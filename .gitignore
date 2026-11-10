@@ -1,0 +1,8 @@
+**/node_modules/
+**/lib/
+**/dist/
+.env*
+*.sqlite*
+*.db*
+.dsh-llsa/
+**/.credentials.yaml

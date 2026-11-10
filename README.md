@@ -32,3 +32,18 @@ npm start -- 3096
 端口占用时请更换端口；API 连接失败时检查模型配置与额度。浏览器应先通过 Harness 的本机认证，再打开任务页面。
 
 本发行包含运行构建和必要许可证。上游组件：[DeepSeek Super-agent](https://github.com/deepseek-ai/dsh-superagent-prototype)、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。
+
+## 源码
+
+- `packages/dsh-collab`：协作插件运行源码。
+- `packages/superagent`：配套 Super-agent 服务端源码，包含必要的内置运行资源。
+
+协作插件可在安装依赖后直接由 Harness 加载其 `src/index.js`。配套服务端构建：
+
+```powershell
+cd packages/superagent
+npm install
+npm run build
+```
+
+生成入口为 `lib/index.js`。普通使用者可继续使用上方构建包安装方式。本仓库不包含研发文档、实验记录和本机运行数据。

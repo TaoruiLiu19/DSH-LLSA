@@ -1,0 +1,41 @@
+{
+  "name": "dsh-collab",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH managed collaboration with adaptive compact messages and immutable step history",
+  "license": "MIT",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./protocol": "./src/protocol.js",
+    "./store": "./src/store.js",
+    "./manager": "./src/manager.js",
+    "./computation": "./src/computation.js",
+    "./encoding-policy": "./src/encoding-policy.js"
+  },
+  "scripts": {
+    "check": "node --check src/index.js"
+  },
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml"
+  ],
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.5-alpha.1",
+    "@deepseek-ai/dsh-llm": "0.2.1-alpha.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-alpha.2",
+    "@deepseek-ai/schemastery": "3.18.5-alpha.1",
+    "js-tiktoken": "1.0.21",
+    "zod": "4.4.3"
+  }
+}

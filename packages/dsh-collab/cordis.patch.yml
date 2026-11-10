@@ -1,0 +1,8 @@
+- insert:
+    - id: dsh-collab
+      name: dsh-collab
+      config:
+        stateDir: ./collab-state
+        maxActiveChildren: 2
+        maxRunTokens: 200000
+        maxOutputTokens: 4096
