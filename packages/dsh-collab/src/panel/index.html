@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>DSH 协作管理 · 单机工作台</title>
+    <style>
+      /* PANEL_STYLES */
+    </style>
+    <script src="/collab/panel.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>DSH 协作管理</h1>
+        <p>单机工作台 · 发起任务、精确计算、回看每一步</p>
+      </div>
+      <a href="/">返回 Harness 对话与设置 ↗</a>
+    </header>
+    <main>
+      <div>
+        <aside class="card">
+          <h2>本机状态</h2>
+          <div id="connection" class="badge">正在连接</div>
+          <p id="local-info" class="note">正在读取可用功能。</p>
+          <p id="model-info" class="note"></p>
+          <details>
+            <summary>版本与能力详情</summary>
+            <pre id="status"></pre>
+            <pre id="protocols"></pre>
+          </details>
+        </aside>
+        <aside class="card">
+          <div class="bar spread">
+            <h2>任务与历史</h2>
+            <button id="refresh" type="button">刷新</button>
+          </div>
+          <div id="runs"></div>
+        </aside>
+        <aside class="card">
+          <h2>从这里开始</h2>
+          <p class="note guide">
+            分析粘贴内容、委派与核验，使用“智能体任务”。精确求和与计数，先预览“本机计算”，再保存结果。
+          </p>
+          <p class="note">
+            文件和终端任务请进入 Harness。API 在 Harness
+            设置中配置；不要把密钥填进任务或数据。历史查询不会重新执行任务。
+          </p>
+        </aside>
+      </div>
+      <div>
+        <div class="columns">
+          <section class="card">
+            <div class="section-kicker">使用已有模型配置</div>
+            <h2>智能体任务</h2>
+            <label
+              >想完成什么？<textarea
+                id="task-prompt"
+                rows="6"
+                maxlength="20000"
+                placeholder="例如：让一个子智能体总结下面三条事实，再核对结论是否遗漏否定条件。"
+              ></textarea>
+            </label>
+            <p id="task-limits" class="note">正在读取本次任务上限。</p>
+            <div class="bar">
+              <button id="start-task" class="primary" type="button" disabled>
+                开始智能体任务（使用 API）
+              </button>
+            </div>
+            <div
+              id="task-notice"
+              class="notice"
+              role="status"
+              aria-live="polite"
+            ></div>
+          </section>
+          <section class="card">
+            <div class="section-kicker">不调用模型 · 不消耗模型 token</div>
+            <h2>本机精确计算</h2>
+            <div class="bar spread">
+              <span class="note">粘贴 JSON 对象数组</span
+              ><button id="calculation-example" type="button">填入示例</button>
+            </div>
+            <label
+              >数据<textarea
+                id="calculation-rows"
+                class="code"
+                rows="4"
+                placeholder='[{"amount":80,"active":true},{"amount":91,"active":true}]'
+              ></textarea>
+            </label>
+            <div class="form-grid">
+              <label
+                >操作<select id="calculation-operation">
+                  <option value="sum">求和</option>
+                  <option value="count">计数</option>
+                </select></label
+              ><label
+                >求和字段<input id="calculation-field" value="amount"
+              /></label>
+            </div>
+            <details>
+              <summary>筛选与单位（可选）</summary>
+              <div class="form-grid">
+                <label
+                  >筛选字段<input
+                    id="filter-field"
+                    placeholder="例如 active" /></label
+                ><label
+                  >比较方式<select id="filter-op">
+                    <option value="eq">等于</option>
+                    <option value="ne">不等于</option>
+                    <option value="lt">小于</option>
+                    <option value="lte">小于或等于</option>
+                    <option value="gt">大于</option>
+                    <option value="gte">大于或等于</option>
+                  </select></label
+                >
+              </div>
+              <label
+                >筛选值（JSON 值）<input
+                  id="filter-value"
+                  placeholder='true、80 或 "已完成"' /></label
+              ><label
+                >单位说明<input
+                  id="calculation-unit"
+                  placeholder="例如 件；不会自动换算"
+              /></label>
+            </details>
+            <p class="note">
+              求和支持安全范围内的整数。字段、筛选和单位以你的选择为准。
+            </p>
+            <button id="preview-calculation" type="button" disabled>
+              预览规则和结果
+            </button>
+            <div
+              id="calculation-notice"
+              class="notice"
+              role="status"
+              aria-live="polite"
+            ></div>
+            <div id="calculation-result" hidden>
+              <p id="calculation-rule" class="note"></p>
+              <pre id="calculation-preview"></pre>
+              <button
+                id="save-calculation"
+                class="primary"
+                type="button"
+                disabled
+              >
+                确认规则并保存结果
+              </button>
+              <details>
+                <summary>预览原始记录</summary>
+                <pre id="calculation-raw"></pre>
+              </details>
+            </div>
+          </section>
+        </div>
+        <section class="card">
+          <div class="bar spread">
+            <h2 id="run-title">选择任务查看详情</h2>
+            <div class="bar">
+              <button id="pause" type="button" disabled>暂停新派发</button
+              ><button id="resume" type="button" disabled>继续派发</button
+              ><button id="interrupt-task" type="button" disabled>
+                结束当前智能体任务
+              </button>
+            </div>
+          </div>
+          <div id="job-summary" class="job-summary muted">
+            新任务会自动出现在左侧，也可以选择已有历史。
+          </div>
+          <div
+            id="notice"
+            class="notice"
+            role="status"
+            aria-live="polite"
+          ></div>
+          <div id="recovery-notice" class="notice" role="status"></div>
+          <p class="note">
+            暂停只阻止新子任务启动；结束任务会请求中断当前运行。中断前已经完成的操作不会撤销。
+          </p>
+          <details>
+            <summary>任务原始信息</summary>
+            <pre id="run-data">未选择任务</pre>
+          </details>
+        </section>
+        <section class="card">
+          <h2>智能体与子任务</h2>
+          <div id="agents" class="table-wrap"></div>
+          <div id="work-items" class="table-wrap"></div>
+        </section>
+        <section class="card">
+          <h2>步骤时间线</h2>
+          <p class="note">点击记录查看当时结果；后续成功不会改写此前失败。</p>
+          <div id="timeline"></div>
+        </section>
+        <section class="card">
+          <h2>查询当时结果</h2>
+          <div class="history-fields">
+            <label
+              >步骤 ID<input
+                id="step-id"
+                placeholder="例如 calculation" /></label
+            ><label>执行尝试（可选）<input id="attempt-id" /></label
+            ><label
+              >截至序号（可选）<input id="as-of" inputmode="numeric"
+            /></label>
+          </div>
+          <button id="inspect" type="button" disabled>只读查询</button>
+          <p class="note">
+            查询读取保存的输入、动作和结果，不重新调用模型。中文字段用于解释记录；自由文本保留原文。
+          </p>
+          <pre id="chinese">尚未查询</pre>
+          <details>
+            <summary>原始记录 JSON</summary>
+            <pre id="raw"></pre>
+          </details>
+          <h3>核对原件</h3>
+          <p class="note">
+            查询步骤后，可读取当时已引用的源数据和结果。只读文本，每次最多 64
+            KiB；大原件可改变起始字节继续查看。
+          </p>
+          <label
+            >当时记录中的原件<select id="artifact-ref" disabled></select></label
+          ><label
+            >起始字节<input
+              id="artifact-offset"
+              inputmode="numeric"
+              value="0" /></label
+          ><button id="read-artifact" type="button" disabled>读取原件</button>
+          <p id="artifact-notice" class="note" role="status">
+            先选择步骤或只读查询。
+          </p>
+          <pre id="artifact-text"></pre>
+        </section>
+        <section class="card">
+          <h2>模型用量</h2>
+          <div id="usage-summary" class="stat-grid"></div>
+          <p id="usage-note" class="note">
+            选择任务后显示。未知值不会按零计算。
+          </p>
+          <details>
+            <summary>用量明细</summary>
+            <pre id="usage">尚未读取</pre>
+          </details>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

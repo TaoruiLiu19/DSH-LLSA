@@ -13,7 +13,7 @@
     "postinstall": "node scripts/run-packages.mjs ci",
     "check": "node scripts/check-versions.mjs",
     "typecheck": "node scripts/run-packages.mjs typecheck",
-    "test": "node scripts/run-packages.mjs test",
+    "test": "node --test scripts/test/*.test.mjs && node scripts/run-packages.mjs test",
     "build": "node scripts/run-packages.mjs build && node scripts/build-local.mjs",
     "start": "node dist/start.js",
     "pack:release": "node scripts/pack-release.mjs",

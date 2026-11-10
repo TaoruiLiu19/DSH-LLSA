@@ -1,5 +1,6 @@
 /** Start an isolated, keyless Harness and verify plugin registration without submitting a task. */
 import assert from 'node:assert/strict';
+import { Script } from 'node:vm';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { mkdtemp } from 'node:fs/promises';
@@ -7,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { PANEL_HTML, PANEL_SCRIPT } from '../packages/dsh-collab/src/text-assets.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -57,8 +59,15 @@ export async function smoke(cwd = root, entry = 'dist/start.js') {
       const page = await fetch(origin + route, { headers, signal: AbortSignal.timeout(5000) });
       assert.equal(page.status, 200, `${route} HTTP status`);
       assert.match(page.headers.get('content-type'), /text\/html/);
+      if (route === '/collab') assert.equal(await page.text(), PANEL_HTML, 'Bundled panel must match its source assets');
     }
     const response = await fetch(origin + '/collab/api/status', { headers, signal: AbortSignal.timeout(5000) });
+    const panelScript = await fetch(origin + '/collab/panel.js', { headers, signal: AbortSignal.timeout(5000) });
+    assert.equal(panelScript.status, 200, 'Bundled panel script must be available without source assets');
+    const panelCode = await panelScript.text();
+    assert.equal(panelCode, PANEL_SCRIPT, 'Bundled browser code must match its source asset');
+    assert.match(panelCode, /textContent/);
+    assert.doesNotThrow(() => new Script(panelCode));
     assert.equal(response.status, 200);
     const status = await response.json();
     assert.ok(status.bridge, 'Native collaboration bridge did not register');

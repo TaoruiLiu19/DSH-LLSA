@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { create as createTar } from 'tar';
+import { readReleaseInfo } from './release-info.mjs';
+
+const release = await readReleaseInfo();
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 const outputDirectory = join(repositoryRoot, 'artifacts');
@@ -155,12 +158,10 @@ for (const packageArtifact of packages) {
   );
 }
 
-const runtimeDependencies = JSON.parse(
-  await readFile(join(repositoryRoot, 'package.json'), 'utf8'),
-).dependencies;
+const runtimeDependencies = release.manifest.dependencies;
 const kitManifest = {
   name: 'dsh-llsa',
-  version: '0.4.1',
+  version: release.version,
   private: true,
   type: 'module',
   license: 'MIT',
@@ -272,7 +273,7 @@ const sourceLock = JSON.parse(await readFile(join(repositoryRoot, 'package-lock.
 const kitLock = buildKitLock(sourceLock, kitManifest, packages);
 await writeFile(join(kitDirectory, 'package-lock.json'), `${JSON.stringify(kitLock, null, 2)}\n`);
 
-const kitFilename = await archive(join(stagingDirectory, 'kit'), 'dsh-llsa-0.4.1.tgz');
+const kitFilename = await archive(join(stagingDirectory, 'kit'), release.kitFilename);
 const artifactFilenames = [...packages.map(packageArtifact => packageArtifact.filename), kitFilename].sort();
 const checksums = [];
 
@@ -288,7 +289,7 @@ await writeFile(join(outputDirectory, 'SHA256SUMS'), `${checksums.join('\n')}\n`
 // This command prepares a review candidate; it does not create a Git release tag.
 const releaseMetadata = {
   tag: null,
-  plannedTag: 'v0.4.1',
+  plannedTag: release.plannedTag,
   status: 'review-candidate',
   sourceCommit,
   workingTreeDirty,

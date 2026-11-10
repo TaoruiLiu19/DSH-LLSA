@@ -42,3 +42,23 @@ jobs:
             artifacts/*.tgz
             artifacts/SHA256SUMS
             artifacts/release.json
+
+  cross-platform:
+    name: Compare platform archives
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: dsh-llsa-review-ubuntu-latest
+          path: platform-artifacts/ubuntu
+      - uses: actions/download-artifact@v4
+        with:
+          name: dsh-llsa-review-windows-latest
+          path: platform-artifacts/windows
+      - name: Verify checksums and compare all archive bytes
+        run: node scripts/compare-artifacts.mjs platform-artifacts/ubuntu platform-artifacts/windows
