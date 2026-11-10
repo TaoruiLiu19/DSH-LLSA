@@ -1,6 +1,6 @@
 - insert:
     - id: dsh-collab
-      name: dsh-collab
+      name: '@dsh-llsa/collab'
       config:
         stateDir: ./collab-state
         maxActiveChildren: 2

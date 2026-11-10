@@ -1,7 +1,31 @@
+// @ts-check
 /** Versioned compact communication. This is encoding, not secrecy or encryption. */
 import { createHash } from 'node:crypto';
 import { encodingInstructionDigest, normalizeQualityEvidence, assessEncodingQuality, TASK_TYPES } from './encoding-policy.js';
 export { encodingInstructionDigest, normalizeQualityEvidence } from './encoding-policy.js';
+
+/** @typedef {import('./types.js').JsonValue} JsonValue */
+/** @typedef {{id: string, version: number, aliases: Record<string, string>}} ProtocolDefinition */
+/** @typedef {{passed: boolean, evidenceId: string, modelProfiles: string[]}} ProtocolEvaluation */
+/** @typedef {ProtocolDefinition & {digest: string, status: 'draft'|'published'|'retired', evaluation: ProtocolEvaluation|null}} ProtocolVersion */
+/**
+ * @typedef {object} EncodingOptions
+ * @property {ProtocolRegistry} [registry]
+ * @property {string|null} [modelProfile]
+ * @property {(text: string) => number} [countTokens] Synchronous local counter, not provider billing.
+ * @property {string} [counterName]
+ * @property {boolean} [allowTable]
+ * @property {boolean} [allowAliases]
+ * @property {boolean} [allowRle]
+ * @property {number} [minSavingsTokens]
+ * @property {number} [minSavingsRatio]
+ * @property {string} [taskType]
+ * @property {ReadonlyArray<Readonly<Record<string, unknown>>>} [qualityEvidence]
+ * @property {number} [minEvidenceSamples]
+ * @property {boolean} [testOnlyAllowSyntheticEvidence]
+ * @property {string} [bodyField]
+ * @property {string} [instructionPrefix]
+ */
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_DEPTH = 64;
@@ -9,6 +33,7 @@ const MAX_NODES = 100000;
 const TABLE_INSTRUCTIONS = '表结构 v1：c 是字段名有序列表，r 的每行按 c 顺序给值；每行代表一个对象，null、空字符串、0 和数组顺序保持原义。';
 const RLE_INSTRUCTIONS = 'RLE v1: d is a dictionary array of complete original JSON values. Each r entry is [count,index], meaning count consecutive copies of d[index] (zero-based). Concatenate runs in order. Every copy counts; preserve all types, string leading zeros, negations, nulls and order.';
 
+/** @param {string} codec @param {ProtocolDefinition} [definition] @returns {string} */
 export function codecInstructions(codec, definition) {
   if (codec === 'table') return TABLE_INSTRUCTIONS;
   if (codec === 'rle') return RLE_INSTRUCTIONS;
@@ -17,12 +42,10 @@ export function codecInstructions(codec, definition) {
   fail('UNKNOWN_PROTOCOL', 'Cannot render unknown codec instructions');
 }
 
-function fail(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  throw error;
-}
+/** @param {string} code @param {string} message @returns {never} */
+function fail(code, message) { throw Object.assign(new Error(message), { code }); }
 
+/** @param {unknown} value @returns {value is import('./types.js').JsonObject} */
 function record(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     && [Object.prototype, null].includes(Object.getPrototypeOf(value));
@@ -32,7 +55,9 @@ function own(target, key, value) {
   Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
-/** Reject values whose JSON serialization would silently alter semantics. */
+/** Reject values whose JSON serialization would silently alter semantics.
+ * @template T @param {T} value @returns {T}
+ */
 function jsonCopy(value) {
   const seen = new Set();
   let nodes = 0;
@@ -76,9 +101,10 @@ function jsonCopy(value) {
   }
   const result = walk(value, 0);
   if (Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_BYTES) fail('JSON_LIMIT', 'JSON exceeds 2 MiB; use an artifact reference');
-  return result;
+  return /** @type {T} */ (result);
 }
 
+/** @template T @param {T} value @returns {T} */
 function freeze(value) {
   if (value && typeof value === 'object') {
     for (const child of Object.values(value)) freeze(child);
@@ -87,6 +113,7 @@ function freeze(value) {
   return value;
 }
 
+/** @template T @param {T} value @returns {T} */
 function frozenCopy(value) { return freeze(jsonCopy(value)); }
 function digest(value) { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
 
@@ -128,7 +155,9 @@ function parseExactDecimalNumber(token) {
   return parsed;
 }
 
-/** Parse JSON while rejecting duplicate members (JSON.parse alone accepts them). */
+/** Parse JSON while rejecting duplicate members (JSON.parse alone accepts them).
+ * @param {string} text @returns {JsonValue}
+ */
 function strictParse(text) {
   if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > MAX_BYTES) fail('JSON_LIMIT', 'Invalid or oversized JSON text');
   let index = 0;
@@ -176,7 +205,7 @@ function strictParse(text) {
         if (sep !== ',') fail('INVALID_JSON', 'Expected comma or array end');
       }
     }
-    for (const [word, result] of [['true', true], ['false', false], ['null', null]]) {
+    for (const [word, result] of /** @type {Array<[string, boolean|null]>} */ ([['true', true], ['false', false], ['null', null]])) {
       if (text.startsWith(word, index)) { index += word.length; return result; }
     }
     const token = text.slice(index).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);
@@ -203,7 +232,9 @@ function validIdentifier(value, name) {
 
 /** Immutable definitions; lifecycle state lives separately from the dictionary. */
 export class ProtocolRegistry {
+  /** @type {Map<string, {schema: ProtocolDefinition, digest: string, status: 'draft'|'published'|'retired', evaluation: ProtocolEvaluation|null}>} */
   #entries = new Map();
+  /** @param {{definitions?: Array<ProtocolDefinition & Partial<ProtocolVersion>>}} [options] */
   constructor({ definitions = [] } = {}) {
     if (!Array.isArray(definitions)) fail('INVALID_PROTOCOL', 'Definitions must be an array');
     for (const definition of jsonCopy(definitions)) {
@@ -223,6 +254,7 @@ export class ProtocolRegistry {
     if (!Number.isSafeInteger(version) || version < 1) fail('INVALID_PROTOCOL', 'Version must be a positive safe integer');
     return `${id}\0${version}`;
   }
+  /** @param {ProtocolDefinition} definition @returns {ProtocolVersion} */
   draft(definition) {
     const { id, version, aliases } = jsonCopy(definition);
     exactKeys(definition, ['id', 'version', 'aliases']);
@@ -242,6 +274,7 @@ export class ProtocolRegistry {
     this.#entries.set(key, { schema, digest: digest(schema), status: 'draft', evaluation: null });
     return this.get(id, version);
   }
+  /** @param {string} id @param {number} version @param {ProtocolEvaluation} evaluation @returns {ProtocolVersion} */
   publish(id, version, evaluation) {
     const entry = this.#entries.get(this.#key(id, version));
     if (!entry) fail('UNKNOWN_PROTOCOL', 'Unknown protocol version');
@@ -257,6 +290,7 @@ export class ProtocolRegistry {
     entry.status = 'published';
     return this.get(id, version);
   }
+  /** @param {string} id @param {number} version @returns {ProtocolVersion} */
   retire(id, version) {
     const entry = this.#entries.get(this.#key(id, version));
     if (!entry) fail('UNKNOWN_PROTOCOL', 'Unknown protocol version');
@@ -264,14 +298,17 @@ export class ProtocolRegistry {
     entry.status = 'retired';
     return this.get(id, version);
   }
+  /** @param {string} id @param {number} version @returns {ProtocolVersion} */
   get(id, version) {
     const entry = this.#entries.get(this.#key(id, version));
     if (!entry) fail('UNKNOWN_PROTOCOL', `Unknown protocol ${id}@${version}`);
     return frozenCopy({ ...entry.schema, digest: entry.digest, status: entry.status, evaluation: entry.evaluation });
   }
+  /** @param {string|null} modelProfile @returns {ProtocolVersion[]} */
   available(modelProfile) {
     return this.exportVersions().filter(d => d.status === 'published' && d.evaluation.modelProfiles.includes(modelProfile));
   }
+  /** @returns {ProtocolVersion[]} */
   exportVersions() {
     return freeze([...this.#entries.values()].map(entry => this.get(entry.schema.id, entry.schema.version)));
   }
@@ -361,7 +398,7 @@ export function decodePacket(packetOrJSON, { registry = new ProtocolRegistry() }
   if (!record(packet)) fail('INVALID_PACKET', 'Packet must be an object');
   if(packet.codec==='envelope'){
     exactKeys(packet,['codec','version','bodyField','envelope','body']);
-    if(packet.version!==1||!record(packet.envelope)||typeof packet.bodyField!=='string'||Object.hasOwn(packet.envelope,packet.bodyField)||!['json','table','rle','aliases'].includes(packet.body?.codec))fail('INVALID_PACKET','Invalid encoded envelope');
+    if(packet.version!==1||!record(packet.envelope)||typeof packet.bodyField!=='string'||Object.hasOwn(packet.envelope,packet.bodyField)||!record(packet.body)||typeof packet.body.codec!=='string'||!['json','table','rle','aliases'].includes(packet.body.codec))fail('INVALID_PACKET','Invalid encoded envelope');
     return {...packet.envelope,[packet.bodyField]:decodePacket(packet.body,{registry})};
   }
   if (packet.codec === 'json') {
@@ -374,16 +411,18 @@ export function decodePacket(packetOrJSON, { registry = new ProtocolRegistry() }
     if (packet.version !== 1) fail('UNKNOWN_PROTOCOL', 'Unknown table wire version');
     if (!Array.isArray(packet.columns) || !packet.columns.length || packet.columns.some(c => typeof c !== 'string')
       || new Set(packet.columns).size !== packet.columns.length || !Array.isArray(packet.rows)) fail('INVALID_PACKET', 'Invalid table columns or rows');
+    const columns = packet.columns;
     return packet.rows.map(row => {
-      if (!Array.isArray(row) || row.length !== packet.columns.length) fail('INVALID_PACKET', 'Table row width mismatch');
+      if (!Array.isArray(row) || row.length !== columns.length) fail('INVALID_PACKET', 'Table row width mismatch');
       const out = {};
-      packet.columns.forEach((column, index) => own(out, column, row[index]));
+      columns.forEach((column, index) => own(out, column, row[index]));
       return out;
     });
   }
   if (packet.codec === 'rle') return expandRle(packet);
   if (packet.codec === 'aliases') {
     exactKeys(packet, ['codec', 'version', 'protocol', 'digest', 'data']);
+    if (typeof packet.protocol !== 'string' || typeof packet.version !== 'number') fail('INVALID_PROTOCOL', 'Invalid protocol identity');
     const definition = registry.get(packet.protocol, packet.version);
     if (definition.status === 'draft') fail('UNPUBLISHED_PROTOCOL', 'Draft dictionaries cannot decode production packets');
     if (packet.digest !== definition.digest) fail('PROTOCOL_DIGEST_MISMATCH', 'Protocol digest mismatch');
@@ -392,7 +431,9 @@ export function decodePacket(packetOrJSON, { registry = new ProtocolRegistry() }
   fail('UNKNOWN_PROTOCOL', `Unknown codec: ${String(packet.codec)}`);
 }
 
-/** Measures full model-facing instructions+text, never just payload bytes. */
+/** Measures full model-facing instructions+text, never just payload bytes.
+ * @param {JsonValue} payload @param {EncodingOptions} [options]
+ */
 export function selectEncoding(payload, options = {}) {
   if(options.bodyField!==undefined){
     const original=jsonCopy(payload),field=options.bodyField;
@@ -425,7 +466,7 @@ export function selectEncoding(payload, options = {}) {
     || !Number.isFinite(minSavingsRatio) || minSavingsRatio < 0 || minSavingsRatio > 1
     || !TASK_TYPES.includes(taskType) || ![allowTable, allowAliases, allowRle, testOnlyAllowSyntheticEvidence].every(value => typeof value === 'boolean')
     || !Number.isSafeInteger(minEvidenceSamples) || minEvidenceSamples < 5) fail('INVALID_OPTIONS', 'Invalid counter, task, policy or savings thresholds');
-  const evidence = normalizeQualityEvidence(qualityEvidence);
+  const evidence = normalizeQualityEvidence([...qualityEvidence]);
   const original = jsonCopy(payload);
   const candidates = [];
   const rejected = [];
@@ -449,7 +490,7 @@ export function selectEncoding(payload, options = {}) {
     const instructionsDigest = encodingInstructionDigest(instructions);
     const quality = packet.codec === 'json' ? { eligible: true, reason: 'PLAIN_JSON_BASELINE', evidenceId: null, evidenceSource: null }
       : assessEncodingQuality({ codec: packet.codec, version: packet.version, modelProfile, taskType, instructionsDigest, protocolDigest: packet.digest },
-        { qualityEvidence: evidence, minEvidenceSamples, testOnlyAllowSyntheticEvidence });
+        { qualityEvidence: [...evidence], minEvidenceSamples, testOnlyAllowSyntheticEvidence });
     if (!quality.eligible) rejected.push({ codec: packet.codec, version: packet.version, reason: quality.reason, evidenceId: quality.evidenceId });
     candidates.push({ packet, text, instructions, instructionsDigest, modelInput, codec: packet.codec, version: packet.version,
       tokens: count(modelInput), payloadTokens: count(text), instructionTokens: count(instructions), evaluation, quality });
@@ -517,7 +558,10 @@ function equivalent(a, b) {
   return false;
 }
 
-/** A lossy model view; retain the original artifact independently before using it. */
+/** A lossy model view; retain the original artifact independently before using it.
+ * @param {JsonValue} input
+ * @param {{kind?: 'raw'|'log', artifactRef?: string, maxEntries?: number, maxLineChars?: number}} [options]
+ */
 export function projectInput(input, { kind = 'raw', artifactRef, maxEntries = 100, maxLineChars = 2000 } = {}) {
   if (kind === 'raw') return frozenCopy({ payload: jsonCopy(input), lossy: false, sourceRef: artifactRef ?? null, omitted: false });
   if (kind !== 'log' || typeof input !== 'string') fail('INVALID_PROJECTION', 'Log projection requires text');
@@ -547,15 +591,17 @@ const OUTCOME = { passed: '通过', succeeded: '成功', failed: '失败', incon
 const display = value => typeof value === 'string' ? value : JSON.stringify(value);
 
 /** Deterministic labels only; it never invents a rationale or translates arbitrary prose. */
+/** @param {JsonValue} result @returns {string} */
 export function renderChinese(result) {
   const item = jsonCopy(result);
   if (Array.isArray(item)) return item.map((row, i) => `记录${i + 1}\n${renderChinese(row)}`).join('\n\n');
   if (!record(item)) return `原始结果：${display(item)}`;
+  const fields = item;
   const lines = [];
   const used = new Set();
   function field(key, label, labels = null) {
-    if (!Object.hasOwn(item, key)) return;
-    used.add(key); const value = item[key];
+    if (!Object.hasOwn(fields, key)) return;
+    used.add(key); const value = fields[key];
     lines.push(`${label}：${labels && typeof value === 'string' && Object.hasOwn(labels, value) ? labels[value] : display(value)}`);
   }
   field('step_id', '步骤'); field('event_id', '事件'); field('attempt_id', '执行尝试');

@@ -38,7 +38,7 @@ export class RetryHealth {
   /** Clear active retry status while preserving the sequence watermark against out-of-order events. */
   clear(sessionId: string): void {
     const state = this.sessions.get(sessionId)
-    if (state) { state.active = undefined; state.settled = true }
+    if (state) { delete state.active; state.settled = true }
   }
 
   get(sessionId: string): BudgetRetryStatus | undefined {
@@ -61,7 +61,7 @@ export class RetryHealth {
     if (event.type === 'turn/start' || event.type === 'turn/end') {
       if (!ordinal(data.turn) || data.turn < state.turn) return
       if (data.turn > state.turn) Object.assign(state, { turn: data.turn, step: -1, ended: false, settled: false, active: undefined })
-      if (event.type === 'turn/end') { state.active = undefined; state.ended = true }
+      if (event.type === 'turn/end') { delete state.active; state.ended = true }
       return
     }
     if (event.type === 'llm/retry-started') return // A retry attempt starting does not mean the budget failure has recovered.
@@ -71,14 +71,14 @@ export class RetryHealth {
     if (event.type === 'assistant/message') {
       const source = record(record(data.message)?.source)
       if (state.active && data.turn === state.turn && data.step === state.step && data.interrupted !== true && source?.kind === 'model' && source.provider === state.active.provider) {
-        state.active = undefined; state.settled = true
+        delete state.active; state.settled = true
       }
       return
     }
     if (data.turn > state.turn || data.step > state.step) Object.assign(state, { turn: data.turn, step: data.step, ended: false, settled: false, active: undefined })
     if (event.type === 'step/start' || state.settled) return
     if (typeof data.retryId !== 'string' || !data.retryId || typeof data.provider !== 'string' || typeof data.retry !== 'number' || !Number.isInteger(data.retry) || data.retry < 1) return
-    if (!budgetFailure(data.failure)) { state.active = undefined; return }
+    if (!budgetFailure(data.failure)) { delete state.active; return }
     const attempts = Math.min(data.retry, Number.MAX_SAFE_INTEGER)
     const previous = state.active?.id === data.retryId && state.active.provider === data.provider ? state.active.status : undefined
     if (previous && attempts <= previous.attempts) return

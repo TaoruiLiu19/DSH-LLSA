@@ -1,6 +1,6 @@
 {
-  "name": "dsh-collab",
-  "version": "0.4.0",
+  "name": "@dsh-llsa/collab",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "description": "DSH managed collaboration with adaptive compact messages and immutable step history",
@@ -15,10 +15,13 @@
     "./encoding-policy": "./src/encoding-policy.js"
   },
   "scripts": {
-    "check": "node --check src/index.js"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.js",
+    "check": "npm run typecheck && npm test"
   },
   "engines": {
-    "node": ">=24.9.0"
+    "node": ">=24.11.0",
+    "dsh": "0.2.2-rc.1"
   },
   "dsh": {
     "manifestVersion": 1,
@@ -28,14 +31,25 @@
   },
   "files": [
     "src",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "LICENSE",
+    "NOTICE"
   ],
   "dependencies": {
-    "@deepseek-ai/cordis": "4.0.5-alpha.1",
-    "@deepseek-ai/dsh-llm": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-tools": "0.2.1-alpha.2",
-    "@deepseek-ai/schemastery": "3.18.5-alpha.1",
     "js-tiktoken": "1.0.21",
     "zod": "4.4.3"
+  },
+  "author": "DSH-LLSA contributors",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/schemastery": "3.19.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/schemastery": "3.19.0",
+    "typescript": "6.0.3",
+    "@types/node": "24.10.1"
   }
 }

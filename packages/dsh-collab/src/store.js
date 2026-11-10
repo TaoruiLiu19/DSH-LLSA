@@ -1,3 +1,4 @@
+// @ts-check
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, realpathSync, readFileSync, existsSync, lstatSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync, unlinkSync } from 'node:fs';
@@ -5,7 +6,9 @@ import { resolve, join, relative, isAbsolute } from 'node:path';
 
 const digest = (data) => createHash('sha256').update(data).digest('hex');
 const now = () => new Date().toISOString();
-function fail(code, message) { const error = new Error(message); error.code = code; throw error; }
+/** @param {string} code @param {string} message @returns {never} */
+function fail(code, message) { throw Object.assign(new Error(message), { code }); }
+/** @param {unknown} value @param {string} name @returns {string} */
 function required(value, name) {
   if (typeof value !== 'string' || !value.length || value.length > 512 || /[\u0000-\u001f]/u.test(value)) fail('INVALID_ARGUMENT', `${name} must be a nonempty identifier`);
   return value;
@@ -41,6 +44,7 @@ const parse = (row) => row ? JSON.parse(row.data) : null;
 
 /** Synchronous host-side persistence. Does not grant authority or execute agent content. */
 export class CollaborationStore {
+  /** @param {{stateDir: string}} options */
   constructor({ stateDir }) {
     required(stateDir, 'stateDir');
     mkdirSync(resolve(stateDir), { recursive: true });
@@ -54,7 +58,7 @@ export class CollaborationStore {
     if (existsSync(dbPath) && lstatSync(dbPath).isSymbolicLink()) fail('UNSAFE_PATH', 'Database must not be a symlink');
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
-    const version = this.db.prepare('PRAGMA user_version').get().user_version;
+    const version = Number(this.db.prepare('PRAGMA user_version').get().user_version);
     if (version > 1) { this.db.close(); fail('SCHEMA_VERSION', 'Database schema is newer than this plugin'); }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -94,6 +98,7 @@ export class CollaborationStore {
   }
   #run(id) { if (!this.getRun(id)) fail('RUN_NOT_FOUND', `Unknown run: ${id}`); }
   close() { if (!this.closed) { this.db.close(); this.closed = true; } }
+  /** @param {import('./types.js').RunInput} input */
   createRun(input) {
     const id = required(input.id ?? input.runId ?? randomUUID(), 'run.id');
     const data = { ...input, id, ticketId: required(input.ticketId, 'ticketId'), assignmentId: required(input.assignmentId, 'assignmentId'), createdAt: input.createdAt ?? now() };
@@ -104,9 +109,11 @@ export class CollaborationStore {
     }
     this.db.prepare('INSERT INTO runs(id,data) VALUES (?,?)').run(id, json(data)); return data;
   }
+  /** @param {string} id */
   getRun(id) { return parse(this.db.prepare('SELECT data FROM runs WHERE id=?').get(required(id, 'runId'))); }
   listRuns() { return this.db.prepare('SELECT data FROM runs ORDER BY rowid').all().map(parse); }
   #event(id) { return parse(this.db.prepare('SELECT data FROM events WHERE id=?').get(id)); }
+  /** @param {string} id */
   getEvent(id) { return this.#event(required(id, 'eventId')); }
   #append(input) {
     const runId = required(input.runId, 'runId'); this.#run(runId);
@@ -118,12 +125,14 @@ export class CollaborationStore {
       const event = this.#event(required(parent, 'parent'));
       if (!event || event.runId !== runId) fail('INVALID_PARENT', 'Parent must be an existing event in this run');
     }
-    const runSeq = this.db.prepare('SELECT COALESCE(MAX(run_seq),0)+1 AS n FROM events WHERE run_id=?').get(runId).n;
+    const runSeq = Number(this.db.prepare('SELECT COALESCE(MAX(run_seq),0)+1 AS n FROM events WHERE run_id=?').get(runId).n);
     const event = { ...input, id, eventId: id, runId, runSeq, stepId: required(input.stepId, 'stepId'), attemptId: required(input.attemptId ?? 'attempt-1', 'attemptId'), kind: required(input.kind, 'kind'), payload: input.payload ?? null, parents, inputRefs: input.inputRefs ?? [], createdAt: input.createdAt ?? now(), committedAt: now() };
     this.db.prepare('INSERT INTO events(id,run_id,run_seq,step_id,attempt_id,data) VALUES (?,?,?,?,?,?)').run(id, runId, runSeq, event.stepId, event.attemptId, json(event));
     return event;
   }
+  /** @param {import('./types.js').EventInput} input */
   appendEvent(input) { return this.#tx(() => this.#append(input)); }
+  /** @param {import('./types.js').RunInput} run @param {import('./types.js').EventInput[]} events */
   createRunWithEvents(run, events) {
     // A local calculation and its idempotency receipt become visible together.
     return this.#tx(() => {
@@ -132,6 +141,7 @@ export class CollaborationStore {
       return events.map(event => this.#append({ ...event, runId: run.id }));
     });
   }
+  /** @param {string} runId @param {import('./types.js').EventQuery} [options] */
   listEvents(runId, { asOfSeq, afterSeq = 0, limit = 1000 } = {}) {
     this.#run(runId); integer(afterSeq, 'afterSeq'); integer(limit, 'limit', 1);
     if (limit > 10000) fail('INVALID_ARGUMENT', 'Page limit exceeds 10000');
@@ -139,7 +149,9 @@ export class CollaborationStore {
     const cap = asOfSeq === undefined ? highWater : integer(asOfSeq, 'asOfSeq');
     return this.db.prepare('SELECT data FROM events WHERE run_id=? AND run_seq>? AND run_seq<=? ORDER BY run_seq LIMIT ?').all(runId, afterSeq, cap, limit).map(parse);
   }
-  highWater(runId) { this.#run(runId); return this.db.prepare('SELECT COALESCE(MAX(run_seq),0) AS n FROM events WHERE run_id=?').get(runId).n; }
+  /** @param {string} runId @returns {number} */
+  highWater(runId) { this.#run(runId); return Number(this.db.prepare('SELECT COALESCE(MAX(run_seq),0) AS n FROM events WHERE run_id=?').get(runId).n); }
+  /** @param {string} runId @param {string} stepId @param {import('./types.js').StepQuery} [options] */
   inspectStep(runId, stepId, { attemptId, asOfSeq, eventId } = {}) {
     this.#run(runId); required(stepId, 'stepId');
     const highWater = this.highWater(runId);
@@ -156,6 +168,7 @@ export class CollaborationStore {
     return { status: selected.length ? 'ok' : 'not_found', runId, stepId, attemptId: attemptId ?? attempts[0] ?? null, asOfSeq: cap, event: selected.at(-1) ?? null, events: selected, view: 'state_as_of' };
   }
 
+  /** @param {Buffer|string|import('./types.js').JsonValue} data @param {{mediaType?: string}} [options] @returns {import('./types.js').ArtifactMetadata} */
   putArtifact(data, { mediaType = 'application/octet-stream' } = {}) {
     const bytes = Buffer.isBuffer(data) ? data : typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(json(data), 'utf8');
     required(mediaType, 'mediaType');
@@ -171,13 +184,15 @@ export class CollaborationStore {
     this.db.prepare('INSERT OR IGNORE INTO artifacts(id,sha256,bytes,media_type,created_at) VALUES (?,?,?,?,?)').run(id, hash, bytes.length, mediaType, now());
     return this.getArtifact(id);
   }
+  /** @param {string|{id: string}} ref @returns {import('./types.js').ArtifactMetadata} */
   getArtifact(ref) {
     const id = typeof ref === 'string' ? ref : ref?.id;
     if (typeof id !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(id)) fail('INVALID_ARTIFACT_REF', 'Artifact ref must be a content digest');
     const row = this.db.prepare('SELECT * FROM artifacts WHERE id=?').get(id);
     if (!row) fail('ARTIFACT_NOT_FOUND', 'Artifact is not registered');
-    return { id: row.id, sha256: row.sha256, bytes: row.bytes, mediaType: row.media_type, createdAt: row.created_at };
+    return { id: String(row.id), sha256: String(row.sha256), bytes: Number(row.bytes), mediaType: String(row.media_type), createdAt: String(row.created_at) };
   }
+  /** @param {string|{id: string}} ref @param {import('./types.js').ArtifactRange} [options] @returns {Buffer} */
   readArtifact(ref, { start = 0, end } = {}) {
     const info = this.getArtifact(ref), path = join(this.artifactDir, info.sha256);
     if (!existsSync(path)) fail('ARTIFACT_MISSING', 'Artifact file is missing');
@@ -209,12 +224,12 @@ export class CollaborationStore {
     const data = { ...input, id: input.id ?? `${logicalMessageId}:${revision}:${digest(recipient).slice(0,12)}`, runId, eventId, logicalMessageId, recipient, deliveryRevision: revision, sender: required(input.sender, 'sender'), projection: input.projection ?? null };
     required(data.id, 'messageId'); json(data);
     const existing = this.db.prepare('SELECT * FROM messages WHERE logical_id=? AND recipient=? AND revision=?').get(logicalMessageId, recipient, revision);
-    if (existing) { if (!equal(JSON.parse(existing.data), data)) fail('ID_CONFLICT', 'Retry changed message content'); return this.#messageRow(existing); }
+    if (existing) { if (!equal(JSON.parse(String(existing.data)), data)) fail('ID_CONFLICT', 'Retry changed message content'); return this.#messageRow(existing); }
     const earlier = this.db.prepare('SELECT * FROM messages WHERE logical_id=? AND recipient=? ORDER BY revision DESC LIMIT 1').get(logicalMessageId, recipient);
     if (earlier) {
-      const before = JSON.parse(earlier.data);
+      const before = JSON.parse(String(earlier.data));
       if (earlier.run_id !== runId || earlier.event_id !== eventId || before.sender !== data.sender) fail('ID_CONFLICT', 'Logical message cannot be rebound');
-      if (revision !== earlier.revision + 1 || earlier.status !== 'rejected') fail('INVALID_REVISION', 'Only a rejected delivery can be replaced with the next encoding revision');
+      if (revision !== Number(earlier.revision) + 1 || earlier.status !== 'rejected') fail('INVALID_REVISION', 'Only a rejected delivery can be replaced with the next encoding revision');
     } else if (revision !== 1) fail('INVALID_REVISION', 'First delivery revision must be one');
     this.db.prepare('INSERT INTO messages(id,run_id,logical_id,recipient,revision,event_id,status,data) VALUES (?,?,?,?,?,?,?,?)').run(data.id, runId, logicalMessageId, recipient, revision, eventId, 'queued', json(data));
     return { ...data, status: 'queued', transportAttempt: 0 };
@@ -230,6 +245,7 @@ export class CollaborationStore {
     const wanted = new Set(states);
     return this.db.prepare(`SELECT * FROM messages ${runId ? 'WHERE run_id=?' : ''} ORDER BY rowid`).all(...(runId ? [runId] : [])).filter(row => wanted.has(row.status)).slice(0, limit).map(row => this.#messageRow(row));
   }
+  /** @param {string} id @param {string} status @param {{incrementAttempt?: boolean, [key: string]: unknown}} [details] */
   markDelivery(id, status, details = {}) {
     const allowed = ['queued','inbox_persisted','included_in_request','rejected','cancelled','unknown'];
     if (!allowed.includes(status)) fail('INVALID_STATE', `Invalid delivery state: ${status}`);
@@ -237,9 +253,9 @@ export class CollaborationStore {
       const row = this.db.prepare('SELECT * FROM messages WHERE id=?').get(id);
       if (!row) fail('MESSAGE_NOT_FOUND', 'Unknown message');
       const terminal = ['included_in_request','rejected','cancelled'];
-      if (terminal.includes(row.status) && row.status !== status) fail('INVALID_TRANSITION', 'Terminal delivery cannot be rewritten');
+      if (terminal.includes(String(row.status)) && row.status !== status) fail('INVALID_TRANSITION', 'Terminal delivery cannot be rewritten');
       if (status === 'included_in_request' && this.db.prepare("SELECT id FROM messages WHERE logical_id=? AND recipient=? AND status='included_in_request' AND id<>?").get(row.logical_id,row.recipient,id)) fail('ALREADY_INCLUDED', 'Logical message already entered a model request');
-      const transportAttempt = row.transport_attempt + (details.incrementAttempt ? 1 : 0);
+      const transportAttempt = Number(row.transport_attempt) + (details.incrementAttempt ? 1 : 0);
       this.db.prepare('UPDATE messages SET status=?,transport_attempt=? WHERE id=?').run(status,transportAttempt,id);
       this.db.prepare('INSERT INTO delivery_events(message_id,data) VALUES (?,?)').run(id,json({ ...details, id:randomUUID(), messageId:id, previousStatus:row.status,status,transportAttempt,at:now() }));
       return this.getMessage(id);

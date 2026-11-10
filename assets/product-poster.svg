@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="640" viewBox="0 0 1600 640" role="img" aria-labelledby="title desc">
+  <title id="title">DSH-LLSA：多 Agent 协作 × LeanLink</title>
+  <desc id="desc">DeepSeek Harness 本机多智能体协作工作台。主 Agent 分派任务，多个子 Agent 分工处理，通过 LeanLink 紧凑协作通信精简回传，按需查看原始记录。工作台与记录在本机，推理使用已配置的模型服务。此图为工作流程示意，不是产品截图。</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1"><stop stop-color="#091321"/><stop offset="1" stop-color="#101d31"/></linearGradient>
+    <linearGradient id="accent" x2="1" y2="1"><stop stop-color="#80e4cc"/><stop offset="1" stop-color="#b4a5ff"/></linearGradient>
+    <linearGradient id="card" x2="1" y2="1"><stop stop-color="#18293d"/><stop offset="1" stop-color="#142237"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#266459" stop-opacity=".35"/><stop offset="1" stop-color="#266459" stop-opacity="0"/></radialGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" fill="none" stroke="#a4c9d8" stroke-opacity=".035"/></pattern>
+    <style>
+      text{font-family:Segoe UI,Microsoft YaHei,PingFang SC,Noto Sans CJK SC,sans-serif}
+      .muted{fill:#a3b6c9}.small{font-size:14px}.headline{fill:#f4f8fd;font-size:24px;font-weight:600}
+    </style>
+  </defs>
+  <rect width="1600" height="640" rx="26" fill="url(#background)"/>
+  <rect width="1600" height="640" rx="26" fill="url(#grid)"/>
+  <ellipse cx="1320" cy="290" rx="560" ry="430" fill="url(#glow)"/>
+  <g transform="translate(72 58)">
+    <rect width="34" height="34" rx="10" fill="url(#accent)"/>
+    <path d="M11 9v16h14v-5H16V9Z" fill="#152839"/>
+    <text x="49" y="23" fill="#b2c8d8" font-size="14" letter-spacing="2">DEEPSEEK HARNESS EXTENSION</text>
+  </g>
+  <text x="69" y="200" fill="#f4f8fd" font-size="82" font-weight="700" letter-spacing="-2">DSH-LLSA</text>
+  <text x="72" y="282" fill="#f4f8fd" font-size="44" font-weight="600">多 Agent 协作</text>
+  <text x="72" y="352" fill="url(#accent)" font-size="57" font-weight="600">× LeanLink</text>
+  <text x="74" y="405" fill="#a3b6c9" font-size="21">任务分工更清楚，协作回传更精简。</text>
+  <g font-size="17" fill="#d2e1ed">
+    <rect x="72" y="452" width="158" height="42" rx="21" fill="#233547"/>
+    <text x="151" y="479" text-anchor="middle">主 Agent 调度</text>
+    <rect x="242" y="452" width="158" height="42" rx="21" fill="#233547"/>
+    <text x="321" y="479" text-anchor="middle">子 Agent 分工</text>
+    <rect x="412" y="452" width="158" height="42" rx="21" fill="#233547"/>
+    <text x="491" y="479" text-anchor="middle">原始记录可查</text>
+  </g>
+  <rect x="1332" y="60" width="196" height="32" rx="16" fill="#172e37" stroke="#345b60"/>
+  <text x="1430" y="81" text-anchor="middle" fill="#9de5d5" font-size="12" letter-spacing="2">LEANLINK · 0.4.1</text>
+  <path d="M1240 214V238M1044 258V238H1436V258M1240 238V258M1044 356V380H1436V356M1240 356V406" fill="none" stroke="#537382" stroke-width="2"/>
+  <circle cx="1240" cy="238" r="4" fill="#8adac9"/><circle cx="1240" cy="380" r="4" fill="#8adac9"/>
+  <g transform="translate(952 110)">
+    <rect width="576" height="108" rx="18" fill="url(#card)" stroke="#365367"/>
+    <rect x="24" y="25" width="48" height="48" rx="13" fill="#25443f"/>
+    <path d="M41 36h13l5 5v20H41ZM54 36v7h5M46 48h8M46 54h8" fill="none" stroke="#9de5d5" stroke-width="2" stroke-linejoin="round"/>
+    <text x="94" y="36" fill="#8fdac9" font-size="12" letter-spacing="2">01 · MAIN AGENT</text>
+    <text x="94" y="73" class="headline">主 Agent 分派任务</text>
+    <path d="M527 47l7 7-7 7" fill="none" stroke="#7b95a9" stroke-width="2"/>
+  </g>
+  <g transform="translate(952 258)">
+    <rect width="184" height="98" rx="16" fill="url(#card)" stroke="#515275"/>
+    <rect x="196" width="184" height="98" rx="16" fill="url(#card)" stroke="#515275"/>
+    <rect x="392" width="184" height="98" rx="16" fill="url(#card)" stroke="#515275"/>
+    <g fill="#beb5f4" font-size="12" letter-spacing="1.5" text-anchor="middle">
+      <text x="92" y="30">SUB-AGENT 01</text><text x="288" y="30">SUB-AGENT 02</text><text x="484" y="30">SUB-AGENT 03</text>
+    </g>
+    <g fill="#f4f8fd" font-size="23" font-weight="600" text-anchor="middle">
+      <text x="92" y="67">检查约束</text><text x="288" y="67">核对数据</text><text x="484" y="67">整理结果</text>
+    </g>
+  </g>
+  <g transform="translate(952 406)">
+    <rect width="576" height="108" rx="18" fill="url(#card)" stroke="#365367"/>
+    <rect x="24" y="25" width="48" height="48" rx="13" fill="#274456"/>
+    <path d="M38 42h19M38 49h10M38 56h10M51 56l4 4 7-10" fill="none" stroke="#9bcfe7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="94" y="36" fill="#9bcfe7" font-size="14" letter-spacing="1">LeanLink · 紧凑协作通信</text>
+    <text x="94" y="73" class="headline">精简回传 · 按需查原始记录</text>
+    <path d="M527 47l7 7-7 7" fill="none" stroke="#7b95a9" stroke-width="2"/>
+  </g>
+  <text x="1526" y="540" text-anchor="end" fill="#7c94aa" font-size="12">工作流程示意 · 非产品截图</text>
+  <path d="M72 565H1528" stroke="#32465a"/>
+  <text x="73" y="609" class="muted" font-size="16">工作台与记录在本机 · 推理使用已配置的模型服务</text>
+  <text x="1526" y="609" text-anchor="end" fill="#86a1b5" font-size="13" letter-spacing="2">LOCAL WORKSPACE / CONNECTED MODELS</text>
+</svg>

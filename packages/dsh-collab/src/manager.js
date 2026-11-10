@@ -1,10 +1,29 @@
+// @ts-check
 import { randomUUID, createHash } from 'node:crypto';
 import { ProtocolRegistry, selectEncoding, decodePacket, renderChinese, projectInput } from './protocol.js';
 import { VERIFICATION_SCOPE, normalizeContract, canonicalHash, executeComputation, resultMismatches } from './computation.js';
 import { normalizeQualityEvidence, MIN_EVIDENCE_SAMPLES, TASK_TYPES } from './encoding-policy.js';
 
+/** @typedef {import('./types.js').JsonValue} JsonValue */
+/**
+ * @typedef {object} ManagerOptions
+ * @property {import('./store.js').CollaborationStore} store
+ * @property {ProtocolRegistry} [registry]
+ * @property {(text: string) => number} [countTokens]
+ * @property {string} [counterName]
+ * @property {import('./types.js').Backend|null} [backend]
+ * @property {number} [maxActiveChildren]
+ * @property {number} [maxRunTokens]
+ * @property {number} [maxOutputTokens]
+ * @property {number} [closeTimeoutMs]
+ * @property {ReadonlyArray<Readonly<Record<string, unknown>>>} [qualityEvidence]
+ * @property {number} [minEvidenceSamples]
+ * @property {boolean} [explicitEvidenceRefs]
+ */
+
 const uid = prefix => `${prefix}-${randomUUID()}`;
-const fail = (code, message) => { const e = new Error(message); e.code = code; throw e; };
+/** @param {string} code @param {string} message @returns {never} */
+const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 const copy = value => JSON.parse(JSON.stringify(value));
 const ACTIVE = new Set(['starting', 'running', 'stopping']);
 const WRITERS = new Set(['implementer', 'tester']);
@@ -12,12 +31,13 @@ export const COMPACT_GUIDANCE = 'Use collab_publish for public steps and final r
 
 /** Host orchestration; backend owns actual DSH handles. No model reasoning is fabricated. */
 export class CollaborationManager {
-  constructor({ store, registry = new ProtocolRegistry(), countTokens, counterName = 'heuristic', backend = null, maxActiveChildren = 2, maxRunTokens = 200000, maxOutputTokens = 4096, closeTimeoutMs = 10000, qualityEvidence = [], minEvidenceSamples = MIN_EVIDENCE_SAMPLES, explicitEvidenceRefs = false } = {}) {
+  /** @param {ManagerOptions} options */
+  constructor({ store, registry = new ProtocolRegistry(), countTokens, counterName = 'heuristic', backend = null, maxActiveChildren = 2, maxRunTokens = 200000, maxOutputTokens = 4096, closeTimeoutMs = 10000, qualityEvidence = [], minEvidenceSamples = MIN_EVIDENCE_SAMPLES, explicitEvidenceRefs = false }) {
     if (typeof explicitEvidenceRefs !== 'boolean') fail('INVALID_ARGUMENT','explicitEvidenceRefs must be boolean');
     this.explicitEvidenceRefs = explicitEvidenceRefs;
     this.store = store; this.registry = registry; this.countTokens = countTokens; this.counterName = counterName;
     this.backend = backend; this.maxActiveChildren = maxActiveChildren; this.maxRunTokens = maxRunTokens; this.maxOutputTokens = maxOutputTokens;
-    this.qualityEvidence = normalizeQualityEvidence(qualityEvidence);
+    this.qualityEvidence = normalizeQualityEvidence([...qualityEvidence]);
     if (!Number.isSafeInteger(minEvidenceSamples) || minEvidenceSamples < MIN_EVIDENCE_SAMPLES) fail('INVALID_ARGUMENT', 'Encoding evidence requires at least five samples');
     this.minEvidenceSamples = minEvidenceSamples;
     this.bindings = new Map(); this.handles = new Map(); this.pending = new Map(); this.finalEvents = new Map(); this.held = new Set(); this.reservations = new Map(); this.bridge = null; this.closing = false;
@@ -50,9 +70,9 @@ export class CollaborationManager {
     }
   }
   status() {
-    return { name: 'dsh-collab', version: '0.4.0', purpose: '紧凑通信与可追溯协作，不是保密加密', dshVersion: '0.2.2-rc.1 (integration target)', counter: this.counterName,
+    return { name: 'dsh-collab', version: '0.4.1', purpose: '紧凑通信与可追溯协作，不是保密加密', dshVersion: '0.2.2-rc.1 (integration target)', counter: this.counterName,
       mode: this.backend ? 'managed_tools' : 'local', bridge: this.bridge?.compatibility() ?? null,
-      capabilities: { persistentHistory: true, adaptiveEncoding: true, qualityGatedEncoding: true, deterministicChinese: true, managedDelegation: !!this.backend, hostComputation: true, directHostCompletion: true, computationVersions: ['1','2'], receiptBoundAcceptance: true, computationVerificationScope: 'bound_contract_fields_only', realModelSavingsVerified: false, automaticLanguageLearning: false },
+      capabilities: { persistentHistory: true, adaptiveEncoding: true, qualityGatedEncoding: true, deterministicChinese: true, managedDelegation: !!this.backend, hostComputation: true, directHostCompletion: true, computationVersions: ['1','2','3'], receiptBoundAcceptance: true, computationVerificationScope: 'bound_contract_fields_only', realModelSavingsVerified: false, automaticLanguageLearning: false },
       encodingPolicy: { minimumSamples: this.minEvidenceSamples, configuredEvidence: this.qualityEvidence.length, defaultFallback: 'json' },
       limitations: ['自由文本保留原文；中文字段由模板展开', '词典需要评测后发布，不会在线猜测新语义', this.bridge?.compatibility().capabilities?.domainEvents ? '已记录原生领域事件、报告与验收；不记录隐藏思维链' : '旧版桥接仅捕获已接入的报告通道'] };
   }
@@ -69,10 +89,12 @@ export class CollaborationManager {
       afterSeq = next;
     }
   }
+  /** @param {string} id */
   describeRun(id) {
     const run = this.store.getRun(id); if (!run) fail('NOT_FOUND', 'Run not found');
     return { run: { ...run, paused: this.held.has(id) }, agents: this.store.getAgents(id), workItems: this.store.getWorkItems(id), events: [...this.#events(id)], usage: this.store.usageSummary(id) };
   }
+  /** @param {string} sessionId @param {{runId?: string, ticketId?: string, assignmentId?: string, title?: string}} [details] */
   bindRoot(sessionId, details = {}) {
     const prior = this.bindings.get(sessionId);
     if (prior && (!details.runId || prior.runId === details.runId)) return prior;
@@ -83,6 +105,7 @@ export class CollaborationManager {
     this.bindings.set(sessionId, agent); return agent;
   }
   binding(sessionId) { return this.bindings.get(sessionId); }
+  /** @param {string} runId @param {{maxOutputTokens: number, maxRunTokens: number}} limits */
   setRunLimits(runId, limits) {
     if (!this.store.getRun(runId) || !limits || Object.keys(limits).some(key => !['maxOutputTokens','maxRunTokens'].includes(key))
       || !Number.isSafeInteger(limits.maxOutputTokens) || limits.maxOutputTokens < 1 || limits.maxOutputTokens > this.maxOutputTokens
@@ -91,6 +114,7 @@ export class CollaborationManager {
     if (prior) fail('IMMUTABLE_LIMITS','Per-run limits are fixed when the task is created');
     const saved=copy(limits);this.store.appendEvent({runId,stepId:'local-task',kind:'run_limits',payload:saved});this.runLimits.set(runId,saved);
   }
+  /** @param {string} sessionId @param {string[]} allowedNames */
   setToolPolicy(sessionId, allowedNames) {
     // Host API only: no model-facing tool can change declaration policy.
     if (typeof sessionId !== 'string' || !sessionId || !Array.isArray(allowedNames)
@@ -124,6 +148,7 @@ export class CollaborationManager {
     return selectEncoding(payload, { registry: this.registry, countTokens: this.countTokens, counterName: this.counterName, modelProfile,
       taskType, ...(payload && !Array.isArray(payload)&&Array.isArray(payload.result)?{bodyField:'result'}:{}),qualityEvidence: this.qualityEvidence, minEvidenceSamples: this.minEvidenceSamples });
   }
+  /** @param {string} sessionId @param {{stepId?: string, result: JsonValue, final?: boolean, parents?: string[], receiptId?: string}} options */
   publish(sessionId, { stepId, result, final = false, parents = [], receiptId }) {
     const binding = this.bindings.get(sessionId); if (!binding) fail('FORBIDDEN', 'No managed run');
     const item = this.#current(binding);
@@ -136,7 +161,7 @@ export class CollaborationManager {
         const receipt = this.#validatedReceipt(binding, item, receiptId);
         const mismatches = resultMismatches(result, receipt.result);
         if (mismatches.length) {
-          const error = new Error('Claim differs from required host-computed fields'); error.code = 'RESULT_MISMATCH'; error.mismatches = mismatches; throw error;
+          throw Object.assign(new Error('Claim differs from required host-computed fields'), { code: 'RESULT_MISMATCH', mismatches });
         }
         verification = { status: 'passed', receiptId, contractHash: receipt.contractHash, resultArtifactRef: artifact.id, verifiedFields: Object.keys(receipt.result), scope: VERIFICATION_SCOPE };
       } catch (error) {
@@ -161,6 +186,7 @@ export class CollaborationManager {
     const { data } = this.readArtifact(item.runId, contract.inputRef);
     return { ...executeComputation(contract, data), inputRef: contract.inputRef };
   }
+  /** @param {string} sessionId @param {Record<string, never>} [options] */
   compute(sessionId, options = {}) {
     if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).length) fail('INVALID_ARGUMENT', 'collab_compute accepts no plan overrides; the task contract is already bound');
     const binding = this.bindings.get(sessionId); if (!binding) fail('FORBIDDEN', 'No managed run');
@@ -174,6 +200,7 @@ export class CollaborationManager {
     const event = this.#event(binding, item.id, 'computation_receipt', { ...receipt, artifactRef: receiptArtifact.id });
     return { receiptId: event.id, result: computed.result, contractHash: computed.contractHash, inputRef: computed.inputRef, verificationScope: VERIFICATION_SCOPE };
   }
+  /** @param {string} sessionId @param {{stepId?: string}} [options] */
   completeComputation(sessionId, options = {}) {
     if (!options || typeof options !== 'object' || Array.isArray(options)
       || Object.keys(options).some(key => key !== 'stepId')
@@ -182,8 +209,8 @@ export class CollaborationManager {
     }
     // Keep both the receipt and final event. The model never copies or edits the result.
     const receipt = this.compute(sessionId, {});
-    const published = this.publish(sessionId, { stepId: options.stepId, result: receipt.result, receiptId: receipt.receiptId, final: true });
-    if (!published.submitted) fail('COMPUTATION_PUBLICATION_FAILED', 'Host result did not pass its bound receipt validation');
+    const published = this.publish(sessionId, { stepId: options.stepId, result: /** @type {JsonValue} */ (receipt.result), receiptId: receipt.receiptId, final: true });
+    if (!published.submitted || !('verification' in published) || !published.verification) fail('COMPUTATION_PUBLICATION_FAILED', 'Host result did not pass its bound receipt validation');
     return { submitted: true, eventId: published.eventId, artifactRef: published.artifactRef,
       receiptId: receipt.receiptId, verifiedFields: published.verification.verifiedFields,
       verificationScope: VERIFICATION_SCOPE };
@@ -213,6 +240,7 @@ export class CollaborationManager {
     const artifact = this.store.putArtifact(JSON.stringify(result), { mediaType: 'application/json' });
     return this.store.appendEvent({ runId: binding.runId, stepId: binding.workItemId ?? `tool-${toolCallId}`, attemptId: binding.attemptId ?? 'root', kind: 'tool_observation', payload: { actorId: sessionId, toolName, toolCallId, artifactRef: artifact.id, provenance: 'host_tool_result', ...(identity ? { toolIdentity: identity } : {}) } });
   }
+  /** @param {string} runId @param {string} stepId @param {import('./types.js').StepQuery} [opts] */
   inspect(runId, stepId, opts = {}) {
     const view = this.store.inspectStep(runId, stepId, opts);
     if (view.event) {
@@ -230,6 +258,7 @@ export class CollaborationManager {
     }
     return view;
   }
+  /** @param {string} runId @param {string} ref @param {import('./types.js').ArtifactRange} [options] */
   readArtifact(runId, ref, options = {}) {
     // A reference must actually occur in an immutable event of this run.
     const includes = v => typeof v === 'string' ? v === ref : Array.isArray(v) ? v.some(includes) : v && typeof v === 'object' ? Object.values(v).some(includes) : false;
@@ -241,6 +270,7 @@ export class CollaborationManager {
     if (range.end !== undefined && Number.isSafeInteger(range.end)) range.end = Math.min(range.end, meta.bytes);
     return { data: this.store.readArtifact(ref, range), mediaType: meta.mediaType ?? 'application/octet-stream' };
   }
+  /** @param {string} sessionId @param {{stepId?: string, text: string, maxEntries?: number}} options */
   prepareLog(sessionId, { stepId, text, maxEntries = 80 }) {
     const b = this.bindings.get(sessionId); if (!b) fail('FORBIDDEN', 'No managed run');
     const raw = this.store.putArtifact(text, { mediaType: 'text/plain; charset=utf-8' });
@@ -383,6 +413,7 @@ export class CollaborationManager {
     this.schedule(b.runId).catch(e => { this.lastError = e.message; });
     return { eventId: event.id, state: accepted ? 'succeeded' : 'rejected' };
   }
+  /** @param {string} runId @param {boolean} paused @param {string} [reason] */
   pause(runId, paused, reason = 'operator') {
     if (!this.store.getRun(runId)) fail('NOT_FOUND', 'Run not found');
     paused ? this.held.add(runId) : this.held.delete(runId);
@@ -390,6 +421,7 @@ export class CollaborationManager {
     if (!paused) this.schedule(runId).catch(e => { this.lastError = e.message; });
     return { runId, paused, runningOperationsNotFrozen: true };
   }
+  /** @param {string} runId @param {string} agentId */
   async interrupt(runId, agentId) {
     const binding = this.authorize(agentId, runId); if (!binding.parentId) fail('INVALID_ARGUMENT', 'Interrupt a managed child, not the root');
     const handle = this.handles.get(agentId); if (!handle) fail('UNAVAILABLE', 'Activation handle is unavailable; inspect its recorded state');
@@ -409,6 +441,7 @@ export class CollaborationManager {
     const writer = this.store.getWorkItems(b.runId).find(t => ACTIVE.has(t.state) && WRITERS.has(t.role));
     if (writer && writer.childId !== sessionId) return 'A managed writer owns this workspace; wait for it to settle.';
   }
+  /** @param {string} sessionId @param {string} callId @param {number} estimate */
   reserveCall(sessionId, callId, estimate) {
     const b = this.bindings.get(sessionId); if (!b) return null;
     if (!Number.isSafeInteger(estimate) || estimate < 0) fail('INVALID_ARGUMENT', 'Token reservation must be a nonnegative safe integer');
@@ -420,6 +453,7 @@ export class CollaborationManager {
     if (usage.totalTokens + pending + estimate > (this.runLimits.get(b.runId)?.maxRunTokens??this.maxRunTokens)) { this.pause(b.runId,true,'token_budget'); fail('TOKEN_BUDGET', 'Run token admission budget exceeded'); }
     this.reservations.set(callId,{runId:b.runId,estimate,tokens:estimate}); return b;
   }
+  /** @param {string} callId */
   releaseCall(callId) {
     const reservation = this.reservations.get(callId); if (!reservation) return;
     const usage = this.store.usageSummary(reservation.runId).usage.find(call => call.callId === callId);

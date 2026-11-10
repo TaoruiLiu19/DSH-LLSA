@@ -1,0 +1,41 @@
+{
+  "name": "@dsh-llsa/launcher",
+  "version": "0.4.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "DSH-LLSA contributors",
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "main": "./lib/start.js",
+  "files": [
+    "lib",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && tsdown",
+    "test": "node --test test/*.test.js"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "0.2.2-rc.1",
+    "@dsh-llsa/collab": "0.4.1",
+    "@dsh-llsa/superagent": "0.1.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh": "0.2.2-rc.1",
+    "typescript": "6.0.3",
+    "tsdown": "0.22.14",
+    "@types/node": "24.10.1"
+  },
+  "peerDependenciesMeta": {
+    "@dsh-llsa/collab": {
+      "optional": true
+    },
+    "@dsh-llsa/superagent": {
+      "optional": true
+    }
+  }
+}

@@ -58,15 +58,17 @@ export interface HttpHost {
   models(): Promise<ModelCatalog>
 }
 /**
- * Represents a client-facing 400 or 404 error raised during management route parsing or lookup.
+ * Represents a client-facing HTTP error raised during management route parsing or lookup.
  * Route handlers throw it when request bodies are malformed or target records are missing, and registerHttp serializes its status and message in the HTTP response.
  */
-class RouteError extends Error { constructor(readonly status: 400 | 404, message: string) { super(message) } }
+class RouteError extends Error { constructor(readonly status: 400 | 404 | 413 | 415, message: string) { super(message) } }
 async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<unknown> {
+  const mediaType = req.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase()
+  if (mediaType !== 'application/json') throw new RouteError(415, 'Content-Type must be application/json')
   let size = 0; const chunks: Buffer[] = []
   for await (const chunk of req) {
     const bytes = Buffer.from(chunk); size += bytes.length
-    if (size > maxBytes) throw new RouteError(400, `Request exceeds ${maxBytes} bytes`)
+    if (size > maxBytes) throw new RouteError(413, `Request exceeds ${maxBytes} bytes`)
     chunks.push(bytes)
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown }
@@ -77,7 +79,7 @@ function json(res: ServerResponse, status: number, value: unknown): void {
 }
 export function sameOrigin(req: Pick<IncomingMessage, 'headers'>, port: number): boolean {
   const host = req.headers.host
-  if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return false
+  if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}` && host !== `[::1]:${port}`) return false
   return req.headers['x-orchestrator-request'] === '1' && (req.headers.origin === undefined || req.headers.origin === `http://${host}`)
 }
 /** Maps errors to HTTP status codes and structured payloads that the panel localizes in the interface language. */
@@ -104,7 +106,7 @@ function setupView(runtime: HttpHost) {
     accounts: resolved ? { repository: resolved.repository, agent: resolved.github.login, feishu: resolved.feishu ? { appId: resolved.feishu.appId, brand: resolved.feishu.brand, botId: resolved.feishu.botId, name: resolved.feishu.name } : null } : null,
   }
 }
-/** Build the `/orchestrator/api/state` response consumed by the management panel and `scripts/dsh-superagent status` (`docs/006-deployment.md`). */
+/** Build the `/orchestrator/api/state` response consumed by the management panel. */
 export function stateView(runtime: HttpHost) {
   const settings = runtime.store.settings()
   return { setup: setupView(runtime), load: { ...executorLoad(runtime.store, runtime.executor.activeCount()),
@@ -149,7 +151,7 @@ const count = z.coerce.number().int().nonnegative()
 const PromptsQuery = z.object({ revision: count.optional(), offset: count.default(0) })
 const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-9-]*$/)])
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
-const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
+const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() }).strict()
 
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
@@ -197,7 +199,7 @@ function routes(runtime: HttpHost): Routes {
     'GET tickets/:id': ({ params }) => ticketPage(runtime, params.id),
     'POST tickets/:id/retry': ({ params }) => { const id = ticket(params.id); runtime.engine.retryTicket(id); return { retried: true } },
     'POST tickets/:id/stop': ({ params }) => { const id = ticket(params.id); runtime.engine.stopTicket(id); return { stopped: true } },
-    'POST executor/pause': async ({ body }) => runtime.settings.pause(z.object({ paused: z.boolean() }).parse(await body()).paused, 'panel'),
+    'POST executor/pause': async ({ body }) => runtime.settings.pause(z.object({ paused: z.boolean() }).strict().parse(await body()).paused, 'panel'),
     'PUT settings/:block': async ({ params, body }) => {
       const block = SettingsBlockSchema.parse(params.block)
       const known = !block.startsWith('source:') || runtime.sources.instances().some(instance => `source:${instance.id}` === block)
@@ -211,7 +213,7 @@ function routes(runtime: HttpHost): Routes {
     'GET models': () => runtime.models(),
     'GET prompts': ({ query }) => { const { revision, offset } = PromptsQuery.parse(query); return promptsView(runtime, revision, offset) },
     'PUT prompts': async input => {
-      const request = z.object({ config: z.unknown(), baseRevision: z.number().int().nonnegative() }).parse(await promptBody(input))
+      const request = z.object({ config: z.unknown(), baseRevision: z.number().int().nonnegative() }).strict().parse(await promptBody(input))
       return savePrompts(runtime, request.config, request.baseRevision, 'panel')
     },
     'POST prompts/preview': async input => runtime.prompts.preview(await promptBody(input)),
@@ -233,17 +235,19 @@ function match(table: Routes, method: string, segments: string[]) {
   return undefined
 }
 export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
-  if (ctx.webServer.host !== '127.0.0.1') throw new Error('Orchestrator management requires a loopback Web server')
+  if (!['127.0.0.1', '::1'].includes(ctx.webServer.host)) throw new Error('Orchestrator management requires a loopback Web server')
   const table = routes(runtime)
   const disposers = [
     ctx.webServer.register({ kind: 'prefix', path: '/orchestrator', handler: async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (req.method==='GET' && url.pathname==='/orchestrator/local' && runtime.machine.localOnly) {
-        if (!sameOrigin({headers:{...req.headers,'x-orchestrator-request':'1'}},ctx.webServer.port)) { json(res,403,{error:'Local host required'}); return }
+        const port = ctx.webServer.port
+        if (port === undefined || !sameOrigin({headers:{...req.headers,'x-orchestrator-request':'1'}},port)) { json(res,403,{error:'Local host required'}); return }
         res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','x-frame-options':'DENY'});res.end(LOCAL_PANEL);return
       }
       if (!url.pathname.startsWith('/orchestrator/api/')) { res.writeHead(404); res.end(); return }
-      if (!sameOrigin(req, ctx.webServer.port)) { json(res, 403, { error: 'Same-origin management request required' }); return }
+      const port = ctx.webServer.port
+      if (port === undefined || !sameOrigin(req, port)) { json(res, 403, { error: 'Same-origin management request required' }); return }
       try {
         await runtime.ready
         const route = match(table, req.method ?? 'GET', url.pathname.slice('/orchestrator/api/'.length).split('/'))

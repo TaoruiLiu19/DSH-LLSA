@@ -54,7 +54,7 @@ export class AgentDelivery {
         }
         offset += events.length
       }
-    })().catch(error => { state.loaded = undefined; throw error })
+    })().catch(error => { delete state.loaded; throw error })
     await state.loaded
     return state
   }

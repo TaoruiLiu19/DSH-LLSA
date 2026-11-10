@@ -55,8 +55,8 @@ export class CollabBridge extends Service {
   readonly apiVersion = 2;
   readonly capabilities = Object.freeze({ durableReportEvents: true, reportProjection: true, stableReportRead: true,
     operatorControl: true, sharedRelayTransaction: true, managedStartupBarrier: false, managedChildren: false });
-  private projector?: CollabProjector;
-  private lifecycle?: CollabLifecycle;
+  private projector: CollabProjector | undefined;
+  private lifecycle: CollabLifecycle | undefined;
   private routeEpoch = 0;
   private closed = false;
   constructor(ctx: Context, private readonly host: CollabBridgeHost) {

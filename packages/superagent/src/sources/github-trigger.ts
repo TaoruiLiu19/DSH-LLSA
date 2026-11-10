@@ -43,7 +43,7 @@ export interface PullRef { number: number; isPr: boolean; url?: string; prAuthor
  * True when GitHub reports the account as a regular user rather than a bot or GitHub App.
  * Review bots running under ordinary user accounts count as human here; the prompts identify which accounts are automated.
  */
-export const isHumanLogin = (user: { login: string; type?: string }): boolean =>
+export const isHumanLogin = (user: { login: string; type?: string | undefined }): boolean =>
   !/\[bot\]$/.test(user.login) && (!user.type || user.type === 'User')
 /** Formats an inline review comment's file:line and the trailing lines of its diff hunk, which GitHub ends at the commented line. */
 export function reviewPlace(comment: GithubComment): string {
@@ -59,7 +59,7 @@ function commentText(comment: GithubComment, kind: 'conversation' | 'inline' | '
 }
 export const mentions = (text: string, login: string): boolean =>
   new RegExp(`(?:^|[^a-zA-Z0-9_@])@${escapeRegExp(login)}(?![a-zA-Z0-9_-])`, 'i').test(text)
-const author = (user: { login: string; type?: string }, agent: string) =>
+const author = (user: { login: string; type?: string | undefined }, agent: string) =>
   ({ actor: { source: SOURCE, id: user.login }, human: isHumanLogin(user) && !sameName(user.login, agent) })
 /** Builds a trigger for a comment or review; text is empty for a bodyless comment or a `COMMENTED` review without a body. */
 export function commentTrigger(comment: GithubComment, ref: PullRef, kind: 'conversation' | 'inline' | 'review', agent: string): Trigger {

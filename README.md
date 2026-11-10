@@ -1,49 +1,197 @@
-# DSH-LLSA
+<p align="center">
+  <img src="assets/product-poster.png" alt="DSH-LLSA · 多 Agent 协作 × LeanLink：主 Agent 分派，子 Agent 分工，精简回传，原始记录按需可查" width="100%">
+</p>
 
-面向 DeepSeek Harness 的本机任务插件，提供任务提交、状态查看和结果查询。当前发布版本为 0.4.0。
+<h1 align="center">DSH-LLSA</h1>
+<p align="center"><strong>让多个 Agent 一起完成任务，让每一次协作更精简。</strong></p>
+<p align="center">DeepSeek Harness 上的本机多智能体工作台<br>由 <strong>LeanLink</strong> 连接任务分工、紧凑通信与可追溯记录。</p>
 
-## 环境
+<p align="center">
+  <a href="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml"><img src="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml/badge.svg" alt="Build & Test"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-80cbc4" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/Node.js-24.11%2B-89b4fa" alt="Node.js 24.11+">
+</p>
+<p align="center"><a href="#快速开始">快速开始</a> · <a href="#第一次协作">第一次协作</a> · <a href="#认识-leanlink">认识 LeanLink</a> · <a href="#使用帮助">使用帮助</a></p>
 
-- Node.js 24.9 或以上。
-- 可用的 DeepSeek 官方 API 配置；模型费用由使用者承担。
-- 本构建使用 DeepSeek Harness 0.2.2-rc.1。
+---
 
-## 安装与启动
+## 一句话交代任务，一处查看协作
 
-将构建包解压到独立目录，进入其中的 package 目录，执行：
+把资料和验收要求交给主 Agent，由它组织子 Agent 分工，再汇总交付。你可以在本机工作台查看任务状态、结果与保存的协作记录。
 
-```powershell
-npm install --omit=dev
+| 分工更清楚 | 回传更精简 | 过程可核对 |
+|:---|:---|:---|
+| 主 Agent 组织任务，子 Agent 执行具体工作 | LeanLink 为受支持的结构化信息选择紧凑表示 | 按需查看已保存的步骤、原文、产物与用量 |
+
+适合从**资料齐全、范围明确、结果可核对**的任务开始：字段提取、规则核验、材料对比，或让多个子任务分别检查同一份输入。
+
+> **当前版本：0.4.1。** 快速开始面向本机单用户使用。工作台与记录保存在本机，推理使用你配置的模型 API；调用费用由使用者承担。
+
+## 快速开始
+
+准备 **Node.js 24.11+、npm 11+ 和 Git**，然后在终端执行：
+
+```sh
+git clone https://github.com/TaoruiLiu19/DSH-LLSA.git
+cd DSH-LLSA
+npm ci
+npm run build
 npm start
 ```
 
-先打开终端输出的 Harness 认证链接，在原生模型设置中配置自己的 API。不要将密钥写入本仓库。之后访问同一地址的 /orchestrator/local 提交任务；/collab 可查看任务记录。默认监听 127.0.0.1:3095。指定其他端口：
+没有 Git？使用仓库页面的 **Code → Download ZIP**，解压后进入包含 `package.json` 的目录，从 `npm ci` 开始执行。
 
-```powershell
-npm start -- 3096
+安装完成后只需三步：
+
+1. **打开认证链接** — 点击终端输出的 Harness 链接，完成本机认证。
+2. **配置模型** — 在 Harness 原生模型设置中填写自己的 DeepSeek 官方 API 配置。
+3. **提交任务** — 打开同一地址下的 `/orchestrator/local`；协作记录在 `/collab` 查看。
+
+默认地址为 `127.0.0.1:3095`。先打开认证链接，再进入任务页面。首次安装需要联网，请保留默认安装脚本，不要添加 `--ignore-scripts`。
+
+<details>
+<summary><strong>使用构建包：跳过源码构建</strong></summary>
+
+在 [Actions](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml) 中打开一次成功运行，下载对应系统的构建产物 ZIP（需要登录 GitHub）。解压后找到 `dsh-llsa-0.4.1.tgz`，按同目录的 `SHA256SUMS` 核对，再解压并进入 `package/`：
+
+```sh
+npm ci
+npm start
 ```
 
-在终端按 Ctrl+C 停止。任务数据默认保存在当前目录下的 .dsh-llsa；可通过 DSH_LLSA_STATE 环境变量指定独立位置。更新或备份前先正常停止服务。
+保留完整目录，特别是 `vendor/` 中的三个组件包。安装仍需要下载运行依赖，真实任务仍需模型 API。旧版 `0.4.0` 包不适用于本页。
 
-## 使用范围
+</details>
 
-当前为实验性单机版本，处理用户提交的内容，不用于自动操作外部仓库或发布部署。结果需要使用者核对，不保证所有任务的正确率、token 降幅或费用下降。
+## 第一次协作
 
-端口占用时请更换端口；API 连接失败时检查模型配置与额度。浏览器应先通过 Harness 的本机认证，再打开任务页面。
+打开任务页，粘贴以下内容。这个小例子便于直接核对结果，并观察一次委托与回传。
 
-本发行包含运行构建和必要许可证。上游组件：[DeepSeek Super-agent](https://github.com/deepseek-ai/dsh-superagent-prototype)、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。
+```text
+请交给一个子 Agent 核对以下资料，再由主 Agent 检查结果。
 
-## 源码
+原始编号是字符串 "007"，必须保留前导零。
+测试尚未执行，修复效果尚未验证，当前不允许部署。
 
-- `packages/dsh-collab`：协作插件运行源码。
-- `packages/superagent`：配套 Super-agent 服务端源码，包含必要的内置运行资源。
+只返回一个 JSON 对象：
+- id：原始编号，字符串。
+- test_status：只能是 "passed"、"failed" 或 "not_run"。
+- fix_verified：修复是否已验证，布尔值。
+- deploy_allowed：是否允许部署，布尔值。
 
-协作插件可在安装依赖后直接由 Harness 加载其 `src/index.js`。配套服务端构建：
-
-```powershell
-cd packages/superagent
-npm install
-npm run build
+不得补造测试结果，不添加说明或 Markdown 代码围栏。
 ```
 
-生成入口为 `lib/index.js`。普通使用者可继续使用上方构建包安装方式。本仓库不包含研发文档、实验记录和本机运行数据。
+勾选 **“最终回复必须为纯 JSON”**，点击 **“提交给 Super-agent”**。检查结果是否符合：
+
+```json
+{
+  "id": "007",
+  "test_status": "not_run",
+  "fix_verified": false,
+  "deploy_allowed": false
+}
+```
+
+接着打开 `/collab`，查看本次保存的协作记录。这里的 JSON 是验收标准；任务结束、格式合法和内容正确，需要分别核对。
+
+## 认识 LeanLink
+
+**LeanLink 关注多 Agent 之间的通信成本。** 对受支持的结构化字段采用紧凑表示，自由文本保留原文；需要检查某一步时，回到保存的原文、结构化结果和产物记录。
+
+| 你能得到 | 使用边界 |
+|---|---|
+| 主 Agent 调度与子 Agent 分工 | 并非所有小任务都值得多 Agent 协作 |
+| 紧凑表示与结构化交付 | 不保证任意自然语言都能压缩，也不是保密加密 |
+| 可查询的步骤与原始记录 | 不提供模型内部隐藏推理的完整回放 |
+| 区分供应商回传、估算和未知的 token 记录 | 未知不等于零；统计不是账单 |
+| 纯 JSON 输出约束与关键值检查 | 格式校验不能替代事实与业务正确性验证 |
+
+实际节省程度取决于任务、模型、重试和输出长度，应使用相同任务的真实用量对比。本项目不承诺固定 token 降幅或正确率。
+
+## 使用帮助
+
+<details>
+<summary><strong>启动、认证与 API 常见问题</strong></summary>
+
+| 现象 | 处理方式 |
+|---|---|
+| Node/npm 版本不匹配 | 运行 `node --version`、`npm --version`；要求 Node ≥ 24.11、npm ≥ 11 |
+| 依赖安装失败 | 检查网络与 registry，在源码根目录重新执行 `npm ci` |
+| 3095 端口被占用 | 使用 `npm start -- 3096`，打开新认证链接 |
+| 页面未认证或拒绝访问 | 先打开当前终端中的 Harness 认证链接 |
+| Harness 版本不匹配 | 重新执行 `npm ci` 恢复锁定依赖，避免混用旧包 |
+| 模型调用失败 | 检查 Harness 设置中的 API 地址、模型名称与额度 |
+
+反馈问题时请提供系统、Node/npm 版本和脱敏错误信息。不要上传 API 密钥、认证链接或私人数据库。
+
+</details>
+
+<details>
+<summary><strong>数据位置、停止与备份</strong></summary>
+
+状态默认保存在启动目录的 `.dsh-llsa/`。按 **Ctrl+C** 并等待进程退出，再复制整个目录进行备份；不要只复制正在使用的 SQLite 文件，WAL/SHM 与关联产物也可能参与持久化。恢复时先停止服务，再恢复完整目录。
+
+在线数据库快照可使用 SQLite `VACUUM INTO 'backup.db'`，但它不能替代关联产物的完整备份。Harness 的模型配置和凭据由 Harness 单独管理。
+
+指定数据位置，Windows PowerShell：
+
+```powershell
+$env:DSH_LLSA_STATE = "D:\DSH-LLSA-data"
+npm start
+```
+
+macOS / Linux：
+
+```sh
+DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
+```
+
+</details>
+
+<details>
+<summary><strong>兼容版本与执行边界</strong></summary>
+
+| 组件 | 版本 |
+|---|---|
+| DSH-LLSA 组合发行 / 启动器 | 0.4.1 |
+| `@dsh-llsa/collab` | 0.4.1 |
+| `@dsh-llsa/superagent` | 0.1.1 |
+| DeepSeek Harness | 0.2.2-rc.1 |
+
+包通过本地构建与随包文件安装，保持 `private: true`；这些名称不是已在 npm 发布的承诺。快速开始会启动指定版本的 Harness，尚不支持对任意已有实例一条 `dsh plugin add` 命令完成全部配置。
+
+默认本机入口不自动操作外部仓库或发布部署。源码保留上游外部集成能力；另行启用时可能使用本机 git、gh、lark 凭据并执行命令。`DSH_SUPERAGENT_BLOCKED_COMMANDS` 是建议性限制，不构成强制沙箱。服务仅供本机使用，不要直接暴露到公网。
+
+</details>
+
+## 开发与验证
+
+```text
+packages/dsh-collab/   协作通信与记录
+packages/superagent/   上游派生的执行插件
+packages/launcher/     本机启动器
+scripts/               构建、打包与安装验证
+assets/                产品海报
+```
+
+在完成 `npm ci` 后运行：
+
+```sh
+npm run check
+npm run typecheck
+npm test
+npm run pack:release
+npm run verify:rebuild
+npm run verify:kit
+```
+
+`pack:release` 先检查并构建，再生成四个归档与 `SHA256SUMS`。后两条命令分别检查重复构建一致性，以及全新目录中的安装、认证、页面与协作桥。已构建源码还可运行 `npm run smoke`。
+
+这些验证使用隔离配置，不提交模型任务；真实任务质量需要另行验收。Windows / Ubuntu 的远端验证状态见页首 CI 标记。构建产物通过 Actions 分发，不提交进源码树。
+
+---
+
+<p align="center"><strong>Built on DeepSeek Harness · Connected by LeanLink</strong></p>
+
+基于 [DeepSeek Super-agent prototype](https://github.com/deepseek-ai/dsh-superagent-prototype) 与 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。采用 [MIT](LICENSE)，上游署名与派生说明见 [NOTICE](NOTICE)，版本变化见 [CHANGELOG](CHANGELOG.md)。本项目是独立扩展，不代表 DeepSeek 官方发布或背书。

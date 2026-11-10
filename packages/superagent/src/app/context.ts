@@ -1,6 +1,5 @@
 /** Built-in prompt sections, role policies, and transcript projections for orchestrator and worker Sessions. */
 import { bundledSkills, promptFile } from './skill-files.ts'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
 export { textPage } from './cards.ts'
 
 /** Built-in host-delivery and tool-usage rules shared by all Sessions; a team may override them (`builtInParts`). */
@@ -26,8 +25,19 @@ export const handoffPolicy = (role: 'orchestrator' | 'worker'): string => `${han
 export const autoMergeThreshold = (lines: number): string => `it changes fewer than ${lines} lines (additions plus deletions);`
 
 /** Retains message content while omitting streamed chunks, usage accounting, and reasoning blocks. */
-export function transcriptEntry(event: SessionEvent) {
+export function transcriptEntry(event: { readonly type: string; readonly data: unknown }) {
   if (event.type !== 'user/message' && event.type !== 'tool/result' && event.type !== 'assistant/message') return undefined
-  const message = event.type === 'user/message' ? event.data : event.data.message
-  return { type: event.type, message: { role: message.role, content: message.content.filter(block => block.type !== 'reasoning') } }
+  const object = (value: unknown): Record<string, unknown> | undefined =>
+    value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+  const data = object(event.data)
+  const message = event.type === 'user/message' ? data : object(data?.message)
+  if (!message || typeof message.role !== 'string' || !Array.isArray(message.content)) {
+    throw new Error(`Invalid ${event.type} history message`)
+  }
+  const content = message.content.map((value: unknown) => {
+    const block = object(value)
+    if (!block || typeof block.type !== 'string') throw new Error(`Invalid ${event.type} history content block`)
+    return block
+  }).filter(block => block.type !== 'reasoning')
+  return { type: event.type, message: { role: message.role, content } }
 }

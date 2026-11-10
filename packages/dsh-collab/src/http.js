@@ -1,12 +1,33 @@
+// @ts-check
 import { PANEL_HTML, PANEL_SCRIPT } from './panel.js';
 import { parseExactJson } from './protocol.js';
+
+/** @typedef {import('node:http').IncomingMessage} Request */
+/** @typedef {import('node:http').ServerResponse} Response */
+/** @typedef {import('./types.js').JsonObject} JsonObject */
+/**
+ * @typedef {object} HttpService
+ * @property {() => unknown} status
+ * @property {() => unknown} protocols
+ * @property {() => unknown} listRuns
+ * @property {(runId: string) => unknown} describeRun
+ * @property {(runId: string, stepId: string, options: import('./types.js').StepQuery) => unknown} inspect
+ * @property {(runId: string, ref: string, options: import('./types.js').ArtifactRange) => {data: Buffer, mediaType: string}|Promise<{data: Buffer, mediaType: string}>} readArtifact
+ * @property {(runId: string, paused: boolean) => unknown} pause
+ * @property {(runId: string, agentId: string) => unknown} interrupt
+ * @property {(command: {runId: string, action: string, idempotencyKey: string}) => unknown} operatorControl
+ * @property {{status: () => unknown, getTask: (id: string) => unknown, startTask: (body: JsonObject) => unknown, previewCalculation: (body: JsonObject) => unknown, commitCalculation: (body: JsonObject) => unknown, interruptTask: (id: string) => unknown}} [localWorkspace]
+ */
+/** @typedef {{webServer: {register: (route: {kind: 'prefix', path: string, handler: (req: Request, res: Response) => Promise<void>}) => void|(() => void)|{dispose: () => void}}}} HttpContext */
 
 const BASE = '/collab';
 const MAX_BODY = 64 * 1024;
 const MAX_ARTIFACT = 1024 * 1024;
 
+/** @param {number} status @param {string} code */
 function httpError(status, code) { return Object.assign(new Error(code), { status, code }); }
 function loopback(address = '') { return address === '::1' || /^(?:::ffff:)?127(?:\.\d{1,3}){3}$/.test(address); }
+/** @param {unknown} host @returns {boolean} */
 function allowedHost(host) {
   if (typeof host !== 'string' || !host || /[\s/@?#\\]/.test(host)) return false;
   try {
@@ -15,12 +36,14 @@ function allowedHost(host) {
     return hostname === 'localhost' || loopback(hostname);
   } catch { return false; }
 }
+/** @param {string} text @returns {string} */
 function identifier(text) {
   let id;
   try { id = decodeURIComponent(text); } catch { throw httpError(400, 'INVALID_IDENTIFIER'); }
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(id) || id.includes('..')) throw httpError(400, 'INVALID_IDENTIFIER');
   return id;
 }
+/** @param {string|null|undefined} text @param {string} name @param {number} [fallback] */
 function integer(text, name, fallback) {
   if (text === null || text === undefined) return fallback;
   if (!/^\d+$/.test(String(text))) throw httpError(400, `INVALID_${name}`);
@@ -28,7 +51,15 @@ function integer(text, name, fallback) {
   if (!Number.isSafeInteger(value)) throw httpError(400, `INVALID_${name}`);
   return value;
 }
+/** Display redaction leaves persisted evidence untouched; it is not a general secret detector.
+ * @param {unknown} value @returns {unknown}
+ */
 function redact(value) {
+  if (typeof value === 'string') {
+    return value
+      .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g, '[REDACTED]')
+      .replace(/\bBearer[ \t]+[A-Za-z0-9._~+\/-]+={0,2}/gi, 'Bearer [REDACTED]');
+  }
   if (Array.isArray(value)) return value.map(redact);
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([key, child]) => [key,
@@ -37,6 +68,7 @@ function redact(value) {
   }
   return value;
 }
+/** @param {Response} res @param {number} status @param {unknown} data @param {string} [contentType] */
 function send(res, status, data, contentType = 'application/json; charset=utf-8') {
   res.statusCode = status;
   res.setHeader('Content-Type', contentType);
@@ -46,6 +78,7 @@ function send(res, status, data, contentType = 'application/json; charset=utf-8'
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'");
   res.end(Buffer.isBuffer(data) || typeof data === 'string' ? data : JSON.stringify(redact(data)));
 }
+/** @param {Request} req @returns {Promise<JsonObject>} */
 async function bodyJSON(req) {
   const type = String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
   if (type !== 'application/json') throw httpError(415, 'JSON_REQUIRED');
@@ -63,16 +96,20 @@ async function bodyJSON(req) {
   if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw httpError(400, 'OBJECT_REQUIRED');
   return parsed;
 }
+/** @param {JsonObject} body @param {string[]} keys */
 function only(body, keys) {
   if (Object.keys(body).some(key => !keys.includes(key))) throw httpError(400, 'UNKNOWN_FIELD');
 }
+/** @param {Request} req */
 function postOrigin(req) {
-  const scheme = req.socket.encrypted ? 'https' : 'http';
+  const scheme = /** @type {import('node:net').Socket & {encrypted?: boolean}} */ (req.socket).encrypted ? 'https' : 'http';
   let origin;
   try { origin = new URL(req.headers.origin).origin; } catch { throw httpError(403, 'SAME_ORIGIN_REQUIRED'); }
   if (req.headers.origin !== origin || origin !== `${scheme}://${req.headers.host}` || req.headers['sec-fetch-site'] === 'cross-site') throw httpError(403, 'SAME_ORIGIN_REQUIRED');
 }
-function mapError(error) {
+/** @param {unknown} caught */
+function mapError(caught) {
+  const error = /** @type {{status?: number, code?: string}} */ (caught && typeof caught === 'object' ? caught : {});
   if (Number.isInteger(error.status) && error.status >= 400 && error.status < 500) return { status: error.status, code: String(error.code ?? 'REQUEST_REJECTED') };
   const code = String(error.code ?? '');
   if (/NOT_FOUND|UNKNOWN_RUN|UNKNOWN_STEP|UNKNOWN_ARTIFACT|ARTIFACT_NOT_IN_RUN|CROSS_RUN/.test(code)) return { status: 404, code: 'NOT_FOUND' };
@@ -82,9 +119,12 @@ function mapError(error) {
   return { status: 500, code: 'INTERNAL_ERROR' };
 }
 
-/** Plugin routes enforce loopback/Host/origin themselves; native index login is a separate boundary. */
+/** Plugin routes enforce loopback/Host/origin themselves; native index login is a separate boundary.
+ * @param {HttpContext} ctx @param {HttpService} service @returns {() => void}
+ */
 export function registerHttp(ctx, service) {
   if (!ctx?.webServer?.register) throw new Error('DSH webServer.register is required');
+  /** @param {Request} req @param {Response} res */
   const handler = async (req, res) => {
     try {
       if (!loopback(req.socket.remoteAddress) || !allowedHost(req.headers.host)) throw httpError(403, 'LOCAL_ACCESS_REQUIRED');
@@ -118,6 +158,7 @@ export function registerHttp(ctx, service) {
         if (!tail) return send(res, 200, await service.describeRun(runId));
         const step = tail.match(/^steps\/([^/]+)$/);
         if (step) {
+          /** @type {import('./types.js').StepQuery} */
           const opts = {};
           if (url.searchParams.has('attemptId')) opts.attemptId = identifier(url.searchParams.get('attemptId'));
           if (url.searchParams.has('asOfSeq')) opts.asOfSeq = integer(url.searchParams.get('asOfSeq'), 'AS_OF');
@@ -152,7 +193,7 @@ export function registerHttp(ctx, service) {
       }
       if (tail === 'control') {
         only(body, ['action', 'idempotencyKey']);
-        if (!['stop', 'retry'].includes(body.action) || typeof body.idempotencyKey !== 'string') throw httpError(400, 'INVALID_COMMAND');
+        if (typeof body.action !== 'string' || !['stop', 'retry'].includes(body.action) || typeof body.idempotencyKey !== 'string') throw httpError(400, 'INVALID_COMMAND');
         return send(res, 200, { result: await service.operatorControl({ runId, action: body.action, idempotencyKey: identifier(body.idempotencyKey) }) });
       }
       throw httpError(404, 'NOT_FOUND');
@@ -165,6 +206,6 @@ export function registerHttp(ctx, service) {
   };
   const dispose = ctx.webServer.register({ kind: 'prefix', path: BASE, handler });
   if (typeof dispose === 'function') return dispose;
-  if (typeof dispose?.dispose === 'function') return () => dispose.dispose();
+  if (dispose && typeof dispose.dispose === 'function') return () => dispose.dispose();
   return () => {};
 }

@@ -1,7 +1,7 @@
 /** Plugin configuration and startup verification for repository access and agent CLI identities. */
 import { LIMITS } from './limits.ts'
 import { accessSync, constants, statSync } from 'node:fs'
-import { delimiter, isAbsolute, join } from 'node:path'
+import { delimiter, extname, isAbsolute, join } from 'node:path'
 import type { Volatile } from '@deepseek-ai/cordis'
 import s from '@deepseek-ai/schemastery'
 import { z } from 'zod'
@@ -44,7 +44,7 @@ const MOVED: Record<string, string> = {
 /** Read machine settings and reject unknown configuration keys (naming where deprecated keys moved). */
 export function machineOf(config: DeploymentConfig): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
-  if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; docs/006-deployment.md lists the keys`)
+  if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; supported keys: ${Object.keys(Config.dict ?? {}).join(', ')}`)
   const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs } = config
   return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, localOnly: config.localOnly, requireCollaboration: config.requireCollaboration }
 }
@@ -66,8 +66,16 @@ export interface FeishuBot { cli: string; appId: string; brand: 'feishu' | 'lark
 
 /** Resolve a command name or absolute path to an executable file, ignoring the worker shim directory. */
 export function executable(name: string, path: string, exclude?: string): string {
-  if (name.includes('/') && !isAbsolute(name)) throw new Error(`${name} must be a command name or an absolute path`)
-  const candidates = isAbsolute(name) ? [name] : path.split(delimiter).filter(dir => isAbsolute(dir) && !(exclude && sameDirectory(dir, exclude))).map(dir => join(dir, name))
+  if (/[\\/]/.test(name) && !isAbsolute(name)) throw new Error(`${name} must be a command name or an absolute path`)
+  // Windows command names commonly omit .exe/.cmd; keep PATH order and then PATHEXT order.
+  const extensions = process.platform === 'win32' && !extname(name)
+    ? [...new Set((process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(value => /^\.[a-z0-9]+$/i.test(value)).map(value => value.toLowerCase()))]
+    : []
+  const names = [name, ...extensions.map(extension => `${name}${extension}`)]
+  const candidates = isAbsolute(name) ? names : path.split(delimiter)
+    .map(dir => process.platform === 'win32' ? dir.replace(/^"(.*)"$/, '$1') : dir)
+    .filter(dir => isAbsolute(dir) && !(exclude && sameDirectory(dir, exclude)))
+    .flatMap(dir => names.map(command => join(dir, command)))
   for (const candidate of candidates) {
     try { if (statSync(candidate).isFile()) { accessSync(candidate, constants.X_OK); return candidate } }
     catch { /* Not an executable file here; try the next PATH directory. */ }

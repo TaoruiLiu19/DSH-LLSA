@@ -1,0 +1,39 @@
+{
+  "name": "dsh-llsa-repo",
+  "version": "0.4.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.11.0",
+    "npm": ">=11"
+  },
+  "packageManager": "npm@11.7.0",
+  "scripts": {
+    "postinstall": "node scripts/run-packages.mjs ci",
+    "check": "node scripts/check-versions.mjs",
+    "typecheck": "node scripts/run-packages.mjs typecheck",
+    "test": "node scripts/run-packages.mjs test",
+    "build": "node scripts/run-packages.mjs build && node scripts/build-local.mjs",
+    "start": "node dist/start.js",
+    "pack:release": "node scripts/pack-release.mjs",
+    "verify:rebuild": "node scripts/verify-rebuild.mjs",
+    "verify:kit": "node scripts/verify-kit.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "tar": "7.5.22",
+    "rolldown": "1.2.7"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.2-rc.1",
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/schemastery": "3.19.0",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-scope": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-app-boot": "0.2.2-rc.1",
+    "proper-lockfile": "4.1.2",
+    "zod": "4.4.3",
+    "js-tiktoken": "1.0.21"
+  }
+}

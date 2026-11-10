@@ -1,0 +1,44 @@
+name: Validate and package
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+      - run: npm install --global npm@11.7.0
+      # Root postinstall runs npm ci for all three independent packages.
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run pack:release
+      - name: Verify byte-for-byte rebuild
+        run: npm run verify:rebuild
+      - name: Install kit in an empty directory and smoke-test
+        run: npm run verify:kit
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-llsa-review-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            artifacts/*.tgz
+            artifacts/SHA256SUMS
+            artifacts/release.json

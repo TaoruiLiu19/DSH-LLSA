@@ -22,8 +22,8 @@ const now = (): string => new Date().toISOString()
 export class Passes {
   private timer?: ReturnType<typeof setInterval>
   private stopped = false
-  private pumping?: Promise<void>
-  private pumpAgain?: Promise<void>
+  private pumping: Promise<void> | undefined
+  private pumpAgain: Promise<void> | undefined
   constructor(private readonly host: PassesHost) {}
   start(): void { if (!this.stopped) this.timer = setInterval(() => { this.request() }, 2000) }
   stop(): Promise<unknown> {

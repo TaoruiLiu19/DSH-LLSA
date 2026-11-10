@@ -6,3 +6,8 @@
 *.db*
 .dsh-llsa/
 **/.credentials.yaml
+/artifacts/
+/*.tgz
+/coverage/
+/.smoke-state/
+**/.test-state/

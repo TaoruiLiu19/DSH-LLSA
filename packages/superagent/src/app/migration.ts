@@ -484,7 +484,7 @@ function reasonsAsCodes(store: Store): void {
   for (const ticket of store.tickets.list()) {
     const ended = (reason?: string) => reason && SENTENCES[reason] === 'retried' ? 'retried' : reason && SENTENCES[reason] === 'hostRestarted' ? 'hostRestarted' : reason
     if (!ticket.assignments.some(item => item.endedReason !== ended(item.endedReason))) continue
-    const assignments = ticket.assignments.map(item => item.endedReason ? { ...item, endedReason: ended(item.endedReason) } : item)
+    const assignments = ticket.assignments.map(item => item.endedReason ? { ...item, endedReason: ended(item.endedReason) ?? item.endedReason } : item)
     store.tickets.save({ ...ticket, assignments })
   }
 }

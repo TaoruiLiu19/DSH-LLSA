@@ -30,7 +30,7 @@ export function directionAllowed(value: unknown): value is AdmissionDirection {
 }
 export interface Assessment {
   decision: 'accept' | 'ignore' | 'unavailable'; rule_assessments: RuleAssessment[]; direction: unknown
-  title: string; scope: string; reason: string; intent_evidence?: string | null; acknowledgement?: string | null; worktree_name?: string
+  title: string; scope: string; reason: string; intent_evidence?: string | null | undefined; acknowledgement?: string | null | undefined; worktree_name?: string | undefined
 }
 /**
  * Validate an assessment against enabled rules and convert it into an engine `AssessmentOutcome`.
@@ -212,7 +212,7 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
     },
     admitsInferred: rules => mode === 'auto' && rules.length > 0 && rules.every(id => settings.policy.rules.some(rule => rule.enabled && rule.id === id)),
     revalidate(mandate: Mandate) {
-      // Revalidation rules follow docs/002 (Eval path; Resume revalidates).
+      // Re-check source access and the recorded admission basis before evaluation or resume.
       const { basis } = mandate
       const { source } = basis
       const current = source && basis.scope ? listened(sources, source, basis.scope) : undefined
