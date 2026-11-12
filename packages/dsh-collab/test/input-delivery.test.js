@@ -13,6 +13,8 @@ test('input hint is durable context, not a changed system prompt; retries, resta
   assert.equal((await delivery.admit(agent, original, binding, inputs)).messages.length, 2);
   const event = { type: 'user/message', data: first.messages[1] }; events.push(event); delivery.observe(session, event);
   assert.equal(await delivery.admit(agent, original, binding, inputs), original);
+  const nextSeries = { ...original, startsRequestSeries: true };
+  assert.equal(await delivery.admit(agent, nextSeries, binding, inputs), nextSeries);
   const reopened = new InputDelivery(persistence);
   assert.equal(await reopened.admit({ id: 'worker', session: {} }, original, binding, inputs), original);
   delivery.observe(session, { type: 'compaction/end' });

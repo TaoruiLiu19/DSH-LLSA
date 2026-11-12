@@ -182,6 +182,8 @@ for (const filename of ['LICENSE', 'NOTICE', 'README.md', 'CHANGELOG.md']) {
   await copyFile(join(repositoryRoot, filename), join(kitDirectory, filename));
 }
 await cp(join(repositoryRoot, 'assets'), join(kitDirectory, 'assets'), { recursive: true });
+await mkdir(join(kitDirectory, 'examples'), { recursive: true });
+await copyFile(join(repositoryRoot, 'examples/money-policy.example.json'), join(kitDirectory, 'examples/money-policy.example.json'));
 
 /** Derive the install graph from the reviewed lockfile, without resolving ranges. */
 function buildKitLock(sourceLock, manifest, packageArtifacts) {

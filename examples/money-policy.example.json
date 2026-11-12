@@ -1,0 +1,18 @@
+{
+  "id": "local-budget-period-1",
+  "currency": "USD",
+  "maxCost": 1,
+  "maxRunCost": 0.2,
+  "maxBranchCost": 0.1,
+  "reserveMultiplier": 1.25,
+  "prices": [
+    {
+      "id": "replace-with-your-price-snapshot-id",
+      "provider": "REPLACE_WITH_HARNESS_PROVIDER",
+      "model": "REPLACE_WITH_MODEL",
+      "currency": "USD",
+      "source": "EXAMPLE_ONLY_REPLACE_WITH_VERIFIED_PRICE_SOURCE_AND_DATE",
+      "perMillion": { "cacheHit": 1, "cacheMiss": 2, "cacheWrite": 2, "output": 4 }
+    }
+  ]
+}

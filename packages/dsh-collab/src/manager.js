@@ -4,6 +4,8 @@ import { ProtocolRegistry, selectEncoding, decodePacket, renderChinese, projectI
 import { VERIFICATION_SCOPE, normalizeContract, canonicalHash, executeComputation, resultMismatches } from './computation.js';
 import { normalizeQualityEvidence, MIN_EVIDENCE_SAMPLES, TASK_TYPES } from './encoding-policy.js';
 import { NativeInputs } from './native-inputs.js';
+import { summarizeAccounting } from './accounting.js';
+import { MoneyBudget } from './money-budget.js';
 
 /** @typedef {import('./types.js').JsonValue} JsonValue */
 /**
@@ -20,6 +22,7 @@ import { NativeInputs } from './native-inputs.js';
  * @property {ReadonlyArray<Readonly<Record<string, unknown>>>} [qualityEvidence]
  * @property {number} [minEvidenceSamples]
  * @property {boolean} [explicitEvidenceRefs]
+ * @property {object|null} [moneyPolicy]
  */
 
 const uid = prefix => `${prefix}-${randomUUID()}`;
@@ -33,7 +36,7 @@ export const COMPACT_GUIDANCE = 'Use collab_publish for public steps and final r
 /** Host orchestration; backend owns actual DSH handles. No model reasoning is fabricated. */
 export class CollaborationManager {
   /** @param {ManagerOptions} options */
-  constructor({ store, registry = new ProtocolRegistry(), countTokens, counterName = 'heuristic', backend = null, maxActiveChildren = 2, maxRunTokens = 200000, maxOutputTokens = 4096, closeTimeoutMs = 10000, qualityEvidence = [], minEvidenceSamples = MIN_EVIDENCE_SAMPLES, explicitEvidenceRefs = false }) {
+  constructor({ store, registry = new ProtocolRegistry(), countTokens, counterName = 'heuristic', backend = null, maxActiveChildren = 2, maxRunTokens = 200000, maxOutputTokens = 4096, closeTimeoutMs = 10000, qualityEvidence = [], minEvidenceSamples = MIN_EVIDENCE_SAMPLES, explicitEvidenceRefs = false, moneyPolicy = null }) {
     if (typeof explicitEvidenceRefs !== 'boolean') fail('INVALID_ARGUMENT','explicitEvidenceRefs must be boolean');
     this.explicitEvidenceRefs = explicitEvidenceRefs;
     this.store = store; this.registry = registry; this.countTokens = countTokens; this.counterName = counterName;
@@ -43,8 +46,10 @@ export class CollaborationManager {
     this.minEvidenceSamples = minEvidenceSamples;
     this.bindings = new Map(); this.handles = new Map(); this.pending = new Map(); this.finalEvents = new Map(); this.held = new Set(); this.reservations = new Map(); this.bridge = null; this.closing = false;
     this.toolPolicies = new Map();
+    this.moneyHolds = new Set();
     this.nativeInputs = new NativeInputs(store);
     this.runLimits = new Map();
+    this.moneyBudget = moneyPolicy ? new MoneyBudget(store, moneyPolicy) : null;
     this.starting = new Set(); this.settlements = new Map(); this.delivering = new Set(); this.closed = false; this.closePromise = null;
     if (!Number.isSafeInteger(closeTimeoutMs) || closeTimeoutMs < 1) fail('INVALID_ARGUMENT', 'closeTimeoutMs must be a positive safe integer');
     this.closeTimeoutMs = closeTimeoutMs;
@@ -53,6 +58,10 @@ export class CollaborationManager {
       for (const event of this.#events(run.id)) {
         if (event.kind === 'run_limits') this.runLimits.set(run.id, event.payload);
         if (event.kind === 'dispatch_hold') event.payload.paused ? this.held.add(run.id) : this.held.delete(run.id);
+        if (event.kind === 'dispatch_hold') {
+          if (!event.payload.paused) this.moneyHolds.delete(run.id);
+          else if (/^(MONEY_|money_budget)/.test(event.payload.reason ?? '')) this.moneyHolds.add(run.id);
+        }
         if (event.kind === 'final_result' && event.payload.actorId) this.finalEvents.set(event.payload.actorId, event);
       }
       const calls = new Map(store.usageSummary(run.id).usage.map(call => [call.callId, call]));
@@ -94,7 +103,10 @@ export class CollaborationManager {
   /** @param {string} id */
   describeRun(id) {
     const run = this.store.getRun(id); if (!run) fail('NOT_FOUND', 'Run not found');
-    return { run: { ...run, paused: this.held.has(id) }, agents: this.store.getAgents(id), workItems: this.store.getWorkItems(id), events: [...this.#events(id)], usage: this.store.usageSummary(id) };
+    const events = [...this.#events(id)], usage = this.store.usageSummary(id);
+    return { run: { ...run, paused: this.held.has(id) }, agents: this.store.getAgents(id), workItems: this.store.getWorkItems(id), events, usage,
+      accounting: summarizeAccounting(this.store.listRequests(id), usage.usage, events),
+      moneyBudget: this.moneyBudget?.snapshot(id) ?? { enabled: false } };
   }
   /** @param {string} sessionId @param {{runId?: string, ticketId?: string, assignmentId?: string, title?: string}} [details] */
   bindRoot(sessionId, details = {}) {
@@ -386,8 +398,15 @@ export class CollaborationManager {
     if (contract && !inputRefs.includes(contract.inputRef)) fail('INVALID_CONTRACT', 'Computation inputRef must be an authorized task inputRef');
     const attemptId = uid('try'); const childId = uid('collab');
     const item = { id, runId: b.runId, objective, role, dependsOn, acceptance, inputRefs, inputVersion: nativeInput?.version ?? null, taskType,attemptId, childId, parentId: parent.id, state: 'ready', maxOutputTokens, epoch: (old?.epoch ?? 0) + 1, ...(contract ? { computation: contract, contractHash: canonicalHash(contract), completionMode: mode } : {}) };
+    if (this.moneyBudget) Object.assign(item, { moneyContract: { policyId:this.moneyBudget.policy.id,
+      currency:this.moneyBudget.policy.currency, maxBranchCost:this.moneyBudget.policy.maxBranchCost,
+      scope:'work_item_including_retries', sharedPeriodAndRunLimits:true } });
     this.store.saveWorkItem(item);
-    this.store.appendEvent({ runId: b.runId, stepId: id, attemptId, kind: 'work_planned', payload: item });
+    // Record observed state, not a guessed model-failure diagnosis.
+    const retry = old ? { retryOfAttemptId: old.attemptId,
+      retryReason: old.staleInput ? 'input_changed' : old.state === 'unknown' ? 'recovery_unknown' :
+        old.state === 'cancelled' ? 'cancelled' : old.state === 'rejected' ? 'acceptance_rejected' : 'execution_failed' } : {};
+    this.store.appendEvent({ runId: b.runId, stepId: id, attemptId, kind: 'work_planned', payload: { ...item, ...retry } });
     this.#saveAgent({ id: childId, runId: b.runId, parentId: parent.id, role, state: 'planned', workItemId: id, attemptId, epoch: item.epoch, managed: true });
     this.pending.set(childId, { item, parent });
     await this.schedule(b.runId);
@@ -473,6 +492,8 @@ export class CollaborationManager {
   pause(runId, paused, reason = 'operator') {
     if (!this.store.getRun(runId)) fail('NOT_FOUND', 'Run not found');
     paused ? this.held.add(runId) : this.held.delete(runId);
+    if (!paused) this.moneyHolds.delete(runId);
+    else if (/^(MONEY_|money_budget)/.test(reason)) this.moneyHolds.add(runId);
     this.store.appendEvent({ runId, stepId: 'dispatch', kind: 'dispatch_hold', payload: { paused, reason, runningOperationsNotFrozen: true } });
     if (!paused) this.schedule(runId).catch(e => { this.lastError = e.message; });
     return { runId, paused, runningOperationsNotFrozen: true };
@@ -498,9 +519,10 @@ export class CollaborationManager {
     const writer = this.store.getWorkItems(b.runId).find(t => ACTIVE.has(t.state) && WRITERS.has(t.role));
     if (writer && writer.childId !== sessionId) return 'A managed writer owns this workspace; wait for it to settle.';
   }
-  /** @param {string} sessionId @param {string} callId @param {number} estimate */
-  reserveCall(sessionId, callId, estimate) {
+  /** @param {string} sessionId @param {string} callId @param {number} estimate @param {object} [priceContext] */
+  reserveCall(sessionId, callId, estimate, priceContext = {}) {
     const b = this.bindings.get(sessionId); if (!b) return null;
+    if (this.moneyHolds.has(b.runId)) fail('RUN_PAUSED', 'Money budget paused requests; an operator must review and resume before another model request.');
     if (!Number.isSafeInteger(estimate) || estimate < 0) fail('INVALID_ARGUMENT', 'Token reservation must be a nonnegative safe integer');
     if (typeof callId !== 'string' || !callId) fail('INVALID_ARGUMENT', 'callId required');
     const old = this.reservations.get(callId);
@@ -508,6 +530,10 @@ export class CollaborationManager {
     const usage = this.store.usageSummary(b.runId);
     const pending = [...this.reservations.values()].filter(x => x.runId === b.runId).reduce((n,x) => n+x.tokens,0);
     if (usage.totalTokens + pending + estimate > (this.runLimits.get(b.runId)?.maxRunTokens??this.maxRunTokens)) { this.pause(b.runId,true,'token_budget'); fail('TOKEN_BUDGET', 'Run token admission budget exceeded'); }
+    if (this.moneyBudget) {
+      try { this.moneyBudget.reserve({ ...priceContext, runId:b.runId, branchId:b.workItemId ?? 'root', callId }); }
+      catch (error) { this.pause(b.runId,true,error.code ?? 'money_budget'); throw error; }
+    }
     this.reservations.set(callId,{runId:b.runId,estimate,tokens:estimate}); return b;
   }
   /** @param {string} callId */

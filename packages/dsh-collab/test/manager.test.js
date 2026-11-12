@@ -41,6 +41,26 @@ function fixture(t,options={}){
 }
 const result={execution_status:'completed',outcome:'failed',facts:{passed:18,failed:1,exit_code:1},summary:'到期边界测试失败，尚未验证修复。',constraints:['不得部署'],evidence_refs:[]};
 
+test('money admission persists across recovery and operator resume cannot reset spending', async t => {
+  const moneyPolicy={id:'period',currency:'USD',maxCost:.0006,maxRunCost:.0006,maxBranchCost:.0006,reserveMultiplier:1,
+    prices:[{id:'fixture',currency:'USD',provider:'fixture',model:'m',source:'test-only',perMillion:{cacheHit:1,cacheMiss:2,cacheWrite:2,output:4}}]};
+  const {manager,store,root}=fixture(t,{moneyPolicy});
+  const context={provider:'fixture',model:'m',estimatedInputTokens:100,maxOutputTokens:50};
+  manager.reserveCall(root.id,'a',150,context);
+  assert.throws(()=>manager.reserveCall(root.id,'b',150,context),{code:'MONEY_BUDGET'});
+  assert.equal(manager.describeRun('r1').run.paused,true);
+  manager.pause('r1',false);
+  assert.throws(()=>manager.reserveCall(root.id,'b',150,context),{code:'MONEY_BUDGET'});
+  const reopened=new CollaborationManager({store,moneyPolicy});
+  assert.equal(reopened.describeRun('r1').moneyBudget.unsettledCalls,1);
+  reopened.pause('r1',false);
+  assert.throws(()=>reopened.reserveCall(root.id,'c',150,context),{code:'MONEY_BUDGET'});
+  store.recordUsage({callId:'a',runId:'r1',provider:'fixture',model:'m',inputTokens:100,cachedInputTokens:100,uncachedInputTokens:0,cacheWriteTokens:0,outputTokens:0});
+  reopened.pause('r1',false);
+  assert.equal(reopened.reserveCall(root.id,'d',150,context).runId,'r1');
+  await reopened.close();
+});
+
 function inputSnapshot(text) { return { text, version: createHash('sha256').update(text).digest('hex') }; }
 
 test('native worker can accept a submitted prerequisite while its dependant is queued', async t => {
@@ -171,6 +191,9 @@ test('new inputs invalidate accepted and running children; retries bind current 
   assert.throws(() => manager.publish(running.childId, { result: {}, final: true }), /Task inputs changed/);
   await tick(); await tick();
   const retry = await manager.delegate(root, { objective: 'verify latest', retryOf: done.workItemId });
+  const accounting = manager.describeRun('r1').accounting;
+  assert.equal(accounting.rework.retries, 1);
+  assert.equal(accounting.rework.reasons.input_changed, 1);
   assert.equal(store.getWorkItems('r1').find(x => x.id === done.workItemId).inputVersion, second.version);
   assert.ok(store.getWorkItems('r1').find(x => x.id === done.workItemId).inputRefs.includes(second.artifactRef));
   assert.throws(() => manager.publish(done.childId, { result: {}, final: true }), /Old activation/);

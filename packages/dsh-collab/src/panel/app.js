@@ -344,6 +344,10 @@ async function selectRun(id) {
   show("run-data", "正在读取…");
   show("chinese", "请选择时间线事件，或按步骤查询当时结果。");
   show("raw", "");
+  show("accounting", "正在读取…");
+  $("accounting-note").textContent = "计量覆盖率正在读取…";
+  $("money-note").textContent = "金额预算正在读取…";
+  show("money-budget", "正在读取…");
   for (const key of ["agents", "work-items", "timeline", "usage-summary"])
     $(key).replaceChildren();
   $("inspect").disabled = false;
@@ -419,6 +423,16 @@ async function loadRun() {
     show("run-title", data.run?.title || "任务详情");
     show("run-data", data.run || {});
     renderUsage(data.usage);
+    show("accounting", data.accounting ?? {status:"unknown"});
+    const money = data.moneyBudget;
+    show("money-budget", money ?? { enabled:false });
+    $("money-note").textContent = money?.enabled
+      ? `预算周期可用估算额度 ${money.scopes.period.remaining.toFixed(6)} ${money.currency}；本工单 ${money.scopes.run.remaining.toFixed(6)} ${money.currency}；${money.unsettledCalls} 次调用尚未结清用量。${money.lastBlocked ? "最近阻止原因：" + money.lastBlocked.code + " / " + money.lastBlocked.scope : ""} 金额包含预留，不是实际账单。`
+      : "未启用金额预算。可在启动时设置 DSH_LLSA_MONEY_POLICY；预测滑块不控制真实调用。";
+    const accounting = data.accounting;
+    $("accounting-note").textContent = accounting
+      ? `已记录调用 ${accounting.calls} 次；分项齐全 ${accounting.completeUsageCalls} 次；用量覆盖率 ${accounting.usageCoverage == null ? "未测" : (accounting.usageCoverage * 100).toFixed(1) + "%"}。重试 ${accounting.rework.retries} 次，输入作废 ${accounting.rework.invalidatedAttempts} 次。`
+      : "计量覆盖率未测。";
     LeanLinkFlow.render(data);
     renderCurrentJob();
     const items = data.workItems || [],

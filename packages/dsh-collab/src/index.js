@@ -5,6 +5,7 @@ import Schema from "@deepseek-ai/schemastery";
 import { z } from "zod";
 import { getEncoding } from "js-tiktoken";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { CollaborationStore } from "./store.js";
 import { CollaborationManager, COMPACT_GUIDANCE } from "./manager.js";
@@ -43,6 +44,7 @@ export const Config = Schema.object({
   explicitEvidenceRefs: Schema.boolean().default(false),
   protocolFile: Schema.string().default(""),
   encodingEvidenceFile: Schema.string().default(""),
+  moneyPolicyFile: Schema.string().default(""),
   minEvidenceSamples: Schema.natural().min(5).default(5),
 });
 
@@ -73,7 +75,7 @@ export async function apply(ctx, rawConfig = {}) {
   const store = new CollaborationStore({ stateDir: resolve(config.stateDir) });
   const encoding = getEncoding("o200k_base");
   const countTokens = (text) => encoding.encode(text).length;
-  let registry, qualityEvidence;
+  let registry, qualityEvidence, moneyPolicy;
   try {
     registry = loadRegistry(
       store,
@@ -82,11 +84,13 @@ export async function apply(ctx, rawConfig = {}) {
     qualityEvidence = loadEncodingEvidence(
       config.encodingEvidenceFile ? resolve(config.encodingEvidenceFile) : null,
     );
+    moneyPolicy = config.moneyPolicyFile ? JSON.parse(readFileSync(resolve(config.moneyPolicyFile), 'utf8')) : null;
   } catch (error) {
     store.close();
     throw error;
   }
-  const manager = new CollaborationManager({
+  let manager;
+  try { manager = new CollaborationManager({
     store,
     registry,
     countTokens,
@@ -97,7 +101,8 @@ export async function apply(ctx, rawConfig = {}) {
     qualityEvidence,
     minEvidenceSamples: config.minEvidenceSamples,
     explicitEvidenceRefs: config.explicitEvidenceRefs ?? false,
-  });
+    moneyPolicy,
+  }); } catch (error) { store.close(); throw error; }
   const backend = createDshBackend(ctx, manager, config);
   manager.backend = backend;
   const localWorkspace = new LocalWorkspace({ manager, ctx });
@@ -442,6 +447,12 @@ export async function apply(ctx, rawConfig = {}) {
         return;
       }
       const callId = `call-${randomUUID()}`;
+      const attribution = {
+        agentId: options.sessionId, attemptId: binding.attemptId ?? "root",
+        workItemId: binding.workItemId ?? "root", parentAgentId: binding.parentId ?? null,
+        role: binding.role ?? "unknown", provider: options.provider, model: options.model,
+        purpose: options.purpose ?? "agent",
+      };
       // Capture only host-visible public input, excluding hidden/private reasoning blocks.
       const manifest = JSON.parse(
         JSON.stringify({
@@ -461,11 +472,16 @@ export async function apply(ctx, rawConfig = {}) {
       const estimate =
         countTokens(JSON.stringify(manifest)) +
         (options.maxTokens ?? config.maxOutputTokens);
-      manager.reserveCall(options.sessionId, callId, estimate);
+      manager.reserveCall(options.sessionId, callId, estimate, {
+        provider: options.provider, model: options.model,
+        estimatedInputTokens: estimate - (options.maxTokens ?? config.maxOutputTokens),
+        maxOutputTokens: options.maxTokens ?? config.maxOutputTokens,
+      });
       const artifact = store.putArtifact(JSON.stringify(manifest), {
         mediaType: "application/json",
       });
       store.recordRequest({
+        ...attribution,
         callId,
         runId: binding.runId,
         agentId: options.sessionId,
@@ -494,6 +510,7 @@ export async function apply(ctx, rawConfig = {}) {
             store.markDelivery(id, "included_in_request", { callId });
         }
       const stream = streams.begin({
+        ...attribution,
         callId,
         runId: binding.runId,
         agentId: options.sessionId,

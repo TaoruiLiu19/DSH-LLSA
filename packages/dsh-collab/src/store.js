@@ -281,14 +281,14 @@ export class CollaborationStore {
     this.#run(required(input.runId, 'runId')); const id = required(input.callId ?? input.id, 'callId');
     const counts = ['inputTokens','outputTokens','cachedInputTokens','cacheWriteTokens','uncachedInputTokens'];
     const old = parse(this.db.prepare('SELECT data FROM usage_calls WHERE id=?').get(id));
-    const data = { ...input, id, callId:id, provider:input.provider ?? old?.provider ?? 'unknown',account:input.account ?? old?.account ?? 'default',providerRequestId:input.providerRequestId ?? old?.providerRequestId ?? null };
+    const data = { ...old, ...input, id, callId:id, provider:input.provider ?? old?.provider ?? 'unknown',account:input.account ?? old?.account ?? 'default',providerRequestId:input.providerRequestId ?? old?.providerRequestId ?? null };
     for (const key of counts) { data[key] = input[key] ?? null; if (data[key] !== null) integer(data[key], key); }
     if (data.inputTokens !== null && data.cachedInputTokens !== null && data.cachedInputTokens > data.inputTokens) fail('INVALID_USAGE', 'Cached input cannot exceed total input');
     if (input.cost !== undefined && input.cost !== null && (typeof input.cost !== 'number' || !Number.isFinite(input.cost) || input.cost < 0)) fail('INVALID_USAGE','Cost must be nonnegative');
     data.cost = input.cost ?? null; data.currency = input.currency ?? old?.currency ?? 'unspecified';
     if (old) {
-      for (const key of ['runId','provider','account',...counts,'cost','providerRequestId']) {
-        if (old[key] != null && data[key] !== null && !equal(old[key],data[key])) fail('USAGE_CONFLICT', `Recorded usage differs: ${key}`);
+      for (const key of ['runId','provider','account','model','agentId','attemptId','workItemId','parentAgentId','role','purpose',...counts,'cost','providerRequestId']) {
+        if (old[key] != null && data[key] != null && !equal(old[key],data[key])) fail('USAGE_CONFLICT', `Recorded usage differs: ${key}`);
         if (data[key] == null && old[key] != null) data[key] = old[key];
       }
       if(old.cost !== null && data.currency !== old.currency) fail('USAGE_CONFLICT','Recorded cost currency cannot change');
@@ -304,7 +304,16 @@ export class CollaborationStore {
   }
   /** Read-only derived view: a price estimate never overwrites account charges. */
   costSummary(runId, price) {
-    return summarizeCosts(this.usageSummary(runId).usage, price);
+    const calls = new Map(this.listRequests(runId).map(row => [row.callId, row]));
+    for (const row of this.usageSummary(runId).usage) calls.set(row.callId, { ...calls.get(row.callId), ...row });
+    const rows = [...calls.values()];
+    const groups = new Map();
+    for (const row of rows) {
+      const id = row.workItemId ?? 'unknown';
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(row);
+    }
+    return { ...summarizeCosts(rows, price), byWorkItem: [...groups].map(([workItemId, calls]) => ({ workItemId, ...summarizeCosts(calls, price) })) };
   }
   usageSummary(runId) {
     this.#run(runId); const calls = this.db.prepare('SELECT data FROM usage_calls WHERE run_id=? ORDER BY rowid').all(runId).map(parse);

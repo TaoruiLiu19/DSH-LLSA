@@ -28,7 +28,7 @@ export class InputDelivery {
     const current = inputs.current(binding.runId); if (!current) return decision;
     const id = `native-input:${binding.runId}:${current.version}`;
     const seen = await this.seen(agent);
-    if (!decision.startsRequestSeries && (seen.has(id) || decision.messages.some(m => m.id === id))) return decision;
+    if (seen.has(id) || decision.messages.some(m => m.id === id)) return decision;
     return { ...decision, messages: [...decision.messages, freezeMessage({ id, role: 'user',
       content: [{ type: 'text', text: inputs.hint(binding.runId) }],
       source: { kind: 'dsh-collab', form: 'input-reference' } })] };

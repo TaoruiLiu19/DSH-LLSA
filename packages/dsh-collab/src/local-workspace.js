@@ -25,7 +25,7 @@ const publicError = failure => {
   const status=failure?.status??failure?.failure?.status;
   if(status===401||status===403)return {code:'API_AUTH_ERROR'};
   if(status===429)return {code:'API_RATE_LIMIT'};
-  if(failure?.code==='TOKEN_BUDGET')return {code:'BUDGET_LIMIT'};
+  if(['TOKEN_BUDGET','MONEY_BUDGET','MONEY_PRICE_MISSING','RUN_PAUSED'].includes(failure?.code))return {code:failure.code==='MONEY_PRICE_MISSING'?'MONEY_PRICE_MISSING':'BUDGET_LIMIT'};
   const code=failure?.code??failure?.message;
   return {code:/^(REQUEST_LIMIT|TASK_TIMEOUT|USER_INTERRUPTED|WORKSPACE_CLOSED|BUDGET_LIMIT|API_AUTH_ERROR|API_RATE_LIMIT)$/.test(code??'')?code:'TASK_FAILED'};
 };

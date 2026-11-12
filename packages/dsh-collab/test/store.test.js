@@ -15,6 +15,28 @@ function fixture(t) {
 }
 const event=(overrides={})=>({runId:'r1',stepId:'s1',attemptId:'try1',kind:'test_result',payload:{executionStatus:'completed',outcome:'failed',passed:18,failed:1,summary:'尚未通过；不得部署',exact:'0.10'},...overrides});
 
+test('usage backfill retains immutable attribution and rejects reassignment', t => {
+  const {store}=fixture(t);
+  store.recordUsage({runId:'r1',callId:'c',provider:'fixture',model:'m',agentId:'child',workItemId:'w',attemptId:'try1',purpose:'compaction'});
+  store.recordUsage({runId:'r1',callId:'c',inputTokens:5,outputTokens:2});
+  const row=store.usageSummary('r1').usage[0];
+  assert.equal(row.workItemId,'w');assert.equal(row.purpose,'compaction');assert.equal(row.model,'m');
+  assert.throws(()=>store.recordUsage({runId:'r1',callId:'c',workItemId:'other'}),{code:'USAGE_CONFLICT'});
+  assert.throws(()=>store.recordUsage({runId:'r1',callId:'c',model:'other'}),{code:'USAGE_CONFLICT'});
+});
+
+test('cost projection includes requests missing usage and retains branch estimates', t => {
+  const {store}=fixture(t);
+  const metadata={runId:'r1',provider:'fixture',model:'m',workItemId:'w'};
+  store.recordRequest({...metadata,callId:'a'});store.recordRequest({...metadata,callId:'b'});
+  store.recordUsage({...metadata,callId:'a',inputTokens:100,cachedInputTokens:80,uncachedInputTokens:20,cacheWriteTokens:0,outputTokens:5});
+  const price={id:'test',provider:'fixture',model:'m',currency:'USD',source:'fixture',perMillion:{cacheHit:1,cacheMiss:2,cacheWrite:2,output:3}};
+  const report=store.costSummary('r1',price);
+  assert.equal(report.estimates.length,2);assert.equal(report.unknownCalls,1);assert.equal(report.amount,null);
+  assert.equal(report.byWorkItem[0].workItemId,'w');assert.equal(report.byWorkItem[0].amount,null);
+  assert.ok(Math.abs(report.knownAmount-0.000135)<1e-12);
+});
+
 test('history survives restart, preserves failed snapshot after later success',t=>{
   const {store,stateDir}=fixture(t);
   const failed=store.appendEvent(event({id:'e1'}));

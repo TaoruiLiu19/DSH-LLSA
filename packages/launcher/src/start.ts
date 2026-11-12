@@ -14,10 +14,10 @@ export function parsePort(value = '3095'): number {
   return port;
 }
 
-export function makePatch(state: string, collab: string, superagent: string) {
+export function makePatch(state: string, collab: string, superagent: string, moneyPolicyFile = '') {
   return [{ insert: [
     { id: 'llsa', name: collab, config: { stateDir: join(state, 'collab'), bridgeProjection: true,
-      explicitEvidenceRefs: true, encodingEvidenceFile: '', maxRunTokens: 300000, maxOutputTokens: 1536 } },
+      explicitEvidenceRefs: true, encodingEvidenceFile: '', moneyPolicyFile, maxRunTokens: 300000, maxOutputTokens: 1536 } },
     { id: 'llsa-worker', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'dsh-superagent-worker', plugins: [] } },
     { id: 'llsa-router', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'dsh-superagent-router', plugins: [] } },
     { id: 'llsa-superagent', name: superagent, config: { stateDir: join(state, 'superagent'), localOnly: true, requireCollaboration: true } },
@@ -47,7 +47,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const state = resolve(process.env.DSH_LLSA_STATE ?? '.dsh-llsa');
   await mkdir(state, { recursive: true });
   const patch = join(state, 'launch.json');
-  await writeFile(patch, JSON.stringify(makePatch(state, collab.replaceAll('\\', '/'), superagent.replaceAll('\\', '/')), null, 2));
+  const moneyPolicyFile = process.env.DSH_LLSA_MONEY_POLICY ? resolve(process.env.DSH_LLSA_MONEY_POLICY) : '';
+  await writeFile(patch, JSON.stringify(makePatch(state, collab.replaceAll('\\', '/'), superagent.replaceAll('\\', '/'), moneyPolicyFile), null, 2));
   console.log(`DSH-LLSA · http://127.0.0.1:${port}/orchestrator/local\n先打开下方 Harness 认证链接，再进入任务页。Ctrl+C 停止。`);
   const child = spawn(process.execPath, [join(dirname(harnessPath), 'lib/bin.js'), 'web', '--patch', patch,
     '--host', '127.0.0.1', '--port', String(port), '--no-open'], { stdio: 'inherit', windowsHide: true });
