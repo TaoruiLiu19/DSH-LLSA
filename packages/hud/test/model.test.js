@@ -254,7 +254,7 @@ test('a session switch resets the field', () => {
   assert.equal(view.taskId, null);
 });
 
-test('focus closes on a question and reopens on the answer', () => {
+test('a question keeps the field, and answering it keeps it too', () => {
   const base = { taskId: null, active: false, dismissedTaskId: null, state: 'idle' };
   const running = { ...createView({ sessionId: 's', now: 0 }), taskId: 't1', state: 'running' };
   const asked = { ...running, state: 'waiting-human', pending: true };
@@ -264,12 +264,21 @@ test('focus closes on a question and reopens on the answer', () => {
   const opened = nextFocus(base, running);
   assert.equal(opened.active, true);
   assert.equal(opened.reason, 'new-task');
-  const closed = nextFocus(opened, asked);
-  assert.equal(closed.active, false, '§4.6: a question leaves focus');
-  const reopened = nextFocus(closed, answered);
-  assert.equal(reopened.active, true, '§4.6: answering comes back to the field');
-  const terminal = nextFocus(reopened, done);
+  const duringAsk = nextFocus(opened, asked);
+  assert.equal(duringAsk.active, true, 'the ask surface floats above the field; the field stays');
+  assert.equal(duringAsk.reason, 'ask');
+  const afterAnswer = nextFocus(duringAsk, answered);
+  assert.equal(afterAnswer.active, true);
+  const terminal = nextFocus(afterAnswer, done);
   assert.equal(terminal.active, true, '§4.4: completion never closes the field itself');
+});
+
+test('a question does not undo an explicit dismissal', () => {
+  const view = { ...createView({ sessionId: 's', now: 0 }), taskId: 't1', state: 'waiting-human', pending: true };
+  const dismissed = { taskId: 't1', active: false, dismissedTaskId: 't1', state: 'waiting-human' };
+  const stay = nextFocus(dismissed, view);
+  assert.equal(stay.active, false, 'the field was dismissed on purpose');
+  assert.equal(stay.dismissedTaskId, 't1');
 });
 
 test('dismissal holds for one task only', () => {

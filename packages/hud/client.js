@@ -861,7 +861,10 @@ function nextFocus(focus, view) {
     return { taskId, active: state === 'running', dismissedTaskId: null, state, reason: 'new-task' };
   }
   if (state === 'waiting-human') {
-    return { taskId, active: false, dismissedTaskId: focus.dismissedTaskId, state, reason: 'ask' };
+    // A question keeps the field. The ask surface renders above the overlay, so
+    // the run stays visible behind it instead of the blur dropping away (§4.6,
+    // revised at the product owner's request).
+    return { taskId, active: focus.active, dismissedTaskId: focus.dismissedTaskId, state, reason: 'ask' };
   }
   if (focus.state === 'waiting-human' && state !== 'waiting-human') {
     // the question was answered: come back to the field

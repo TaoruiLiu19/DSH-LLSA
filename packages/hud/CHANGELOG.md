@@ -31,6 +31,11 @@ First HUD package.
   mid-run) adopts the turn, so the field appears at once instead of staying blank
   until the next command. When the snapshot route is unreachable the overlay says
   `HUD 未连接` instead of rendering nothing.
+- A pending question no longer drops the field: the ask surface floats above it,
+  so the blur and the field stay while the dialog is open. A modal also softens
+  the scrim (lighter dim, no pointer capture) so it can never swallow the dialog's
+  clicks. Stale bundles and measurement mistakes are covered by a fake-shell test
+  that walks `display: contents` slot hosts.
 - Verification: the five contract fixtures (44 steps) replayed against the model,
   the 13 label cases, layout, focus, Host route, and a loader-shaped smoke test
   of the committed browser bundle.
