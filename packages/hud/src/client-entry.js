@@ -168,6 +168,19 @@ function lastFlowRowBox(stage) {
   }
 }
 
+/**
+ * Whether a candidate is a usable hole: inside the message area, and small enough
+ * that blurring the rest still reads as "the field".
+ */
+function boxFitsStage(box, stage) {
+  if (stage.w <= 0 || stage.h <= 0) return false;
+  const inside = box.x >= stage.x - 8
+    && box.y >= stage.y - 8
+    && box.x + box.width <= stage.x + stage.w + 8
+    && box.y + box.height <= stage.y + stage.h + 8;
+  return inside && box.width * box.height <= stage.w * stage.h * 0.45;
+}
+
 /** The dialog's box in viewport coordinates, or null when it has none yet. */
 function dialogBox(element) {
   if (element === null || typeof element.getBoundingClientRect !== 'function') return null;
@@ -401,16 +414,14 @@ export function applyClient(ctx, React) {
     // Only a pending question earns a hole: any other time the scrim stays whole,
     // otherwise a persistent app frame would be mistaken for a dialog and leave a
     // sharp rectangle behind after the question is answered.
-    const candidate = view.pending === true
-      ? (questionCardBox(stage) ?? findDialogSurface() ?? lastFlowRowBox(stage))
+    //
+    // Every candidate is screened: it must sit inside the message area and leave
+    // most of the area blurred (a panel-sized box would look like no blur at all).
+    const hole = view.pending === true
+      ? [questionCardBox(stage), findDialogSurface(), lastFlowRowBox(stage)]
+        .find(box => box !== null && boxFitsStage(box, stage))
+        ?? null
       : null;
-    const insideStage = candidate !== null
-      && candidate.x >= stage.x - 8
-      && candidate.y >= stage.y - 8
-      && candidate.x + candidate.width <= stage.x + stage.w + 8
-      && candidate.y + candidate.height <= stage.y + stage.h + 8
-      && candidate.width * candidate.height < stage.w * stage.h * 0.85;
-    const hole = insideStage ? candidate : null;
     const soft = view.pending === true && hole === null;
     return wrap(React.createElement(FocusLayer, {
       view,
