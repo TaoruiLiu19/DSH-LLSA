@@ -580,6 +580,17 @@ export function nextFocus(focus, view) {
   return { taskId, active: focus.active || state === 'running', dismissedTaskId: focus.dismissedTaskId, state, reason: 'same-task' };
 }
 
+/**
+ * Whether the field may show at all.
+ *
+ * Two independent switches: the plugin's `focusMode` setting (on by default, so a
+ * missing value still shows the field) and a session-local override from the
+ * keyboard shortcut, which never touches the saved configuration.
+ */
+export function focusGate(configFocusMode, manualOff) {
+  return configFocusMode !== false && manualOff !== true;
+}
+
 /** Capsule text + colour: the state the field is in while it is closed (§4.4). */
 export function capsuleOf(view) {
   const state = view.state === 'idle' ? 'running' : view.state;

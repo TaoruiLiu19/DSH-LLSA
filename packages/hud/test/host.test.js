@@ -65,9 +65,37 @@ test('the route answers a snapshot plus the meta the contract cannot carry', asy
   assert.equal(empty.body.snapshot.aliasVersion, 1);
   assert.equal(empty.body.meta.sessionId, 's1');
   assert.equal(empty.body.meta.source, 'core');
+  assert.equal(empty.body.meta.focusMode, true, 'focus mode defaults on');
+  assert.equal(empty.body.meta, empty.body.meta);
   assert.equal(empty.headers.get('cache-control'), 'no-store');
   // The snapshot itself must stay inside the frozen schema: no extra keys.
   assert.deepEqual(Object.keys(empty.body.snapshot).sort(), ['agents', 'aliasVersion', 'events', 'eventsFromSeq', 'now', 'seq', 'stalledAfterMs', 'v']);
+});
+
+test('the focus-mode setting rides in meta and defaults on', async () => {
+  const on = fakeHost();
+  apply(on.ctx, {});
+  const enabled = await call(on, `${ROUTE}?session=s1`);
+  assert.equal(enabled.body.meta.focusMode, true);
+  const pingOn = await call(on, PING_ROUTE);
+  assert.equal(pingOn.body.focusMode, true);
+
+  const off = fakeHost();
+  apply(off.ctx, { focusMode: false });
+  const disabled = await call(off, `${ROUTE}?session=s1`);
+  assert.equal(disabled.body.meta.focusMode, false, 'an explicit false reaches the client');
+  const pingOff = await call(off, PING_ROUTE);
+  assert.equal(pingOff.body.focusMode, false);
+  // Turning the field off must not change the wire format.
+  assert.equal(disabled.body.snapshot.v, 1);
+  assert.deepEqual(Object.keys(disabled.body.snapshot).sort(), Object.keys(enabled.body.snapshot).sort());
+});
+
+test('the focus-mode setting never accepts a truthy non-boolean', async () => {
+  const host = fakeHost();
+  apply(host.ctx, { focusMode: 'false' });
+  const answer = await call(host, `${ROUTE}?session=s1`);
+  assert.equal(answer.body.meta.focusMode, true, 'only an explicit false disables the field');
 });
 
 test('the route reflects live session events', async () => {

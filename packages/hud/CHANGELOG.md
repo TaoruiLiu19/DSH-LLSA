@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- The plugin exports a `Config` schema, so `focusMode` (and the existing tuning
+  keys) appear as a form in the plugin panel. `focusMode` defaults to on: turning
+  it off keeps the plugin installed but draws nothing.
+- `Ctrl/Cmd+Shift+H` silences the field for the current page without saving; the
+  saved setting is untouched.
+- `meta.focusMode` carries the setting to the client, and `/api/ping` reports it,
+  so the wire format stays inside the frozen contract.
+- `@deepseek-ai/schemastery` is resolved through a ladder (`import.meta.url`, then
+  `DSH_PROFILE_DIR`), because a linked checkout resolves outside the profile where
+  that module is not reachable; a missing schema only means "no form".
+
 ## 0.2.0
 
 - The field is measured from the column the host actually renders

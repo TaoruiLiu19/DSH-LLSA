@@ -12,7 +12,7 @@
  * The half is read-only by construction: it polls one JSON route and draws.
  * There is no write path, no tool, and no session event (§6).
  */
-import { createView, foldSnapshot, nextFocus, stepLifecycle } from './model.js';
+import { createView, focusGate, foldSnapshot, nextFocus, stepLifecycle } from './model.js';
 import { createFieldCanvas } from './render.js';
 import { STYLES, createCapsule, createFocusLayer, createOfflinePill, createStageHook } from './focus.js';
 
@@ -58,6 +58,10 @@ function createStore(getLocale) {
     view: createView({ now: 0 }),
     focus: { taskId: null, active: false, dismissedTaskId: null, state: 'idle' },
     online: false,
+    /** The plugin's `focusMode` setting, mirrored from `meta` on every poll. */
+    configFocus: true,
+    /** Session-local override from the shortcut; never written to the profile. */
+    manualOff: false,
     locale: 'zh',
     version: 0,
     listeners: new Set(),
@@ -89,6 +93,8 @@ function createStore(getLocale) {
     fold(snapshot, now, meta) {
       foldSnapshot(state.view, snapshot, now, { ...meta, sessionId: state.sessionId });
       state.online = true;
+      // Absent means on, the same default the schema declares.
+      state.configFocus = meta === null || meta === undefined ? true : meta.focusMode !== false;
       const focus = nextFocus(state.focus, state.view);
       const changedFocus = focus.active !== state.focus.active || focus.taskId !== state.focus.taskId || focus.dismissedTaskId !== state.focus.dismissedTaskId;
       state.focus = { taskId: focus.taskId, active: focus.active, dismissedTaskId: focus.dismissedTaskId, state: focus.state, reason: focus.reason };
@@ -107,6 +113,12 @@ function createStore(getLocale) {
     open() {
       state.focus = { ...state.focus, active: true, dismissedTaskId: null };
       notify();
+    },
+    /** Ctrl/Cmd+Shift+H: silence the field for this session only. */
+    toggleManualOff() {
+      state.manualOff = state.manualOff !== true;
+      notify();
+      return state.manualOff;
     },
   };
 }
@@ -213,6 +225,13 @@ export function applyClient(ctx, React) {
 
     React.useEffect(() => {
       const onKey = event => {
+        // Ctrl/Cmd+Shift+H silences the field without touching the saved setting.
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === 'H' || event.key === 'h')) {
+          event.preventDefault();
+          event.stopPropagation();
+          store.toggleManualOff();
+          return;
+        }
         if (event.key === 'Escape' && store.get().focus.active) {
           event.stopPropagation();
           store.dismiss();
@@ -227,13 +246,16 @@ export function applyClient(ctx, React) {
       return unsubscribe;
     }, []);
 
-    const focused = state.focus.active && view.taskId !== null;
+    // The plugin setting and the session shortcut gate everything the field draws:
+    // turning focus mode off leaves the plugin installed but silent.
+    const enabled = focusGate(state.configFocus, state.manualOff);
+    const focused = enabled && state.focus.active && view.taskId !== null;
     // The stylesheet lives on the entry, not on the layer: the capsule and the
     // pill also mount while the layer is gone and must keep their rules.
     const sheet = React.createElement('style', { 'data-dsh-hud': 'overlay' }, STYLES);
     const wrap = node => React.createElement(React.Fragment, null, sheet, node);
     if (!focused) {
-      const showCapsule = view.taskId !== null && state.focus.dismissedTaskId !== null;
+      const showCapsule = enabled && view.taskId !== null && state.focus.dismissedTaskId !== null;
       if (showCapsule) {
         return wrap(React.createElement(Capsule, {
           view,
@@ -243,29 +265,21 @@ export function applyClient(ctx, React) {
         }));
       }
       // A session is known but the snapshot route never answered: say so instead
-      // of showing the same blank screen as "nothing is happening".
-      if (state.sessionId !== null && state.online === false) {
+      // of showing the same blank screen as "nothing is happening". A field that
+      // was switched off on purpose says nothing at all.
+      if (enabled && state.sessionId !== null && state.online === false) {
         return wrap(React.createElement(OfflinePill, { stage, text: strings.offline }));
       }
       return wrap(null);
     }
-    // The scrim is split around whatever the user must interact with: a modal
-    // card, or the answer controls of an inline question. The blur and the dim
-    // stay everywhere else, and the sharp area stays clickable.
-    //
-    // The hole is only accepted when it sits inside the message area and leaves
-    // something to blur: a stray full-screen wrapper must never dissolve the
-    // scrim, and a card covering everything means there is nothing left to blur.
     // The ask surface renders below the message area (over the composer), not
     // inside it, so the plain scrim already leaves it sharp: no hole is cut, and
     // the blur covers exactly the conversation.
-    const hole = null;
-    const soft = false;
     return wrap(React.createElement(FocusLayer, {
       view,
       stage,
-      soft,
-      hole: soft ? null : hole,
+      soft: false,
+      hole: null,
       onDismiss: () => store.dismiss(),
       hint: strings.hint,
       canvasProps: { getView, getStage },

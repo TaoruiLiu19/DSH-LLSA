@@ -20,6 +20,10 @@ import {
   normalizeHudSnapshot,
   MAX_SESSIONS,
 } from './source.js';
+import { Config } from './config.js';
+
+/** Re-exported so the Loader renders this plugin's settings form. */
+export { Config };
 
 /** Read-only snapshot endpoint consumed by `client.js`. */
 export const ROUTE = '/dsh-hud/api/state';
@@ -45,6 +49,9 @@ function normalizeConfig(config) {
   const source = config !== null && typeof config === 'object' ? config : {};
   const hudEndpoint = typeof source.hudEndpoint === 'string' ? source.hudEndpoint.trim() : '';
   return {
+    // Focus mode is opt-out: an absent field means "on", matching the schema
+    // default, so a hand-written `config: {}` behaves like a fresh install.
+    focusMode: source.focusMode !== false,
     hudEndpoint,
     hudTimeoutMs: Number.isFinite(source.hudTimeoutMs) ? Math.max(50, source.hudTimeoutMs) : DEFAULTS.hudTimeoutMs,
     maxSessions: Number.isFinite(source.maxSessions) ? Math.max(1, Math.floor(source.maxSessions)) : DEFAULTS.maxSessions,
@@ -134,20 +141,26 @@ export function apply(ctx, config) {
     if (options.hudEndpoint !== '') {
       const external = await fetchHudSnapshot(options.hudEndpoint, sessionId, { timeoutMs: options.hudTimeoutMs });
       if (external !== undefined) {
-        return { snapshot: external, meta: { sessionId, source: 'hud', taskText: '' } };
+        return { snapshot: external, meta: { sessionId, source: 'hud', taskText: '', focusMode: options.focusMode } };
       }
     }
     const children = await childrenOf(sessionId);
     return {
       snapshot: collector.snapshotFor(sessionId, { children }),
-      meta: { sessionId, source: 'core', taskText: collector.taskTextOf(sessionId) },
+      meta: {
+        sessionId,
+        source: 'core',
+        taskText: collector.taskTextOf(sessionId),
+        // Rides in `meta`, not the snapshot: the frozen schema forbids extra keys.
+        focusMode: options.focusMode,
+      },
     };
   }
 
   const handler = async request => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     if (url.pathname === PING_ROUTE) {
-      return jsonResponse({ ok: true, version: SNAPSHOT_VERSION, route: ROUTE });
+      return jsonResponse({ ok: true, version: SNAPSHOT_VERSION, route: ROUTE, focusMode: options.focusMode });
     }
     const sessionId = url.searchParams.get('session');
     if (sessionId === null || sessionId === '') {

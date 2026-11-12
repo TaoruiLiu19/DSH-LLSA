@@ -16,6 +16,7 @@ import {
   capsuleOf,
   centerText,
   createView,
+  focusGate,
   foldSnapshot,
   nextFocus,
   shortenTask,
@@ -252,6 +253,15 @@ test('a session switch resets the field', () => {
   assert.equal(view.materials.size, 0);
   assert.equal(view.cursor, 0);
   assert.equal(view.taskId, null);
+});
+
+test('the field is gated by the setting and the session shortcut', () => {
+  assert.equal(focusGate(true, false), true, 'setting on, no override');
+  assert.equal(focusGate(undefined, false), true, 'an absent setting means on');
+  assert.equal(focusGate(null, false), true);
+  assert.equal(focusGate(false, false), false, 'the saved setting wins');
+  assert.equal(focusGate(true, true), false, 'the shortcut silences without saving');
+  assert.equal(focusGate(false, true), false);
 });
 
 test('a task first seen while it already waits for an answer still opens', () => {

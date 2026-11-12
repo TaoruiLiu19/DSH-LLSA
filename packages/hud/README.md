@@ -70,22 +70,29 @@ blank screen as "nothing is happening".
 
 ## Configuration
 
-All keys are optional; the loader row's `config` is read as plain JSON.
+The plugin exports a `Config` schema, so its options appear as a form in the
+**plugin panel** (Plugin Manager → this plugin). That is the native home for a
+plugin's own settings: it travels with the plugin, survives upgrades, and does not
+depend on the host's settings implementation.
 
-```yaml
-- id: hud
-  name: '@dsh-llsa/hud'
-  config:
-    # Optional orchestrator endpoint that already speaks hud-v1. When it answers
-    # with a valid snapshot the plugin passes it through untouched; when it does
-    # not (absent, slow, malformed) the core-event source takes over.
-    hudEndpoint: 'http://127.0.0.1:3080/collab/api/runs/{session}/hud'
-    hudTimeoutMs: 900
-    maxSessions: 32
-    childrenRefreshMs: 1200
-```
+| Key | Default | Meaning |
+|---|---|---|
+| `focusMode` | `true` | The field itself: while a task runs, the conversation is blurred and the ring HUD is shown. Turn it off to keep the plugin installed but silent — no scrim, no capsule, no hint. |
+| `hudEndpoint` | `''` | Optional orchestrator endpoint that already speaks hud-v1. When it answers with a valid snapshot the plugin passes it through untouched; when it does not (absent, slow, malformed) the core-event source takes over. |
+| `hudTimeoutMs` | `900` | Timeout for that endpoint before falling back. |
+| `maxSessions` | `32` | How many sessions the collector keeps warm. |
+| `childrenRefreshMs` | `1200` | How long a `listChildren` answer is reused. |
 
-`{session}` is replaced with the URL-encoded session id.
+`{session}` in `hudEndpoint` is replaced with the URL-encoded session id.
+
+`focusMode` is opt-out: an absent key means on, so a hand-written `config: {}`
+behaves like a fresh install. Changing it restarts the plugin (it is an ordinary
+field), so the picture can blink once.
+
+**Session-only override.** `Ctrl/Cmd+Shift+H` silences the field for the current
+page without touching the saved setting; press it again to bring the field back.
+A dismissed field (Esc) stays dismissed, and a question never reopens it behind
+your back.
 
 ## Contract
 
