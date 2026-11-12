@@ -17,6 +17,7 @@ import {
   centerText,
   createView,
   focusGate,
+  isStaleAnswer,
   foldSnapshot,
   nextFocus,
   shortenTask,
@@ -253,6 +254,36 @@ test('a session switch resets the field', () => {
   assert.equal(view.materials.size, 0);
   assert.equal(view.cursor, 0);
   assert.equal(view.taskId, null);
+});
+
+test('a stale answer for another session is dropped', () => {
+  assert.equal(isStaleAnswer('a', 'a', 'a'), false, 'the current session answers itself');
+  assert.equal(isStaleAnswer('a', 'b', 'a'), true, 'the page already moved to b');
+  assert.equal(isStaleAnswer('a', 'a', 'b'), true, 'the body names another session');
+  assert.equal(isStaleAnswer('a', 'a', undefined), false, 'a body without meta still applies');
+});
+
+test('an agent the snapshot no longer declares leaves the view', () => {
+  const view = createView({ sessionId: 's', now: 0 });
+  const running = {
+    seq: 2,
+    now: '2026-11-12T03:20:02Z',
+    agents: [
+      { ...agent('root', 'running', { role: 'root' }), parentId: null },
+      { ...agent('child', 'running', { role: 'worker', parentId: 'root' }) },
+    ],
+    events: [],
+  };
+  foldSnapshot(view, running, 0, { sessionId: 's' });
+  assert.equal(view.agents.size, 2, 'both agents are in the run');
+  assert.equal(aggregateState(view.agents), 'running');
+
+  // The child finished and the projection dropped it: the field must not keep it.
+  const retired = { ...running, seq: 3, agents: [{ ...agent('root', 'done', { role: 'root' }), parentId: null }] };
+  foldSnapshot(view, retired, 0, { sessionId: 's' });
+  assert.equal(view.agents.size, 1, 'the retired child is gone');
+  assert.equal(view.agents.has('child'), false);
+  assert.equal(aggregateState(view.agents), 'done', 'so the run can finish');
 });
 
 test('the field is gated by the setting and the session shortcut', () => {

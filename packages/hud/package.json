@@ -1,6 +1,6 @@
 {
   "name": "@dsh-llsa/hud",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "Read-only HUD for DSH agent activity: a one-glance field of conclusions, materials and sub-agents, with a focus mode over the conversation.",

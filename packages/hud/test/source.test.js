@@ -94,7 +94,7 @@ test('an aborted turn is a cancellation: interrupted tools and idle', () => {
   assert.equal(interrupted.reason, 'interrupted');
 });
 
-test('a question raises and resolves attention with the tool pair', () => {
+test('a question raises attention, and a user message resolves it', () => {
   const collector = createCollector();
   collector.observeEvent('s', { type: 'turn/start', seq: 1, time: Date.parse('2026-11-12T03:20:00Z'), data: { turn: 1 } });
   collector.observeEvent('s', { type: 'tool/call', seq: 2, time: Date.parse('2026-11-12T03:20:01Z'), data: { callId: 'ask1', name: 'ask_user_question' } });
@@ -105,10 +105,85 @@ test('a question raises and resolves attention with the tool pair', () => {
   assert.ok(raised !== undefined);
   assert.equal(raised.tool, null);
 
-  collector.observeEvent('s', { type: 'tool/result', seq: 3, time: Date.parse('2026-11-12T03:20:02Z'), data: { message: { toolCallId: 'ask1' } } });
+  // The answer is steered in as a user message: that is what closes the question.
+  collector.observeEvent('s', { type: 'user/message', seq: 3, time: Date.parse('2026-11-12T03:20:02Z'), data: { message: { content: [{ type: 'text', text: '用方案 A' }] } } });
   const answered = collector.snapshotFor('s');
   assert.equal(answered.agents[0].state, 'running');
   assert.ok(answered.events.some(event => event.kind === 'attention.resolved'));
+});
+
+test('a pending result is not an answer: the question stays open', () => {
+  // `askTimed` resolves with `{ pending: true }` when the wait times out and the
+  // Client never claimed the card. The question is still answerable, so the tool
+  // return must not clear the yellow light — and the turn ending must not turn
+  // the field green either.
+  const collector = createCollector();
+  collector.observeEvent('s', { type: 'turn/start', seq: 1, time: Date.parse('2026-11-12T03:20:00Z'), data: { turn: 1 } });
+  collector.observeEvent('s', { type: 'tool/call', seq: 2, time: Date.parse('2026-11-12T03:20:01Z'), data: { callId: 'ask1', name: 'ask_user_question' } });
+  collector.observeEvent('s', { type: 'tool/result', seq: 3, time: Date.parse('2026-11-12T03:20:30Z'), data: { message: { toolCallId: 'ask1', content: [{ type: 'text', text: '{"pending":true}' }] } } });
+  const afterResult = collector.snapshotFor('s');
+  assert.equal(afterResult.agents[0].state, 'waiting-human', 'a timed-out wait is still a question');
+  assert.equal(afterResult.events.filter(event => event.kind === 'attention.raised').length, 1);
+  assert.equal(afterResult.events.some(event => event.kind === 'attention.resolved'), false);
+
+  collector.observeEvent('s', { type: 'turn/end', seq: 4, time: Date.parse('2026-11-12T03:20:31Z'), data: { reason: { kind: 'completed' } } });
+  const afterTurn = collector.snapshotFor('s');
+  assertSnapshotShape(afterTurn);
+  assert.equal(afterTurn.agents[0].state, 'waiting-human', 'the open question outranks the completion');
+});
+
+test('a missed resolution is repaired from the session log', () => {
+  // The event window dropped the user message that answered the question; the
+  // log still knows the answer came after the ask, so `waiting` must disappear.
+  const answeredSession = {
+    deriveMessages: () => ([
+      { role: 'user', content: [{ type: 'text', text: '开始' }] },
+      { role: 'assistant', content: [{ type: 'tool-call', id: 'ask1', name: 'ask_user_question' }] },
+      { role: 'user', content: [{ type: 'text', text: '用方案 A' }] },
+    ]),
+  };
+  const collector = createCollector();
+  collector.observeEvent('s', { type: 'turn/start', seq: 1, time: Date.parse('2026-11-12T03:20:00Z'), data: { turn: 1 } }, answeredSession);
+  collector.observeEvent('s', { type: 'tool/call', seq: 2, time: Date.parse('2026-11-12T03:20:01Z'), data: { callId: 'ask1', name: 'ask_user_question' } }, answeredSession);
+  const repaired = collector.snapshotFor('s');
+  assert.equal(repaired.agents[0].state, 'running', 'the log says the question was answered');
+
+  // The mirror case: the raising event was missed, but the log still has an
+  // unanswered ask, so the field must show the question.
+  const openSession = {
+    deriveMessages: () => ([
+      { role: 'user', content: [{ type: 'text', text: '开始' }] },
+      { role: 'assistant', content: [{ type: 'tool-call', id: 'ask2', name: 'ask_user_question' }] },
+    ]),
+  };
+  const other = createCollector();
+  other.observeEvent('s', { type: 'turn/start', seq: 1, time: Date.parse('2026-11-12T03:21:00Z'), data: { turn: 1 } }, openSession);
+  const raised = other.snapshotFor('s');
+  assertSnapshotShape(raised);
+  assert.equal(raised.agents[0].state, 'waiting-human', 'the log says a question is open');
+});
+
+test('a log in an unknown shape never clears a real question', () => {
+  // If the projection does not expose tool-call blocks this build recognises, the
+  // reconciler must stay silent: "no ask found" must not be read as "answered".
+  const opaque = { deriveMessages: () => ([{ role: 'user', content: [{ type: 'text', text: '开始' }] }]) };
+  const collector = createCollector();
+  collector.observeEvent('s', { type: 'turn/start', seq: 1, time: Date.parse('2026-11-12T03:20:00Z'), data: { turn: 1 } }, opaque);
+  collector.observeEvent('s', { type: 'tool/call', seq: 2, time: Date.parse('2026-11-12T03:20:01Z'), data: { callId: 'ask1', name: 'ask_user_question' } }, opaque);
+  const snapshot = collector.snapshotFor('s');
+  assert.equal(snapshot.agents[0].state, 'waiting-human', 'an unreadable log keeps the event-derived answer');
+});
+
+test('child labels are sanitised and capped like every other label', () => {
+  const collector = createCollector();
+  const long = 'E:\\work\\projects\\very\\deep\\path\\that\\goes\\on\\and\\on\\assignment.md';
+  collector.noteChildren('s', [{ id: 's/child', label: long }]);
+  const snapshot = collector.snapshotFor('s', { children: [{ id: 's/child', label: long }] });
+  assertSnapshotShape(snapshot);
+  const child = snapshot.agents.find(agent => agent.id === 's/child');
+  assert.ok(child !== undefined);
+  assert.equal([...child.label].length <= 12, true, `label is capped: ${child.label}`);
+  assert.equal(child.label.includes('\\'), false, 'no path survives the sanitiser');
 });
 
 test('a tool call that arrives without an open turn adopts the turn', () => {

@@ -58,9 +58,22 @@ blurred. A field the user dismissed stays dismissed; a question never reopens it
 behind the user's back. (The task document's §4.6 closed the field on a question;
 that rule is reversed here at the product owner's request.)
 
+What counts as "still asking" is decided by the session **log**, not by the tool's
+return value: the host documents that an answer arrives as a user message, and that
+message is what closes the question. A timed-out wait returns
+`{ pending: true }` and stays open — the field keeps 等你确认, including after the
+turn ends. Every snapshot re-derives this, so a dropped resolution event is
+repaired rather than leaving the yellow light stuck.
+
 **Stalled (§2.1).** `stalled` is stamped by whoever produced the snapshot; the
 field only reports it — a dashed halo on the seat and a `停顿中` sub-line. The
 client never derives it from silence.
+
+**Agents and labels.** The snapshot is the whole truth about who is in the run: an
+agent missing from it leaves the view, so a retired worker cannot hold the field in
+`running`. Every label — root, worker, child — goes through the same sanitiser and
+the same 12-code-point cap; a child's raw assignment title or filesystem path never
+reaches the wire.
 
 **Late start.** Installing, restarting or hot-reloading the plugin mid-run adopts
 the current turn from the first tool call it sees, so the field appears

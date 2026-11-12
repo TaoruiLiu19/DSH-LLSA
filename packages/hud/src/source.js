@@ -81,6 +81,10 @@ function createSessionState(id) {
     agents: new Map(),
     taskText: '',
     lastActivity: Date.now(),
+    /** Last observed `Session`, used to re-derive the pending question. */
+    session: null,
+    /** Set when the log may have moved; cleared once attention is reconciled. */
+    dirty: false,
   };
 }
 
@@ -167,6 +171,19 @@ export function createCollector(options = {}) {
   }
 
   /**
+   * Resolve every open question and move the agent back to work.
+   *
+   * Clearing the set alone would leave `state` on `waiting-human`: the state is
+   * only recomputed by `change`, so an answered question would keep the yellow
+   * light until the next turn boundary.
+   */
+  function settleAttention(state, agent, at, reason) {
+    if (agent.attention.size === 0) return;
+    clearAttention(state, agent, at, reason);
+    change(state, agent, agent.turn === null ? 'idle' : 'running', 'confirmation_resolved', at);
+  }
+
+  /**
    * Seed the task line from the session log.
    *
    * A plugin activated mid-turn never sees the `user/message` that started it, so
@@ -199,6 +216,10 @@ export function createCollector(options = {}) {
   function observeEvent(sessionId, event, session) {
     if (event === null || typeof event !== 'object') return;
     const state = stateFor(sessionId);
+    // Keep the log handle: the pending question is derived from it, not from the
+    // tool's return value, and it is the same source the host projection uses.
+    if (session !== null && session !== undefined) state.session = session;
+    state.dirty = true;
     seedFromSession(state, session);
     const data = event.data !== null && typeof event.data === 'object' ? event.data : {};
     const at = Number.isFinite(event.time) ? event.time : Date.now();
@@ -210,6 +231,9 @@ export function createCollector(options = {}) {
         if (state.taskText !== '') {
           agent.label = hudLabel({ assignmentTitle: state.taskText, role: 'root' });
         }
+        // The answer to a question arrives as a user message: that is the record
+        // which closes it, not the tool's return value.
+        settleAttention(state, agent, at, 'answered');
         break;
       }
       case 'turn/start': {
@@ -240,8 +264,9 @@ export function createCollector(options = {}) {
         agent.tools.set(callId, name);
         activity(state, agent, 'tool.start', at, { tool: name });
         if (name === 'ask_user_question') {
-          // The question tool's own call/result pair is the only read-only
-          // evidence of "waiting for the human" — its presence, not its output.
+          // Raise on the call only. The result is *not* evidence of an answer: a
+          // timed-out wait returns `{ pending: true }` and the question stays
+          // answerable, so resolving on the result is what lost the yellow light.
           const attentionId = `question:${callId}`;
           if (!agent.attention.has(attentionId)) {
             agent.attention.add(attentionId);
@@ -259,11 +284,10 @@ export function createCollector(options = {}) {
         agent.tools.delete(callId);
         activity(state, agent, 'tool.end', at, { tool: name });
         if (name === 'ask_user_question') {
-          const attentionId = `question:${callId}`;
-          if (agent.attention.delete(attentionId)) {
-            activity(state, agent, 'attention.resolved', at);
-            change(state, agent, agent.attention.size > 0 ? 'waiting-human' : (agent.turn !== null ? 'running' : 'idle'), 'confirmation_resolved', at);
-          }
+          // The call ended, but "ended" is not "answered": the result is either a
+          // real answer (which then arrives as a user message) or `pending: true`.
+          // Reconciliation against the log decides; never the return value.
+          state.dirty = true;
         }
         break;
       }
@@ -304,6 +328,73 @@ export function createCollector(options = {}) {
     }
   }
 
+  /**
+   * The question that is still open in the log, or `undefined` when the log
+   * cannot be read.
+   *
+   * Authoritative rule from the host contract: an answer is steered into the
+   * agent as a **user message**, and that message is the record that closes the
+   * question. So the log decides: the last ask call after the last user message
+   * is still waiting. A timed-out call returns `{ pending: true }` — the question
+   * stays answerable, so it must stay open here too. The tool's own output is
+   * never inspected.
+   */
+  function openQuestionFromLog(session) {
+    if (session === null || session === undefined || typeof session.deriveMessages !== 'function') return undefined;
+    let open = null;
+    let sawToolCall = false;
+    try {
+      const messages = session.deriveMessages();
+      if (!Array.isArray(messages)) return undefined;
+      for (const message of messages) {
+        if (message === null || typeof message !== 'object') continue;
+        if (message.role === 'user') {
+          open = null;
+          continue;
+        }
+        const blocks = Array.isArray(message.content) ? message.content : [];
+        for (const block of blocks) {
+          if (block === null || typeof block !== 'object') continue;
+          const kind = String(block.type ?? block.kind ?? '');
+          if (kind !== 'tool-call' && kind !== 'tool_call') continue;
+          sawToolCall = true;
+          const name = block.name ?? block.toolName;
+          if (name !== 'ask_user_question') continue;
+          const callId = block.id ?? block.callId ?? block.toolCallId;
+          open = callId === undefined ? 'question:unknown' : `question:${String(callId)}`;
+        }
+      }
+    } catch {
+      return undefined;
+    }
+    // No tool-call block anywhere means the projection uses a shape this build
+    // does not know: reporting "answered" would clear a real question, so report
+    // "unknown" and let the event-derived set stand.
+    if (!sawToolCall) return undefined;
+    return open;
+  }
+
+  /**
+   * Rebuild the attention set from the log.
+   *
+   * Every snapshot runs this when the log moved, so a dropped resolution event (a
+   * gap in the event window) cannot pin "waiting for the human" forever, and a
+   * pending-result question cannot be cleared by its own return value.
+   */
+  function reconcileAttention(state, agent, at) {
+    if (agent === null || agent === undefined) return;
+    const open = openQuestionFromLog(state.session);
+    if (open === undefined) return;
+    if (open === null) {
+      settleAttention(state, agent, at, 'answered');
+      return;
+    }
+    if (agent.attention.has(open)) return;
+    agent.attention.add(open);
+    activity(state, agent, 'attention.raised', at);
+    change(state, agent, 'waiting-human', 'confirmation_pending', at);
+  }
+
   /** Published sub-agents join the run as worker agents with their own states. */
   function noteChildren(sessionId, children) {
     const state = stateFor(sessionId);
@@ -311,7 +402,10 @@ export function createCollector(options = {}) {
       const id = String(child.id);
       const childState = sessions.get(id);
       const childAgent = childState === undefined ? undefined : childState.agents.get(id);
-      const label = typeof child.label === 'string' && child.label !== '' ? child.label : hudLabel({ role: 'worker' });
+      // A child's raw label can be an assignment title or a filesystem path; it
+      // gets the same sanitiser and 12-code-point cap as every other label, or it
+      // would escape the contract's `label` budget.
+      const label = hudLabel({ assignmentTitle: typeof child.label === 'string' ? child.label : '', role: 'worker' });
       return { id, label, state: childAgent === undefined ? 'running' : childAgent.state };
     });
   }
@@ -321,6 +415,15 @@ export function createCollector(options = {}) {
     const state = sessions.get(String(sessionId));
     const now = Number.isFinite(options2.now) ? options2.now : Date.now();
     const selfId = String(sessionId);
+    if (state !== undefined && state.dirty === true && now - (state.lastReconcile ?? 0) >= 300) {
+      // Recompute "waiting for the human" from the log before answering, so a
+      // missed resolution event cannot leave the field stuck on 等你确认. Capped
+      // to a few reads per second: the projection is a full pass over the log.
+      const root = state.agents.get(selfId);
+      reconcileAttention(state, root, now);
+      state.dirty = false;
+      state.lastReconcile = now;
+    }
     const agents = [];
     if (state !== undefined) {
       for (const agent of state.agents.values()) {

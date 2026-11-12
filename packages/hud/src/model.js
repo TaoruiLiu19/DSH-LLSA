@@ -289,8 +289,10 @@ function applyEvent(view, event, options) {
 /** Server-declared agent data is authoritative and always applied. */
 function syncAgents(view, snapshot, now) {
   const agents = Array.isArray(snapshot.agents) ? snapshot.agents : [];
+  const seen = new Set();
   for (const agent of agents) {
     if (agent === null || typeof agent !== 'object' || agent.id === undefined) continue;
+    seen.add(String(agent.id));
     const node = ensureAgent(view, String(agent.id), agent.label, agent.role);
     if (agent.parentId !== undefined) node.parentId = agent.parentId === null ? null : String(agent.parentId);
     node.stalled = agent.stalled === true;
@@ -303,6 +305,11 @@ function syncAgents(view, snapshot, now) {
     } else if (node.lastAt === 0) {
       node.lastAt = now;
     }
+  }
+  // The snapshot is the whole truth about who is in the run: a retired child that
+  // is gone from it must stop holding the field in `running` forever.
+  for (const id of [...view.agents.keys()]) {
+    if (!seen.has(id)) view.agents.delete(id);
   }
 }
 
@@ -578,6 +585,18 @@ export function nextFocus(focus, view) {
     return { taskId, active: false, dismissedTaskId: focus.dismissedTaskId, state, reason: 'dismissed' };
   }
   return { taskId, active: focus.active || state === 'running', dismissedTaskId: focus.dismissedTaskId, state, reason: 'same-task' };
+}
+
+/**
+ * Whether a snapshot answer belongs to a session the page already left.
+ *
+ * Switching from A to B while A's request is in flight would otherwise paint A's
+ * run over B; the answer is dropped instead of folded.
+ */
+export function isStaleAnswer(requested, current, answered) {
+  if (requested !== current) return true;
+  if (answered === undefined || answered === null) return false;
+  return String(answered) !== String(requested);
 }
 
 /**

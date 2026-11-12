@@ -12,7 +12,7 @@
  * The half is read-only by construction: it polls one JSON route and draws.
  * There is no write path, no tool, and no session event (§6).
  */
-import { createView, focusGate, foldSnapshot, nextFocus, stepLifecycle } from './model.js';
+import { createView, focusGate, foldSnapshot, isStaleAnswer, nextFocus, stepLifecycle } from './model.js';
 import { createFieldCanvas } from './render.js';
 import { STYLES, createCapsule, createFocusLayer, createOfflinePill, createStageHook } from './focus.js';
 
@@ -160,17 +160,27 @@ export function applyClient(ctx, React) {
           cache: 'no-store',
         });
         if (!response.ok) {
-          store.offline();
+          // A late failure for a session the page already left must not mark the
+          // current one offline.
+          if (getSessionId() === sessionId) store.offline();
         } else {
           const body = await response.json();
-          if (body !== null && typeof body === 'object' && body.ok === true && body.snapshot !== null && typeof body.snapshot === 'object') {
+          // The page may have switched sessions while this request was in flight:
+          // dropping the answer is the only way A's state can never paint over B.
+          const current = getSessionId();
+          const answered = body !== null && typeof body === 'object' && body.meta !== null && typeof body.meta === 'object'
+            ? body.meta.sessionId
+            : undefined;
+          if (isStaleAnswer(sessionId, current, answered)) {
+            // nothing to apply
+          } else if (body.ok === true && body.snapshot !== null && typeof body.snapshot === 'object') {
             store.fold(body.snapshot, globalThis.performance?.now?.() ?? Date.now(), body.meta ?? {});
           } else {
             store.offline();
           }
         }
       } catch {
-        store.offline();
+        if (getSessionId() === sessionId) store.offline();
       } finally {
         inFlight = false;
       }

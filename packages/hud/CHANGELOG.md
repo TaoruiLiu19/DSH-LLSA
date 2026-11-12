@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.1
+
+State fixes found in review. All five are covered by regression tests.
+
+- **A timed-out question is not an answer.** `askTimed` resolves with
+  `{ pending: true, callId }` when the wait expires; that used to clear the yellow
+  light, and the turn end then showed SUCCESS. Attention now closes only on the
+  record the host documents for it — the **user message** whose arrival answers the
+  question — so a pending question keeps 等你确认 even after the turn ends, and the
+  tool's own output is never inspected.
+- **A missed resolution cannot pin the field.** Every snapshot re-derives the open
+  question from the session log (`deriveMessages`), so a gap in the event window is
+  repaired instead of leaving 等你确认 on a running agent. A projection this build
+  cannot read reports "unknown" and leaves the event-derived set alone.
+- **A late answer for another session is dropped.** The poller compares the
+  session it asked about with the session the page shows (and with the body's own
+  `meta.sessionId`) before folding, so switching A→B never paints A's run over B.
+- **A retired child leaves the view.** Agents absent from the newest snapshot are
+  removed, so a finished worker cannot hold the run in `running` forever.
+- **Child labels are sanitised.** A child's label gets the same path/code stripping
+  and 12-code-point cap as every other label instead of being passed through raw.
+
 ## 0.3.0
 
 - The plugin exports a `Config` schema, so `focusMode` (and the existing tuning
