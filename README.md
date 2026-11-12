@@ -25,7 +25,7 @@
 
 适合从**资料齐全、范围明确、结果可核对**的任务开始：字段提取、规则核验、材料对比，或让多个子任务分别检查同一份输入。
 
-> **当前版本：0.4.1。** 快速开始面向本机单用户使用。工作台与记录保存在本机，推理使用你配置的模型 API；调用费用由使用者承担。
+> **当前版本：0.4.2。** 快速开始面向本机单用户使用。工作台与记录保存在本机，推理使用你配置的模型 API；调用费用由使用者承担。
 
 ## 快速开始
 
@@ -52,7 +52,7 @@ npm start
 <details>
 <summary><strong>使用构建包：跳过源码构建</strong></summary>
 
-在 [Actions](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml) 中打开一次成功运行，下载对应系统的构建产物 ZIP（需要登录 GitHub）。解压后找到 `dsh-llsa-0.4.1.tgz`，按同目录的 `SHA256SUMS` 核对，再解压并进入 `package/`：
+在 [Actions](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml) 中打开一次成功运行，下载对应系统的构建产物 ZIP（需要登录 GitHub）。解压后找到 `dsh-llsa-0.4.2.tgz`，按同目录的 `SHA256SUMS` 核对，再解压并进入 `package/`：
 
 ```sh
 npm ci
@@ -104,10 +104,14 @@ npm start
 | 主 Agent 调度与子 Agent 分工 | 并非所有小任务都值得多 Agent 协作 |
 | 紧凑表示与结构化交付 | 不保证任意自然语言都能压缩，也不是保密加密 |
 | 可查询的步骤与原始记录 | 不提供模型内部隐藏推理的完整回放 |
+| 原生工单的输入引用与历史版本 | 子任务按引用读取完整资料；追加要求后，旧结果需要重新核对 |
+| 子任务提交后自动结束该轮 | 保留父 Agent 验收，失败或未完成的结果不能自动算作通过 |
 | 区分供应商回传、估算和未知的 token 记录 | 未知不等于零；统计不是账单 |
 | 纯 JSON 输出约束与关键值检查 | 格式校验不能替代事实与业务正确性验证 |
 
 实际节省程度取决于任务、模型、重试和输出长度，应使用相同任务的真实用量对比。本项目不承诺固定 token 降幅或正确率。
+
+**资料很长时怎么用？** 在任务里写清目标、约束和验收标准即可。接入原生工单的 worker 会获得可用的输入引用，无需反复把整段资料抄进委托参数。读取结果带有分页位置，长资料可以继续读取；查询过去的结果时，历史版本仍保留原文。`input:` 引用属于当前工单执行批次，不能复制到另一个任务使用。
 
 ## 使用帮助
 
@@ -154,9 +158,9 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 
 | 组件 | 版本 |
 |---|---|
-| DSH-LLSA 组合发行 / 启动器 | 0.4.1 |
-| `@dsh-llsa/collab` | 0.4.1 |
-| `@dsh-llsa/superagent` | 0.1.1 |
+| DSH-LLSA 组合发行 / 启动器 | 0.4.2 |
+| `@dsh-llsa/collab` | 0.4.2 |
+| `@dsh-llsa/superagent` | 0.4.2 |
 | DeepSeek Harness | 0.2.2-rc.1 |
 
 包通过本地构建与随包文件安装，保持 `private: true`；这些名称不是已在 npm 发布的承诺。快速开始会启动指定版本的 Harness，尚不支持对任意已有实例一条 `dsh plugin add` 命令完成全部配置。
@@ -195,3 +199,10 @@ npm run verify:kit
 <p align="center"><strong>Built on DeepSeek Harness · Connected by LeanLink</strong></p>
 
 基于 [DeepSeek Super-agent prototype](https://github.com/deepseek-ai/dsh-superagent-prototype) 与 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。采用 [MIT](LICENSE)，上游署名与派生说明见 [NOTICE](NOTICE)，版本变化见 [CHANGELOG](CHANGELOG.md)。本项目是独立扩展，不代表 DeepSeek 官方发布或背书。
+
+
+### 协作树与费用推演
+
+工作台新增父子 Agent 调用树，展示已记录的任务下发、结果回传和公开消息。点击连接可查看历史，并按连接调整压缩情景、费率、缓存命中及额外开销。已有阶段实验与情景预测分开展示。
+
+滑块只做预测，不修改实际压缩策略；默认费率是示例。未知用量不补零，减少 token 也可能增加费用。当前不保证任意任务的固定降幅，后续完整验证尚未完成。

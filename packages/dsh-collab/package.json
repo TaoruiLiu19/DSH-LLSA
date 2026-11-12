@@ -1,6 +1,6 @@
 {
   "name": "@dsh-llsa/collab",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "description": "DSH managed collaboration with adaptive compact messages and immutable step history",

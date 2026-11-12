@@ -4,6 +4,7 @@ import { randomUUID, createHash } from 'node:crypto'
 import type { DomainEvent, Engine, Ticket, WorkerReport } from '../core/index.ts'
 import { workerSessionId } from '../executor/dsh.ts'
 import type { Store } from './store.ts'
+import { captureTaskInput } from './input-snapshot.ts'
 
 export interface CollabRelay { id: string; text: string }
 export interface CollabReportEvent {
@@ -39,7 +40,6 @@ declare module '@deepseek-ai/cordis' { interface Context { orchestratorCollabBri
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const digest = (value:unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const inputVersion = (ticket:Ticket) => digest({origin:ticket.origin,inputs:ticket.inputs.map(input=>input.id),mandate:ticket.mandate});
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object') { for (const item of Object.values(value)) freeze(item); Object.freeze(value) }
   return value;
@@ -52,9 +52,9 @@ function bounded(value: number | undefined, fallback: number, max: number): numb
 
 /** Records original reports atomically with the existing relay effect, exposes stable history, and delegates operator control to Engine. */
 export class CollabBridge extends Service {
-  readonly apiVersion = 2;
+  readonly apiVersion = 3;
   readonly capabilities = Object.freeze({ durableReportEvents: true, reportProjection: true, stableReportRead: true,
-    operatorControl: true, sharedRelayTransaction: true, managedStartupBarrier: false, managedChildren: false });
+    operatorControl: true, sharedRelayTransaction: true, versionedTaskInput: true, managedStartupBarrier: false, managedChildren: false });
   private projector: CollabProjector | undefined;
   private lifecycle: CollabLifecycle | undefined;
   private routeEpoch = 0;
@@ -120,7 +120,7 @@ export class CollabBridge extends Service {
       const value = { reportId, ticketId: report.ticketId, assignmentId: report.assignmentId, accepted, reason, actorId: this.host.masterId };
       const prior = this.host.store.db.prepare('SELECT value FROM collab_bridge_reviews WHERE report_id=?').get(reportId);
       if (prior) { if (String(prior.value) !== JSON.stringify(value)) throw new Error('Review is immutable; request a new worker report'); return value; }
-      if(report.reviewContext && report.reviewContext.inputVersion!==inputVersion(ticket))throw new Error('Report predates current task inputs; request an updated report');
+      if(report.reviewContext && report.reviewContext.inputVersion!==this.inputSnapshot(ticket.id).version)throw new Error('Report predates current task inputs; request an updated report');
       if(accepted)this.beforeReport(ticket,{state:'ready'});
       this.host.store.db.prepare('INSERT INTO collab_bridge_reviews VALUES (?,?)').run(reportId, JSON.stringify(value));
       this.appendLifecycle({ kind: 'coordinator_review', ...value });
@@ -135,7 +135,7 @@ export class CollabBridge extends Service {
     const row = this.host.store.db.prepare('SELECT value FROM collab_bridge_events WHERE ticket_id=? ORDER BY seq DESC LIMIT 1').get(ticketId);
     const report = row && JSON.parse(String(row.value)) as CollabReportEvent | undefined;
     const review = report && this.host.store.db.prepare('SELECT value FROM collab_bridge_reviews WHERE report_id=?').get(report.id);
-    if (!report || report.assignmentId !== ticket?.assignments.at(-1)?.id || !review || !JSON.parse(String(review.value)).accepted || (report.reviewContext && ticket && report.reviewContext.inputVersion!==inputVersion(ticket)))
+    if (!report || report.assignmentId !== ticket?.assignments.at(-1)?.id || !review || !JSON.parse(String(review.value)).accepted || (report.reviewContext && ticket && report.reviewContext.inputVersion!==this.inputSnapshot(ticket.id).version))
       throw new Error('Review and accept the latest ready report before replying with a result');
   }
   validateReply(ticketId:string,text:string):void {
@@ -152,6 +152,13 @@ export class CollabBridge extends Service {
     const tickets = ticketId ? [this.host.store.tickets.get(ticketId)].filter((ticket): ticket is Ticket => !!ticket) : this.host.store.tickets.list();
     return { masterSessionId: this.host.masterId, tickets: tickets.map(ticket => ({ ticket: clone(ticket),
       workerSessionId: workerSessionId(ticket.id), assignmentId: ticket.assignments.at(-1)?.id ?? null })) };
+  }
+  /** Full, immutable input view for the current assignment. Never exposes delivery bookkeeping. */
+  inputSnapshot(ticketId: string, assignmentId?: string) {
+    this.active();
+    const ticket = this.host.store.tickets.get(ticketId);
+    if (!ticket || (assignmentId && ticket.assignments.at(-1)?.id !== assignmentId)) throw new Error('Unknown or stale input assignment');
+    return freeze(captureTaskInput(ticket, id => this.host.store.triggers.get(id)));
   }
   /** Only one synchronous projector owns future report representation. Existing durable effects are never rewritten. */
   registerProjection(projector: CollabProjector): () => void {
@@ -172,8 +179,8 @@ export class CollabBridge extends Service {
         createdAt: new Date().toISOString(), report: clone(report), read: `ticket/${ticket.id}/collab-report/${id}`,
         routeOwner: relay ? 'legacy' : 'internal', routeEpoch: this.routeEpoch,
         originalRelay: relay ? clone(relay) : null, deliveredRelay: relay ? clone(relay) : null };
-      if(this.lifecycle && report.state==='ready')event.reviewContext={version:1,inputVersion:inputVersion(ticket),
-        sources:ticket.origin.triggerIds.map(triggerId=>{const source=this.host.store.triggers.get(triggerId);return {read:`trigger/${triggerId}`,sha256:digest(source?.text??''),outputFormat:String(source?.meta.outputFormat??'text')};}),
+      if(this.lifecycle && report.state==='ready')event.reviewContext={version:1,inputVersion:this.inputSnapshot(ticket.id).version,
+        sources:(this.inputSnapshot(ticket.id).content.sources as import('../core/index.ts').Trigger[]).map(source=>({read:`trigger/${source.id}`,sha256:digest(source.text),outputFormat:String(source.meta.outputFormat??'text')})),
         children:clone(this.lifecycle.reviewState?.(ticket)??{available:false}),verificationScope:'Child acceptance is a coordinator assessment; independently compare this report with the original task and necessary evidence.'};
       if (relay && this.lifecycle) {
         const native = JSON.parse(relay.text) as Record<string, unknown>;

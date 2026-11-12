@@ -336,6 +336,7 @@ async function loadRuns() {
 }
 async function selectRun(id) {
   current = id;
+  LeanLinkFlow.render({run:{id},agents:[],events:[]});
   inspectionVersion++;
   clearArtifacts();
   notice("");
@@ -418,6 +419,7 @@ async function loadRun() {
     show("run-title", data.run?.title || "任务详情");
     show("run-data", data.run || {});
     renderUsage(data.usage);
+    LeanLinkFlow.render(data);
     renderCurrentJob();
     const items = data.workItems || [],
       agents = data.agents || [];
@@ -963,3 +965,5 @@ setInterval(() => {
     void refreshAll();
   }
 }, 4000);
+
+LeanLinkFlow.init();

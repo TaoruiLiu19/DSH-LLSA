@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, realpathSync, readFileSync, existsSync, lstatSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync, unlinkSync } from 'node:fs';
 import { resolve, join, relative, isAbsolute } from 'node:path';
+import { summarizeCosts } from './cost.js';
 
 const digest = (data) => createHash('sha256').update(data).digest('hex');
 const now = () => new Date().toISOString();
@@ -115,6 +116,11 @@ export class CollaborationStore {
   #event(id) { return parse(this.db.prepare('SELECT data FROM events WHERE id=?').get(id)); }
   /** @param {string} id */
   getEvent(id) { return this.#event(required(id, 'eventId')); }
+  /** @param {string} runId @param {string} kind */
+  eventsByKind(runId, kind) {
+    this.#run(runId);
+    return this.db.prepare("SELECT data FROM events WHERE run_id=? AND json_extract(data,'$.kind')=? ORDER BY run_seq").all(runId, kind).map(parse);
+  }
   #append(input) {
     const runId = required(input.runId, 'runId'); this.#run(runId);
     const id = required(input.id ?? input.eventId ?? randomUUID(), 'eventId');
@@ -295,6 +301,10 @@ export class CollaborationStore {
       }
     }
     this.db.prepare('INSERT INTO usage_calls(id,run_id,provider,account,provider_request_id,data) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_request_id=excluded.provider_request_id,data=excluded.data').run(id,data.runId,data.provider,data.account,data.providerRequestId,json(data)); return data;
+  }
+  /** Read-only derived view: a price estimate never overwrites account charges. */
+  costSummary(runId, price) {
+    return summarizeCosts(this.usageSummary(runId).usage, price);
   }
   usageSummary(runId) {
     this.#run(runId); const calls = this.db.prepare('SELECT data FROM usage_calls WHERE run_id=? ORDER BY rowid').all(runId).map(parse);

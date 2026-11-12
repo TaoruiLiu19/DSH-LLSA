@@ -1,6 +1,6 @@
 {
   "name": "@dsh-llsa/launcher",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -21,8 +21,8 @@
   },
   "peerDependencies": {
     "@deepseek-ai/dsh": "0.2.2-rc.1",
-    "@dsh-llsa/collab": "0.4.1",
-    "@dsh-llsa/superagent": "0.1.1"
+    "@dsh-llsa/collab": "0.4.2",
+    "@dsh-llsa/superagent": "0.4.2"
   },
   "devDependencies": {
     "@deepseek-ai/dsh": "0.2.2-rc.1",

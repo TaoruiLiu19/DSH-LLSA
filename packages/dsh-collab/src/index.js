@@ -19,6 +19,9 @@ import { TASK_TYPES } from "./encoding-policy.js";
 import { ToolEventIndex } from "./tool-event-index.js";
 import { LocalWorkspace } from "./local-workspace.js";
 import { connectSuperagent } from "./superagent-integration.js";
+import { InputDelivery } from "./input-delivery.js";
+import { concludeSubmitted } from "./turn-completion.js";
+import { readEvidencePage } from "./evidence-page.js";
 
 export const name = "dsh-collab";
 export const inject = [
@@ -191,6 +194,7 @@ export async function apply(ctx, rawConfig = {}) {
             state: w.state,
             dependsOn: w.dependsOn ?? [],
           })),
+          requiredAssessments: view.workItems.filter(w=>w.state==='submitted').map(w=>({workItemId:w.id,eventId:w.resultEventId,action:'Inspect the result, then collab_accept with an explicit acceptance or rejection. Polling will not perform this assessment.'})),
           usage: {
             calls: view.usage.calls,
             totalTokens: view.usage.totalTokens,
@@ -215,7 +219,7 @@ export async function apply(ctx, rawConfig = {}) {
           role: z
             .enum(["researcher", "reviewer", "implementer", "tester"])
             .default("researcher"),
-          dependsOn: z.array(z.string()).default([]),
+          dependsOn: z.array(z.string()).default([]).describe('These work items must be parent-accepted before this child starts. A reviewer needed to decide acceptance must instead read result inputRefs without that acceptance dependency.'),
           acceptance: z.array(z.string()).default([]),
           inputRefs: z.array(z.string()).default([]),
           workItemId: z.string().optional(),
@@ -227,6 +231,15 @@ export async function apply(ctx, rawConfig = {}) {
       (args) => manager.delegate(agent, args),
     );
     register(
+      "collab_delegate_task",
+      "Default child delegation for executing OR independently checking the currently requested result. Use reviewer for checking, implementer for file changes, researcher for extraction/analysis. Only the execution/checking portion is delegated; coordination and acceptance stay with the parent. All sources, corrections, constraints and output requirements are supplied by the host. No copied objective or acceptance checklist is needed. Use collab_delegate only for a distinct subset or different objective.",
+      z.object({
+        role: z.enum(["researcher", "reviewer", "implementer", "tester"]).default("researcher"),
+        retryOf: z.string().optional(),
+      }).strict(),
+      (args) => manager.delegate(agent, { ...args, wholeTask: true }),
+    );
+    register(
       "collab_compute",
       TOOL_DESCRIPTIONS.collab_compute,
       z.object({}).strict(),
@@ -235,8 +248,8 @@ export async function apply(ctx, rawConfig = {}) {
     register(
       "collab_complete_computation",
       TOOL_DESCRIPTIONS.collab_complete_computation,
-      z.object({ stepId: z.string().min(1).optional() }).strict(),
-      (args) => manager.completeComputation(agent.id, args),
+      z.object({ stepId: z.string().min(1).optional(), checkpointStepId: z.string().min(1).optional() }).strict(),
+      (args, execution) => concludeSubmitted(manager.completeComputation(agent.id, args), true, execution, !!manager.binding(agent.id)?.parentId),
     );
     register(
       "collab_publish",
@@ -253,7 +266,7 @@ export async function apply(ctx, rawConfig = {}) {
           receiptId: z.string().optional(),
         })
         .strict(),
-      (args) => manager.publish(agent.id, args),
+      (args, execution) => concludeSubmitted(manager.publish(agent.id, args), args.final, execution, !!manager.binding(agent.id)?.parentId),
     );
     register(
       "collab_send",
@@ -272,7 +285,7 @@ export async function apply(ctx, rawConfig = {}) {
       "collab_history",
       TOOL_DESCRIPTIONS.collab_history +
         (config.explicitEvidenceRefs
-          ? " For a delivered child result use its stepId, attemptId and eventId. workItemId is not a stepId. Read history only for missing detail; the delivered result is already available for review."
+          ? " For a delivered child result use its stepId, attemptId and eventId. workItemId is not a stepId. Read history for missing detail or an explicit historical verification request. When the user requires a history-tool check, inspect the returned saved record before acceptance even if the delivered result is available."
           : ""),
       z
         .object({
@@ -308,18 +321,8 @@ export async function apply(ctx, rawConfig = {}) {
         })
         .strict(),
       (args) => {
-        const { data, mediaType } = manager.readArtifact(
-          historyScope(manager, agent.id, args).runId,
-          args.ref,
-          { start: args.start, end: args.start + args.bytes },
-        );
-        return {
-          ref: args.ref,
-          start: args.start,
-          bytes: data.length,
-          mediaType,
-          text: data.toString("utf8"),
-        };
+        return readEvidencePage(manager, historyScope(manager, agent.id, args).runId,
+          args.ref, args.start, args.bytes);
       },
     );
     register(
@@ -356,7 +359,7 @@ export async function apply(ctx, rawConfig = {}) {
         order: 9998,
         interpolate: false,
         text: () =>
-          `For delegated tasks use collab_delegate, collab_send and collab_publish to preserve inspectable steps and compact messages. ${COMPACT_GUIDANCE}`,
+          `When collab_delegate_task is available, use it for the complete native user task; it binds full inputs without copying them. Use collab_delegate for a narrower subtask, collab_send for necessary messages, and collab_publish for recorded results. ${COMPACT_GUIDANCE}`,
       }),
     );
     disposers.push(
@@ -385,6 +388,14 @@ export async function apply(ctx, rawConfig = {}) {
   ctx.on("agent/error", ({ agent, error }) => {
     localWorkspace.onAgentError(agent, error);
   });
+  const inputDelivery = new InputDelivery(ctx.sessionPersistence);
+  ctx.on("agent/pre-step", async ({ agent }, next) => {
+    if (manager.bridge) ensureRun(agent);
+    superagentIntegration?.assertSession?.(agent.id);
+    const decision = await next();
+    superagentIntegration?.assertSession?.(agent.id);
+    return inputDelivery.admit(agent, decision, manager.binding(agent.id), manager.nativeInputs);
+  });
   ctx.on("agent/request", async ({ agent, signal }, next) => {
     if (manager.bridge) ensureRun(agent);
     await superagentIntegration?.beforeRequest?.(agent.id, signal);
@@ -396,6 +407,7 @@ export async function apply(ctx, rawConfig = {}) {
 
   ctx.on("session/event", (session, event) => {
     if (storeClosed) return;
+    inputDelivery.observe(session, event);
     backend.observeMessage(session, event);
     toolIndex.observe(session, event);
     const binding = manager.binding(session.id);

@@ -49,6 +49,23 @@
         </aside>
       </div>
       <div>
+
+        <section class="card flow-workspace" aria-labelledby="flow-heading">
+          <div class="bar spread"><div><div class="section-kicker">LEANLINK / COLLABORATION MAP</div><h2 id="flow-heading">看见每一次协作</h2><p class="note">父子 Agent 调用树 · 双向通信 · 压缩收益推演</p></div><span id="flow-mode" class="flow-pill">真实记录 · 情景估算</span></div>
+          <details class="flow-evidence"><summary>已有实验结果 <span>阶段证据 · 与下方情景预测分开</span></summary><p class="note">已完成的24题、三组72次运行；这是历史冻结构建的结果，不是当前任务或新版的效果保证。</p><div class="table-wrap"><table><thead><tr><th>方案</th><th>通过任务</th><th>任务费用 USD</th><th>主模型费用 USD</th></tr></thead><tbody><tr><td>原生 DS（本地适配）</td><td>13 / 24</td><td>≥ 0.078677460 · 10次未知</td><td>0.018725076</td></tr><tr><td>此前修正版</td><td>17 / 24</td><td>≥ 0.109991106 · 1次未知</td><td>0.022599678</td></tr><tr><td>该轮候选版</td><td>20 / 24</td><td>0.073177602 · 完整</td><td>0.017418048</td></tr></tbody></table></div><p class="note">该轮总费用至少下降6.99%，主模型费用下降6.98%。包含失败与重试，按统一非高峰费率估算，非账单核销。长表计算改善明显；代码修改当轮更贵。后续验证有质量失败且因余额不足中断，不能宣布最新版本通过完整验收。</p></details>
+          <div class="flow-metrics"><div><span>预计净减少 token</span><strong id="flow-tokens">待补充</strong><small>包含输入复用及额外开销</small></div><div><span id="flow-money-label">预计净节省费用 · USD</span><strong id="flow-money">待补充</strong><small id="flow-before-after">填写原始通信 token 后计算</small></div><div><span>估算覆盖</span><strong id="flow-coverage">0 / 0 条连接</strong><small id="flow-coverage-note">未知连接不按零计入</small></div></div>
+          <p class="note">情景预测 · 默认费率为示例，非实时账单；连线百分比是推演比例，不是质量保证。</p>
+          <div class="flow-layout"><div class="flow-map"><div class="bar spread flow-toolbar"><div class="flow-legend"><span>↓ 任务下发</span><span>↑ 结果回传</span></div><div class="bar"><button id="flow-demo" type="button">查看演示</button><button id="flow-live" type="button">回到真实任务</button></div></div><div class="flow-viewport" tabindex="0" aria-label="Agent 调用关系图，可水平滚动"><div id="flow-canvas"></div></div><p class="note flow-caption">连线箭头表示方向，不代表消息正在传输；虚线为显式消息关系。点击节点或连接查看详情。</p></div>
+          <aside class="flow-inspector"><h3>压缩推演</h3><p class="note">滑块只调整预测，不改变运行策略。</p><label>全局压缩比例 <b id="flow-strength-value">40%</b><input id="flow-strength" type="range" min="0" max="90" value="40" /></label>
+          <p id="flow-selection" class="flow-selection">点击连接，调整这条通信的压缩比例</p><div id="flow-edge-controls" hidden>
+          <div class="form-grid"><label>下发原始 token<input id="flow-down" type="number" min="0" placeholder="未知，请输入" /></label><label>回传原始 token<input id="flow-up" type="number" min="0" placeholder="未知，请输入" /></label></div>
+          <label>该连接压缩比例 <b id="flow-edge-strength-label">40%</b><input id="flow-edge-strength" type="range" min="0" max="90" value="40" /></label>
+          <details><summary>此连接费率覆盖（USD / 百万 token）</summary><label>未命中输入<input id="flow-edge-miss" type="number" min="0" step="any" /></label><label>命中输入<input id="flow-edge-hit" type="number" min="0" step="any" /></label><label>输出<input id="flow-edge-output" type="number" min="0" step="any" /></label><p class="note">同一连接双向使用相同费率。异构模型双向价格不同，需分别核算，本图不能替代账单。</p></details>
+          <p id="flow-edge-estimate" class="note"></p><button id="flow-reset-edge" type="button">恢复全局假设</button><p id="flow-observed" class="note"></p><h4>最近20条公开通信</h4><div id="flow-records"></div></div></aside></div>
+          <details class="flow-assumptions"><summary>价格、缓存与计算假设</summary><p class="note">默认是示例费率，非实时价格。请按所用模型修改。单次编码前后计数是本地估算，费用变化是反事实情景，均不是已验证的整任务省钱结果。</p>
+          <div class="flow-fields"><label>未命中输入 $ / 百万 token<input id="flow-miss-price" type="number" min="0" step="any" value="0.15" /></label><label>命中输入 $ / 百万 token<input id="flow-hit-price" type="number" min="0" step="any" value="0.003" /></label><label>输出 $ / 百万 token<input id="flow-output-price" type="number" min="0" step="any" value="0.6" /></label><label>每条连接额外输入 token<input id="flow-overhead" type="number" min="0" value="64" /></label><label>接收端上下文复用次数<input id="flow-reuse" type="number" min="1" value="1" /></label><label>原始输入缓存命中 %<input id="flow-hit-before" type="number" min="0" max="100" value="80" /></label><label>压缩后缓存命中 %<input id="flow-hit-after" type="number" min="0" max="100" value="80" /></label></div>
+          <label class="flow-check"><input id="flow-generated" type="checkbox" />假设模型直接生成精简消息，输出 token 同比例减少</label><p class="note">默认仅估算接收端输入收益，宿主事后编码不减少已生成的输出。费用 = 命中输入 × 命中单价 + 未命中输入 × 未命中单价 + 输出 × 输出单价；均按百万 token 换算。额外输入包括协议/解码说明等开销；不包含新增模型调用、重试、推理变化及未建模历史，负值表示增耗。压缩强度不等于质量保证。</p></details>
+        </section>
         <div class="columns">
           <section class="card">
             <div class="section-kicker">使用已有模型配置</div>

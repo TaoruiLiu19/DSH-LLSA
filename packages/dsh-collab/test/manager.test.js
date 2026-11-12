@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { CollaborationStore } from '../src/store.js';
 import { CollaborationManager } from '../src/manager.js';
+import { createHash } from 'node:crypto';
+import { NativeInputs } from '../src/native-inputs.js';
+import { connectSuperagent } from '../src/superagent-integration.js';
 
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function deferred(){let resolve,reject;const promise=new Promise((res,rej)=>{resolve=res;reject=rej;});return {promise,resolve,reject};}
@@ -37,6 +40,147 @@ function fixture(t,options={}){
   return {store,backend,manager,root,binding,stateDir};
 }
 const result={execution_status:'completed',outcome:'failed',facts:{passed:18,failed:1,exit_code:1},summary:'到期边界测试失败，尚未验证修复。',constraints:['不得部署'],evidence_refs:[]};
+
+function inputSnapshot(text) { return { text, version: createHash('sha256').update(text).digest('hex') }; }
+
+test('native worker can accept a submitted prerequisite while its dependant is queued', async t => {
+  const {manager,root,backend}=fixture(t);let lifecycle;
+  const ticket={id:'t1',title:'dependency',assignments:[{id:'a1'}]};
+  const bridge={compatibility(){return {apiVersion:2};},snapshot(){return {masterSessionId:'main',tickets:[{ticket,workerSessionId:root.id,assignmentId:'a1'}]};},registerLifecycle(value){lifecycle=value;return ()=>{};}};
+  const connection=connectSuperagent(manager,bridge);t.after(()=>connection.dispose());lifecycle.bindWorker(ticket,root.id);
+  lifecycle.bindWorker(ticket,root.id);
+  assert.equal(manager.store.eventsByKind('super-t1-a1','agent_relation').length,1);
+  assert.equal(manager.binding(root.id).parentId,null,'visual topology must not change execution authority');
+  const first=await manager.delegate(root,{objective:'produce prerequisite'});
+  const second=await manager.delegate(root,{objective:'check accepted prerequisite',dependsOn:[first.workItemId]});
+  manager.publish(first.childId,{result:{value:7},final:true});await backend.complete(first.childId);
+  await assert.rejects(manager.delegate(root,{objective:'premature dependent review',dependsOn:[first.workItemId]}),{code:'DEPENDENCY_ASSESSMENT_REQUIRED'});
+  assert.equal(backend.started.length,1);
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),1000);
+  try{await assert.doesNotReject(connection.beforeRequest(root.id,controller.signal));}finally{clearTimeout(timer);}
+  assert.equal(backend.started.length,1,'opening parent request must not bypass acceptance');
+  manager.accept(root.id,{workItemId:first.workItemId,accepted:true,reason:'checked source'});
+  await tick();await tick();assert.ok(backend.started.some(x=>x.childId===second.childId));
+});
+
+test('source tables remain exact, scoped and version-bound while host computation avoids copied rows', async t => {
+  const {manager,root,store,backend}=fixture(t);
+  const rows=Array.from({length:80},(_,i)=>({id:`00${i}`,amount:i,enabled:i%2===0}));
+  const raw=JSON.stringify(rows),source='Compute only enabled rows.\n'+raw+'\nDo not deploy.';
+  const snapshot=manager.syncNativeInput('r1',inputSnapshot(JSON.stringify({sources:[{id:'s1',text:source}]})));
+  assert.equal(snapshot.tables.length,1);
+  const table=snapshot.tables[0];
+  assert.equal(manager.readArtifact('r1',table.artifactRef).data.toString(),raw);
+  assert.equal(Buffer.from(source).subarray(table.startByte,table.endByte).toString(),raw);
+  assert.throws(()=>manager.readArtifact('other-run',table.artifactRef));
+  const computation={version:'1',inputRef:table.artifactRef,rowsPath:[],filter:[{field:'enabled',op:'eq',value:true}],operations:[{op:'count',as:'count',unit:'rows'},{op:'sum',field:'amount',as:'sum',unit:'integer'}],precision:'safe_integer',nullPolicy:'reject',deduplicate:false};
+  const work=await manager.delegate(root,{objective:'Count and sum enabled rows, preserve original source.',inputRefs:[table.artifactRef],computation});
+  const receipt=manager.completeComputation(work.childId,{stepId:'final',checkpointStepId:'checkpoint'});assert.ok(receipt);
+  const checkpoint=store.eventsByKind('r1','step_result').find(e=>e.stepId==='checkpoint');
+  assert.deepEqual(checkpoint.payload.result,{count:40,sum:1560});
+  assert.equal(checkpoint.payload.verification.status,'passed');
+  const final=store.getEvent(receipt.eventId);
+  assert.ok(final.parents.includes(checkpoint.id));
+  assert.deepEqual(final.payload.result,checkpoint.payload.result);
+  await backend.complete(work.childId);
+  const item=store.getWorkItems('r1').find(x=>x.id===work.workItemId);
+  assert.equal(item.state,'submitted');
+  assert.equal(item.inputVersion,snapshot.version);
+  assert.equal(manager.computationReview('r1',work.workItemId),null,'a host receipt does not replace parent acceptance');
+  manager.accept(root.id,{workItemId:work.workItemId,accepted:true,reason:'checked filter and source'});
+  const proof=manager.computationReview('r1',work.workItemId);
+  assert.deepEqual(proof.result,{count:40,sum:1560});
+  assert.equal(proof.source.inputVersion,snapshot.version);
+  assert.deepEqual(proof.contract.filter,computation.filter);
+  const acceptedItem=store.getWorkItems('r1').find(x=>x.id===work.workItemId);
+  store.saveWorkItem({...acceptedItem,computation:{...acceptedItem.computation,filter:[]}});
+  assert.throws(()=>manager.computationReview('r1',work.workItemId),/immutable computation contract/);
+  store.saveWorkItem(acceptedItem);
+  manager.syncNativeInput('r1',inputSnapshot(JSON.stringify({sources:[{id:'s1',text:'Replacement input; no table remains.'}]})));
+  assert.equal(manager.computationReview('r1',work.workItemId),null,'stale verification must not appear as current proof');
+  assert.throws(()=>manager.nativeInputs.resolve('r1',table.artifactRef,{currentOnly:true}),/Stale/);
+  assert.equal(manager.readArtifact('r1',table.artifactRef).data.toString(),raw);
+});
+
+test('whole-task shorthand binds full current input while narrow delegations remain explicit', async t => {
+  const { manager, root, store, backend } = fixture(t);
+  assert.equal(manager.isToolAvailable(root.id,'collab_delegate_task'),false);
+  await assert.rejects(manager.delegate(root,{wholeTask:true}),/requires a current native/);
+  await assert.rejects(manager.delegate(root,{}),/Objective required/);
+  const input=manager.syncNativeInput('r1',inputSnapshot('all sources, corrections and constraints'));
+  assert.equal(manager.isToolAvailable(root.id,'collab_delegate_task'),true);
+  await assert.rejects(manager.delegate(root,{wholeTask:true,objective:'ambiguous'}),/not both/);
+  const work=await manager.delegate(root,{wholeTask:true,role:'implementer'});
+  assert.equal(manager.isToolAvailable(work.childId,'collab_delegate_task'),false);
+  const item=store.getWorkItems('r1').find(x=>x.id===work.workItemId);
+  assert.deepEqual(item.inputRefs,[input.artifactRef]);assert.equal(item.inputVersion,input.version);
+  assert.match(backend.started[0].prompt,/later corrections and constraints/);
+  assert.match(backend.started[0].prompt,/exact requested output format/);
+  manager.publish(work.childId,{result:{done:true},final:true});await backend.complete(work.childId);
+  assert.equal(store.getWorkItems('r1')[0].state,'submitted');
+});
+
+test('native ready gate instructs retryOf for invalidated work and opens only after the new parent assessment', async t => {
+  const { manager, root, backend } = fixture(t);
+  let text='v1', lifecycle;
+  const ticket={id:'t1',title:'fixture',assignments:[{id:'a1'}]};
+  const bridge={compatibility(){return {apiVersion:3};},snapshot(){return {masterSessionId:'main',tickets:[{ticket,workerSessionId:root.id,assignmentId:'a1'}]};},inputSnapshot(){return inputSnapshot(text);},registerLifecycle(value){lifecycle=value;return ()=>{};}};
+  const connection=connectSuperagent(manager,bridge);t.after(()=>connection.dispose());
+  lifecycle.bindWorker(ticket,root.id);
+  const work=await manager.delegate(root,{objective:'verify current task'});
+  text='v2';connection.assertSession(root.id);
+  assert.throws(()=>lifecycle.beforeReady(ticket),/Retry each listed work item.*retryOf/);
+  await tick();await tick();
+  const retry=await manager.delegate(root,{objective:'verify corrected task',retryOf:work.workItemId});
+  manager.publish(retry.childId,{result:{version:2},final:true});await backend.complete(retry.childId);
+  assert.throws(()=>lifecycle.beforeReady(ticket),/Accept all/);
+  manager.accept(root.id,{workItemId:retry.workItemId,accepted:true,reason:'compared with v2'});
+  assert.doesNotThrow(()=>lifecycle.beforeReady(ticket));
+});
+
+test('native input handles survive reopening, reject wrong scope and preserve historical bytes', async t => {
+  const { manager, store, stateDir } = fixture(t);
+  const first = manager.syncNativeInput('r1', inputSnapshot('complete input 001 不得部署'));
+  assert.equal(manager.readArtifact('r1', first.handle).data.toString(), 'complete input 001 不得部署');
+  assert.equal(manager.syncNativeInput('r1', inputSnapshot('complete input 001 不得部署')).handle, first.handle);
+  const reopened = new CollaborationStore({ stateDir });
+  try { assert.deepEqual(new NativeInputs(reopened).current('r1'), first); } finally { reopened.close(); }
+  const second = manager.syncNativeInput('r1', inputSnapshot('complete input 002 用户更正'));
+  assert.notEqual(first.handle, second.handle);
+  assert.equal(manager.readArtifact('r1', first.handle).data.toString(), 'complete input 001 不得部署');
+  assert.throws(() => manager.nativeInputs.resolve('r1', first.handle, { currentOnly: true }), /Stale/);
+  manager.bindRoot('other', { runId: 'r2' });
+  assert.throws(() => manager.readArtifact('r2', first.handle), /Unknown input handle/);
+  manager.publish('other', { result: { guessedArtifact: first.artifactRef, nested: { artifactRef: first.artifactRef } } });
+  assert.throws(() => manager.readArtifact('r2', first.artifactRef), /not referenced by this run/);
+  assert.throws(() => manager.readArtifact('r1', 'trigger/one'), /native resource paths/);
+  assert.throws(() => manager.readArtifact('r1', 'input:invented'), /Unknown input/);
+  assert.equal(store.eventsByKind('r1', 'input_snapshot').length, 2);
+});
+
+test('new inputs invalidate accepted and running children; retries bind current input and late output cannot overwrite', async t => {
+  const { manager, store, root, backend } = fixture(t);
+  const first = manager.syncNativeInput('r1', inputSnapshot('v1'));
+  const done = await manager.delegate(root, { objective: 'verify', inputRefs: [first.handle] });
+  manager.publish(done.childId, { result: { version: 1 }, final: true }); await backend.complete(done.childId);
+  manager.accept(root.id, { workItemId: done.workItemId, accepted: true, reason: 'checked v1' });
+  const running = await manager.delegate(root, { objective: 'still working' });
+  const second = manager.syncNativeInput('r1', inputSnapshot('v2'));
+  assert.throws(() => manager.accept(root.id, { workItemId: done.workItemId, accepted: true, reason: 'reuse' }), /earlier task input.*collab_delegate with retryOf=/);
+  assert.ok(manager.nativeInputs.hint('r1').includes(JSON.stringify({ retryOf: done.workItemId })));
+  assert.throws(() => manager.publish(running.childId, { result: {}, final: true }), /Task inputs changed/);
+  await tick(); await tick();
+  const retry = await manager.delegate(root, { objective: 'verify latest', retryOf: done.workItemId });
+  assert.equal(store.getWorkItems('r1').find(x => x.id === done.workItemId).inputVersion, second.version);
+  assert.ok(store.getWorkItems('r1').find(x => x.id === done.workItemId).inputRefs.includes(second.artifactRef));
+  assert.throws(() => manager.publish(done.childId, { result: {}, final: true }), /Old activation/);
+  manager.publish(retry.childId, { result: { version: 2 }, final: true }); await backend.complete(retry.childId);
+  manager.accept(root.id, { workItemId: retry.workItemId, accepted: true, reason: 'checked v2' });
+  assert.equal(store.getWorkItems('r1').find(x => x.id === retry.workItemId).state, 'succeeded');
+  assert.equal(store.getWorkItems('r1').find(x => x.id === running.workItemId).state, 'rejected');
+  assert.equal(store.eventsByKind('r1', 'result_assessment').length, 2);
+  assert.equal(store.eventsByKind('r1', 'activation_settled').find(x => x.attemptId === running.attemptId).payload.stale, true);
+});
 
 test('explicit evidence relay supplies the unchanged original artifact and still requires parent assessment',async t=>{
  const {manager,root,backend,store}=fixture(t,{explicitEvidenceRefs:true});

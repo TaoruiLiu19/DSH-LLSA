@@ -6,7 +6,7 @@ export const PANEL_HTML = read("./panel/index.html").replace(
   "/* PANEL_STYLES */",
   () => read("./panel/styles.css"),
 );
-export const PANEL_SCRIPT = read("./panel/app.js");
+export const PANEL_SCRIPT = [read("./panel/flow-model.js"), read("./panel/flow-view.js"), read("./panel/app.js")].join("\n");
 export const TOOL_DESCRIPTIONS = Object.freeze(
   Object.fromEntries(
     [

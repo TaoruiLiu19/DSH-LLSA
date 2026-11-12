@@ -3,6 +3,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { ProtocolRegistry, selectEncoding, decodePacket, renderChinese, projectInput } from './protocol.js';
 import { VERIFICATION_SCOPE, normalizeContract, canonicalHash, executeComputation, resultMismatches } from './computation.js';
 import { normalizeQualityEvidence, MIN_EVIDENCE_SAMPLES, TASK_TYPES } from './encoding-policy.js';
+import { NativeInputs } from './native-inputs.js';
 
 /** @typedef {import('./types.js').JsonValue} JsonValue */
 /**
@@ -27,7 +28,7 @@ const fail = (code, message) => { throw Object.assign(new Error(message), { code
 const copy = value => JSON.parse(JSON.stringify(value));
 const ACTIVE = new Set(['starting', 'running', 'stopping']);
 const WRITERS = new Set(['implementer', 'tester']);
-export const COMPACT_GUIDANCE = 'Use collab_publish for public steps and final results. Preserve numbers, negations, errors, constraints and evidence. Use collab_send for managed communication. Send concise structured facts, not encrypted text. Query collab_history for a prior step. After final submission, finish with a short acknowledgement. Published facts are claims unless backed by tool evidence.';
+export const COMPACT_GUIDANCE = 'Use collab_publish for public steps and final results. Preserve numbers, negations, errors, constraints and evidence. Use collab_send for necessary managed communication. Send concise structured facts, not encrypted text. Query collab_history for a prior step. A successful final submission ends the child turn; do not send the same result again. Parent acceptance is still required. Published facts are claims unless backed by tool evidence.';
 
 /** Host orchestration; backend owns actual DSH handles. No model reasoning is fabricated. */
 export class CollaborationManager {
@@ -42,6 +43,7 @@ export class CollaborationManager {
     this.minEvidenceSamples = minEvidenceSamples;
     this.bindings = new Map(); this.handles = new Map(); this.pending = new Map(); this.finalEvents = new Map(); this.held = new Set(); this.reservations = new Map(); this.bridge = null; this.closing = false;
     this.toolPolicies = new Map();
+    this.nativeInputs = new NativeInputs(store);
     this.runLimits = new Map();
     this.starting = new Set(); this.settlements = new Map(); this.delivering = new Set(); this.closed = false; this.closePromise = null;
     if (!Number.isSafeInteger(closeTimeoutMs) || closeTimeoutMs < 1) fail('INVALID_ARGUMENT', 'closeTimeoutMs must be a positive safe integer');
@@ -105,6 +107,24 @@ export class CollaborationManager {
     this.bindings.set(sessionId, agent); return agent;
   }
   binding(sessionId) { return this.bindings.get(sessionId); }
+  /** Persist before issuing handles; old accepted results never satisfy new task inputs. */
+  syncNativeInput(runId, snapshot) {
+    const current = this.nativeInputs.register(runId, snapshot);
+    for (const item of this.store.getWorkItems(runId)) {
+      if (item.inputVersion === current.version || item.staleInput) continue;
+      this.store.saveWorkItem({ ...item, state: 'rejected', staleInput: true });
+      this.store.appendEvent({ runId, stepId: item.id, attemptId: item.attemptId, kind: 'input_invalidated',
+        payload: { previousVersion: item.inputVersion ?? null, currentVersion: current.version, resultEventId: item.resultEventId ?? null } });
+      this.pending.delete(item.childId);
+      const handle = this.handles.get(item.childId);
+      if (handle) Promise.resolve().then(() => handle.dispose()).catch(error => { this.lastError = error.message; });
+    }
+    return current;
+  }
+  isCurrentInput(item) {
+    const current = this.nativeInputs.current(item.runId);
+    return !item.staleInput && (!current || item.inputVersion === current.version);
+  }
   /** @param {string} runId @param {{maxOutputTokens: number, maxRunTokens: number}} limits */
   setRunLimits(runId, limits) {
     if (!this.store.getRun(runId) || !limits || Object.keys(limits).some(key => !['maxOutputTokens','maxRunTokens'].includes(key))
@@ -126,19 +146,23 @@ export class CollaborationManager {
     const policy = this.toolPolicies.get(sessionId);
     if (policy && !policy.has(toolName)) return false;
     const binding = this.bindings.get(sessionId);
+    if (toolName === 'collab_delegate_task') return !!binding && !binding.parentId && !!this.nativeInputs.current(binding.runId);
     const item = binding?.workItemId ? this.store.getWorkItems(binding.runId).find(work => work.id === binding.workItemId) : null;
     if (binding?.parentId && item?.computation) {
       if (item.attemptId !== binding.attemptId || !ACTIVE.has(item.state) || this.finalEvents.has(sessionId)) return false;
       return (item.completionMode === 'model-copy' ? ['collab_compute','collab_publish'] : ['collab_complete_computation']).includes(toolName);
     }
     if (['collab_compute','collab_complete_computation'].includes(toolName)) return false;
-    if (binding?.parentId && ['collab_delegate','collab_accept'].includes(toolName)) return false;
+    if (binding?.parentId) {
+      if (this.finalEvents.has(sessionId) || (item && !this.isCurrentInput(item))) return false;
+      return ['collab_read_evidence', 'collab_history', 'collab_publish', 'collab_send'].includes(toolName);
+    }
     return true;
   }
   authorize(sessionId, runId) { const b = this.bindings.get(sessionId); if (!b || b.runId !== runId) fail('FORBIDDEN', 'Agent is not bound to this run'); return b; }
   #saveAgent(agent) { this.store.saveAgent(agent); this.bindings.set(agent.id, agent); return agent; }
   #item(runId, id) { const item = this.store.getWorkItems(runId).find(x => x.id === id); if (!item) fail('NOT_FOUND', 'Unknown work item'); return item; }
-  #current(binding) { if (!binding.workItemId) return null; const item = this.#item(binding.runId, binding.workItemId); if (item.attemptId !== binding.attemptId) fail('STALE_ATTEMPT', 'Old activation cannot update the current attempt'); return item; }
+  #current(binding) { if (!binding.workItemId) return null; const item = this.#item(binding.runId, binding.workItemId); if (item.attemptId !== binding.attemptId) fail('STALE_ATTEMPT', 'Old activation cannot update the current attempt'); if (!this.isCurrentInput(item)) fail('STALE_INPUT', 'Task inputs changed; retry against the current input version'); return item; }
   #event(binding, stepId, kind, payload, parents = []) {
     this.#current(binding);
     return this.store.appendEvent({ runId: binding.runId, stepId, attemptId: binding.attemptId ?? 'root', kind, payload: { ...copy(payload), actorId: binding.id }, parents });
@@ -200,16 +224,17 @@ export class CollaborationManager {
     const event = this.#event(binding, item.id, 'computation_receipt', { ...receipt, artifactRef: receiptArtifact.id });
     return { receiptId: event.id, result: computed.result, contractHash: computed.contractHash, inputRef: computed.inputRef, verificationScope: VERIFICATION_SCOPE };
   }
-  /** @param {string} sessionId @param {{stepId?: string}} [options] */
+  /** @param {string} sessionId @param {{stepId?: string, checkpointStepId?: string}} [options] */
   completeComputation(sessionId, options = {}) {
     if (!options || typeof options !== 'object' || Array.isArray(options)
-      || Object.keys(options).some(key => key !== 'stepId')
-      || (Object.hasOwn(options, 'stepId') && (typeof options.stepId !== 'string' || !options.stepId.trim()))) {
-      fail('INVALID_ARGUMENT', 'Only an optional nonempty stepId is accepted; computed values and contracts cannot be supplied');
+      || Object.keys(options).some(key => !['stepId','checkpointStepId'].includes(key))
+      || ['stepId','checkpointStepId'].some(key=>Object.hasOwn(options,key)&&(typeof options[key]!=='string'||!options[key].trim()))) {
+      fail('INVALID_ARGUMENT', 'Only optional nonempty stepId and checkpointStepId are accepted; computed values and contracts cannot be supplied');
     }
     // Keep both the receipt and final event. The model never copies or edits the result.
     const receipt = this.compute(sessionId, {});
-    const published = this.publish(sessionId, { stepId: options.stepId, result: /** @type {JsonValue} */ (receipt.result), receiptId: receipt.receiptId, final: true });
+    const checkpoint=options.checkpointStepId?this.publish(sessionId,{stepId:options.checkpointStepId,result:/** @type {JsonValue} */(receipt.result),receiptId:receipt.receiptId,final:false}):null;
+    const published = this.publish(sessionId, { stepId: options.stepId, result: /** @type {JsonValue} */ (receipt.result), receiptId: receipt.receiptId, final: true,parents:checkpoint?[checkpoint.eventId]:[] });
     if (!published.submitted || !('verification' in published) || !published.verification) fail('COMPUTATION_PUBLICATION_FAILED', 'Host result did not pass its bound receipt validation');
     return { submitted: true, eventId: published.eventId, artifactRef: published.artifactRef,
       receiptId: receipt.receiptId, verifiedFields: published.verification.verifiedFields,
@@ -234,6 +259,17 @@ export class CollaborationManager {
     const receipt = this.#validatedReceipt(binding, item, verification.receiptId);
     if (verification.contractHash !== receipt.contractHash || canonicalHash(verification.verifiedFields) !== canonicalHash(Object.keys(receipt.result)) || resultMismatches(final.payload.result, receipt.result).length || this.store.readArtifact(final.payload.artifactRef).toString('utf8') !== JSON.stringify(final.payload.result)) fail('VALIDATION_REQUIRED', 'Final result differs from its host validation');
     return verification;
+  }
+  /** Host-only review facts: verify persisted receipts again; never certify business-rule choice. */
+  computationReview(runId, workItemId) {
+    const item=this.#item(runId,workItemId);
+    if(!item.computation||item.state!=='succeeded'||!this.isCurrentInput(item))return null;
+    const verification=this.#validatedFinal(item),receipt=this.store.getEvent(verification.receiptId);
+    const input=this.nativeInputs.current(runId),table=input?.tables?.find(t=>t.artifactRef===item.computation.inputRef);
+    const proof={receiptId:receipt.id,receiptRef:receipt.payload.artifactRef,verificationScope:VERIFICATION_SCOPE,
+      contract:this.#boundContract(item),result:receipt.payload.result,
+      ...(table?{source:{binding:'exact_slice_of_current_input',inputVersion:input.version,sourceId:table.sourceId,sourceHash:table.sourceHash,startByte:table.startByte,endByte:table.endByte}}:{})};
+    return Buffer.byteLength(JSON.stringify(proof))<=4096?proof:{receiptId:proof.receiptId,receiptRef:proof.receiptRef,verificationScope:VERIFICATION_SCOPE,detail:'Read the immutable receipt for its rule and result; omitted here because it exceeds the compact review limit.'};
   }
   recordToolResult(sessionId, toolName, result, toolCallId, identity = null) {
     const binding = this.bindings.get(sessionId); if (!binding) return;
@@ -260,15 +296,16 @@ export class CollaborationManager {
   }
   /** @param {string} runId @param {string} ref @param {import('./types.js').ArtifactRange} [options] */
   readArtifact(runId, ref, options = {}) {
-    // A reference must actually occur in an immutable event of this run.
-    const includes = v => typeof v === 'string' ? v === ref : Array.isArray(v) ? v.some(includes) : v && typeof v === 'object' ? Object.values(v).some(includes) : false;
+    ref = this.nativeInputs.resolve(runId, ref);
+    // Only host-owned envelope fields grant access. A model's result can mention any string;
+    // mentioning another run's digest must not turn it into readable evidence.
     let referenced = false;
-    for (const event of this.#events(runId)) if (includes(event.payload) || includes(event.inputRefs)) { referenced = true; break; }
+    for (const event of this.#events(runId)) if (event.payload?.artifactRef === ref || event.inputRefs?.includes(ref)) { referenced = true; break; }
     if (!referenced) fail('FORBIDDEN', 'Artifact is not referenced by this run');
     const meta = this.store.getArtifact(ref); if (!meta) fail('NOT_FOUND', 'Artifact not found');
     const range = { ...options };
     if (range.end !== undefined && Number.isSafeInteger(range.end)) range.end = Math.min(range.end, meta.bytes);
-    return { data: this.store.readArtifact(ref, range), mediaType: meta.mediaType ?? 'application/octet-stream' };
+    return { data: this.store.readArtifact(ref, range), mediaType: meta.mediaType ?? 'application/octet-stream', totalBytes: meta.bytes };
   }
   /** @param {string} sessionId @param {{stepId?: string, text: string, maxEntries?: number}} options */
   prepareLog(sessionId, { stepId, text, maxEntries = 80 }) {
@@ -313,13 +350,19 @@ export class CollaborationManager {
     }
     return results;
   }
-  async delegate(parent, { objective, role = 'researcher', dependsOn = [], acceptance = [], inputRefs = [], workItemId, retryOf, computation, completionMode, taskType, maxOutputTokens = this.maxOutputTokens }) {
+  async delegate(parent, { objective, wholeTask = false, role = 'researcher', dependsOn = [], acceptance = [], inputRefs = [], workItemId, retryOf, computation, completionMode, taskType, maxOutputTokens = this.maxOutputTokens }) {
     if (this.closing) fail('CLOSING', 'Plugin is draining');
     const b = this.bindings.get(parent.id) ?? this.bindRoot(parent.id);
     maxOutputTokens=Math.min(maxOutputTokens,this.runLimits.get(b.runId)?.maxOutputTokens??this.maxOutputTokens);
     if (b.parentId) fail('DEPTH_LIMIT', 'MVP delegation is owned by the root coordinator');
     if (!this.backend) fail('UNAVAILABLE', 'DSH backend is not connected');
     if (!['researcher', 'reviewer', 'implementer', 'tester'].includes(role)) fail('INVALID_ROLE', 'Unsupported role');
+    if (typeof wholeTask !== 'boolean') fail('INVALID_ARGUMENT', 'wholeTask must be boolean');
+    if (wholeTask) {
+      if (objective !== undefined) fail('INVALID_ARGUMENT', 'Choose wholeTask or a narrower objective, not both');
+      if (!this.nativeInputs.current(b.runId)) fail('INVALID_ARGUMENT', 'wholeTask requires a current native task input snapshot');
+      objective = 'Execute or check the requested result using the bound complete input snapshot, including later corrections and constraints. You are the execution child: coordination, acknowledgements and acceptance belong to the parent; do not create agents. Preserve the exact requested output format. For a specified JSON object, publish that object itself as the final result, without wrappers, repeated field checklists or extra metadata. Record separately any intermediate checkpoint explicitly requested and evidence needed to support actual actions; do not invent test success. The parent independently verifies and accepts the result.';
+    }
     if (typeof objective !== 'string' || !objective.trim()) fail('INVALID_ARGUMENT', 'Objective required');
     const old = retryOf ? this.#item(b.runId, retryOf) : null;
     taskType=taskType??old?.taskType??'generic';
@@ -329,12 +372,20 @@ export class CollaborationManager {
     if (old && !['failed', 'cancelled', 'unknown', 'rejected'].includes(old.state)) fail('INVALID_STATE', 'Only a failed/interrupted work item can be retried');
     const id = old?.id ?? workItemId ?? uid('work');
     if (!old && this.store.getWorkItems(b.runId).some(x => x.id === id)) fail('DUPLICATE_WORK', 'Work item already exists');
-    for (const dep of dependsOn) { if (dep === id) fail('DEPENDENCY_CYCLE', 'Task cannot depend on itself'); this.#item(b.runId, dep); }
+    for (const dep of dependsOn) {
+      if (dep === id) fail('DEPENDENCY_CYCLE', 'Task cannot depend on itself');
+      const prerequisite=this.#item(b.runId, dep);
+      if(prerequisite.state==='submitted')fail('DEPENDENCY_ASSESSMENT_REQUIRED',`Dependency ${dep} has a result awaiting YOUR assessment. It will not unblock by polling. Either inspect and accept/reject it with collab_accept first, or, if this new child must help decide acceptance, use dependsOn:[] and pass the recorded result through inputRefs. No child was created.`);
+    }
+    const nativeInput = this.nativeInputs.current(b.runId);
+    inputRefs = [...new Set(inputRefs.map(ref => this.nativeInputs.resolve(b.runId, ref, { currentOnly: true })))];
+    if (nativeInput && !inputRefs.includes(nativeInput.artifactRef)) inputRefs.push(nativeInput.artifactRef);
     for (const ref of inputRefs) this.readArtifact(b.runId, ref);
-    const contract = computation === undefined ? (old?.computation ? normalizeContract(old.computation) : null) : normalizeContract(computation);
+    const rawContract = computation ?? old?.computation;
+    const contract = rawContract ? normalizeContract({ ...rawContract, inputRef: this.nativeInputs.resolve(b.runId, rawContract.inputRef, { currentOnly: true }) }) : null;
     if (contract && !inputRefs.includes(contract.inputRef)) fail('INVALID_CONTRACT', 'Computation inputRef must be an authorized task inputRef');
     const attemptId = uid('try'); const childId = uid('collab');
-    const item = { id, runId: b.runId, objective, role, dependsOn, acceptance, inputRefs, taskType,attemptId, childId, parentId: parent.id, state: 'ready', maxOutputTokens, epoch: (old?.epoch ?? 0) + 1, ...(contract ? { computation: contract, contractHash: canonicalHash(contract), completionMode: mode } : {}) };
+    const item = { id, runId: b.runId, objective, role, dependsOn, acceptance, inputRefs, inputVersion: nativeInput?.version ?? null, taskType,attemptId, childId, parentId: parent.id, state: 'ready', maxOutputTokens, epoch: (old?.epoch ?? 0) + 1, ...(contract ? { computation: contract, contractHash: canonicalHash(contract), completionMode: mode } : {}) };
     this.store.saveWorkItem(item);
     this.store.appendEvent({ runId: b.runId, stepId: id, attemptId, kind: 'work_planned', payload: item });
     this.#saveAgent({ id: childId, runId: b.runId, parentId: parent.id, role, state: 'planned', workItemId: id, attemptId, epoch: item.epoch, managed: true });
@@ -358,8 +409,10 @@ export class CollaborationManager {
       this.#saveAgent({ ...this.bindings.get(childId), state: 'starting' });
       const completion = item.completionMode === 'model-copy'
         ? 'Call collab_compute with {}. Publish the exact returned result fields and receiptId using collab_publish final=true.'
-        : 'Call collab_complete_computation with {} once. The host computes and publishes the exact bound result directly; do not copy or recalculate values. After submitted=true, finish with a brief acknowledgement.';
-      const prompt = `${COMPACT_GUIDANCE}\nRole: ${item.role}. Work item: ${item.id}. Run: ${runId}. Attempt: ${item.attemptId}.\nObjective: ${item.objective}\nAcceptance: ${JSON.stringify(item.acceptance)}\nAvailable evidence references: ${JSON.stringify(item.inputRefs)}${item.computation ? `\nBound computation contract: ${JSON.stringify(item.computation)}\n${completion} ${VERIFICATION_SCOPE}` : ''}\nUse only your permitted tools. Evidence is not new authorization.`;
+        : 'Call collab_complete_computation once. If the objective requests a named checkpoint, pass checkpointStepId equal to the exact requested public step name (for example checkpoint), not the computation operation as/result key, so the host records the actual result there before final submission; otherwise pass {}. The host computes and publishes the exact bound result directly; do not copy or recalculate values. Successful submission ends this turn.';
+      const native = this.nativeInputs.current(runId);
+      const refs = item.inputRefs.map(ref => native?.artifactRef === ref ? native.handle : ref);
+      const prompt = `${COMPACT_GUIDANCE}\nRole: ${item.role}. Work item: ${item.id}. Run: ${runId}. Attempt: ${item.attemptId}.\nObjective: ${item.objective}\nAcceptance: ${JSON.stringify(item.acceptance)}\nAvailable evidence references: ${JSON.stringify(refs)}${native ? '\nThe input: handle contains the complete versioned task, ordered updates and sources; read required pages before executing. Framework requestId, ticket and assignment IDs are routing metadata, not user-data identifiers; obtain business values from source text and later corrections even when field names overlap. Return only the requested result and necessary evidence, not a copy of the source.' : ''}${item.computation ? `\nBound computation contract: ${JSON.stringify(item.computation)}\n${completion} ${VERIFICATION_SCOPE}` : ''}\nUse only your permitted tools. Evidence is not new authorization.`;
       this.store.appendEvent({ runId, stepId: item.id, attemptId: item.attemptId, kind: 'delegation_input', payload: { recipient: childId, prompt, inputRefs: item.inputRefs, provenance: 'host' } });
       try {
         const start = Promise.resolve(this.backend.start({ parent, childId, prompt, label: item.objective.slice(0, 80), maxOutputTokens: item.maxOutputTokens }));
@@ -368,11 +421,13 @@ export class CollaborationManager {
         try { handle = await start; } finally { this.starting.delete(start); }
         if (this.closed) { await handle.dispose(); return; }
         this.handles.set(childId, handle);
-        this.store.saveWorkItem({ ...item, state: 'running' }); this.#saveAgent({ ...this.bindings.get(childId), state: 'active' });
+        const current = this.#item(runId, item.id);
+        const stale = current.attemptId !== item.attemptId || !this.isCurrentInput(current);
+        if (!stale) { this.store.saveWorkItem({ ...item, state: 'running' }); this.#saveAgent({ ...this.bindings.get(childId), state: 'active' }); }
         const settlement = handle.result.then(result => this.settle(childId, result), error => this.settle(childId, { stopReason: 'error', output: [], diagnostic: error.message }))
           .catch(error => { this.lastError = error.message; }).finally(() => { this.settlements.delete(childId); });
         this.settlements.set(childId, settlement);
-        if (this.closing) await handle.dispose();
+        if (this.closing || stale) await handle.dispose();
       } catch (e) { await this.settle(childId, { stopReason: 'error', output: [], diagnostic: e.message }); }
     }
   }
@@ -384,7 +439,7 @@ export class CollaborationManager {
     for (const event of this.#events(binding.runId)) if (event.kind === 'activation_settled' && event.attemptId === binding.attemptId && event.payload.agentId === childId) { previous=event; break; }
     if (previous) return { duplicate: true, eventId: previous.id };
     const item = this.#item(binding.runId, binding.workItemId);
-    const stale = item.attemptId !== binding.attemptId || this.bindings.get(binding.parentId)?.runId !== binding.runId;
+    const stale = item.attemptId !== binding.attemptId || this.bindings.get(binding.parentId)?.runId !== binding.runId || !this.isCurrentInput(item);
     const final = this.finalEvents.get(childId);
     const output = (result.output ?? []).filter(x => x.type !== 'reasoning');
     const raw = this.store.putArtifact(JSON.stringify({ ...result, output }), { mediaType: 'application/json' });
@@ -403,6 +458,7 @@ export class CollaborationManager {
   accept(parentId, { workItemId, accepted, reason, evidenceRefs = [] }) {
     const b = this.bindings.get(parentId); if (!b) fail('FORBIDDEN', 'No managed run');
     const item = this.#item(b.runId, workItemId);
+    if (!this.isCurrentInput(item)) fail('STALE_INPUT', `Cannot accept a result from an earlier task input version. Call collab_delegate with retryOf=${JSON.stringify(item.id)}, an objective and acceptance criteria for the current inputs; then assess that new attempt.`);
     if (item.parentId !== parentId || item.state !== 'submitted') fail('INVALID_STATE', 'Only the owning coordinator can assess a submitted result');
     if (typeof accepted !== 'boolean') fail('INVALID_ARGUMENT', 'accepted must be a boolean');
     for (const ref of evidenceRefs) this.readArtifact(b.runId, ref);
@@ -431,6 +487,7 @@ export class CollaborationManager {
   }
   canUseTool(sessionId, toolName) {
     const b = this.bindings.get(sessionId); if (!b) return;
+    if (b.parentId) { try { this.#current(b); } catch (error) { return error.message; } }
     if (toolName.startsWith('collab_') && !this.isToolAvailable(sessionId,toolName)) return 'This tool is not available for the current task phase and host policy.';
     const final = this.finalEvents.get(sessionId);
     if (final?.runId === b.runId && final.attemptId === (b.attemptId ?? 'root') && !toolName.startsWith('collab_')) return 'Final result already submitted; finish the turn.';
