@@ -51,13 +51,12 @@ collapsed: the scrim covers the window, square, and the HUD is `min(w,h) × 0.97
 The change is a 260 ms transition, never a jump. The composer, the top tabs and
 the side panels are never blurred, so you can always type.
 
-**Ask.** A pending question keeps the field: the ask surface renders above the
-overlay, so the blur, the rings and the centre stay put while the dialog is up,
-and answering it simply returns the centre to the run. A field the user dismissed
-stays dismissed; a question never reopens it behind the user's back. (The task
-document's §4.6 closed the field on a question; that rule is reversed here at the
-product owner's request, because the question is a dialog above the layer, not a
-card inside it.)
+**Ask.** A pending question keeps the field, and needs no hole in the scrim: the
+ask surface renders *below* the message area (over the composer), so the plain
+scrim already leaves it sharp and clickable while the conversation behind it stays
+blurred. A field the user dismissed stays dismissed; a question never reopens it
+behind the user's back. (The task document's §4.6 closed the field on a question;
+that rule is reversed here at the product owner's request.)
 
 **Stalled (§2.1).** `stalled` is stamped by whoever produced the snapshot; the
 field only reports it — a dashed halo on the seat and a `停顿中` sub-line. The

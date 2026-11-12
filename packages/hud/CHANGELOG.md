@@ -10,12 +10,12 @@
   frosting, its corner position and its pointer events after the field closes.
 - Material nodes say how a call ended (`完成`/`未完成`) instead of freezing on
   `读取中`, and a bare role name is never used as the task line.
-- A question keeps the field; the scrim is split around the dialog card (role
-  dialog, portaled backdrop, or the answer controls of an inline question) so the
-  blur and the dim stay around it while the card itself stays readable and
-  clickable.
-- A tool call that arrives without an open turn adopts the turn, and the task
-  line is seeded from the session log when the plugin was activated mid-run.
+- A question keeps the field. The ask surface renders below the message area, so
+  the scrim needs no hole: the conversation stays blurred while the question stays
+  sharp and clickable, and answering it leaves no stray sharp rectangle.
+- A task first seen while it already waits for an answer opens instead of going
+  blank, and the task line is seeded from the session log when the plugin was
+  activated mid-run.
 
 ## 0.1.0
 

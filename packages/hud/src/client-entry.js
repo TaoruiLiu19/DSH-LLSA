@@ -14,7 +14,7 @@
  */
 import { createView, foldSnapshot, nextFocus, stepLifecycle } from './model.js';
 import { createFieldCanvas } from './render.js';
-import { STYLES, createCapsule, createFocusLayer, createOfflinePill, createStageHook, scrimPieces } from './focus.js';
+import { STYLES, createCapsule, createFocusLayer, createOfflinePill, createStageHook } from './focus.js';
 
 /** How often the snapshot is polled, by what the field is doing. */
 export const POLL_MS = Object.freeze({ running: 240, waiting: 600, settled: 800, empty: 1400 });
@@ -33,161 +33,6 @@ const STRINGS = Object.freeze({
     offline: 'HUD offline',
   },
 });
-
-/**
- * Find the surface a dialog paints, if one is open.
- *
- * Dialogs arrive as a role-annotated element, or as a full-screen fixed backdrop
- * (usually portaled next to the app root) with a card inside it. The card is the
- * largest box inside the backdrop that is still smaller than the viewport.
- */
-function findDialogSurface() {
-  if (typeof document === 'undefined' || document.body === null) return null;
-  try {
-    const explicit = document.querySelector('[aria-modal="true"], [role="dialog"], [role="alertdialog"]');
-    if (explicit !== null) return dialogBox(explicit);
-
-    const viewportWidth = globalThis.innerWidth ?? 0;
-    const viewportHeight = globalThis.innerHeight ?? 0;
-    if (!(viewportWidth > 0) || !(viewportHeight > 0)) return null;
-
-    // Portals mount next to the app root, one or two levels deep: a shallow walk
-    // finds them without scanning the whole app on every frame.
-    const candidates = [];
-    const collect = (element, depth) => {
-      if (element === null || depth > 2 || candidates.length > 80) return;
-      candidates.push(element);
-      for (const child of element.children ?? []) collect(child, depth + 1);
-    };
-    for (const child of document.body.children) {
-      if (child.id === 'root') {
-        for (const inner of child.children) collect(inner, 0);
-        continue;
-      }
-      collect(child, 0);
-    }
-
-    let backdrop = null;
-    let bestZ = -Infinity;
-    for (const element of candidates) {
-      if (element.closest('[class*="dsh-hud"]') !== null) continue;
-      const style = getComputedStyle(element);
-      if (style.position !== 'fixed' && style.position !== 'absolute') continue;
-      if (style.display === 'none' || style.visibility === 'hidden') continue;
-      const rect = element.getBoundingClientRect();
-      if (!(rect.width >= viewportWidth * 0.9 && rect.height >= viewportHeight * 0.9)) continue;
-      const z = Number.parseInt(style.zIndex, 10);
-      const rank = Number.isFinite(z) ? z : 0;
-      if (rank >= bestZ) {
-        bestZ = rank;
-        backdrop = element;
-      }
-    }
-    if (backdrop === null) return null;
-
-    let card = null;
-    let largest = 0;
-    for (const element of backdrop.querySelectorAll('*')) {
-      const rect = element.getBoundingClientRect();
-      const area = rect.width * rect.height;
-      if (area < 8000) continue;
-      if (rect.width >= viewportWidth - 2 && rect.height >= viewportHeight - 2) continue;
-      if (area > largest) {
-        largest = area;
-        card = element;
-      }
-    }
-    return dialogBox(card ?? backdrop);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The card the user must answer, found from the controls they must press.
- *
- * A question rendered inside the message flow has no role and no backdrop, so the
- * anchor is the last interactive control in the flow: walk up from it to the card
- * that holds it. Bounded by the stage, so a stray button elsewhere is ignored.
- */
-function questionCardBox(stage) {
-  if (typeof document === 'undefined' || stage === null) return null;
-  try {
-    const host = document.querySelector('#root [data-slot="conversation.chat.flow"]')
-      ?? document.querySelector('[data-slot="conversation.chat.flow"]');
-    if (host === null) return null;
-    const controls = [...host.querySelectorAll('button, [role="button"], input, textarea')];
-    const inside = controls.filter(element => {
-      const rect = element.getBoundingClientRect();
-      if (!(rect.width > 0 && rect.height > 0)) return false;
-      return rect.top >= stage.y - 4 && rect.bottom <= stage.y + stage.h + 4;
-    });
-    const anchor = inside.at(-1);
-    if (anchor === undefined) return null;
-    let box = null;
-    let node = anchor;
-    for (let hop = 0; hop < 6 && node !== null; hop += 1, node = node.parentElement) {
-      const rect = node.getBoundingClientRect();
-      if (rect.width >= 240 && rect.height >= 56) {
-        box = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
-      }
-      // Stop at the card: a row that already spans most of the column is the
-      // message wrapper, not the question.
-      if (rect.width >= stage.w * 0.7 || rect.height >= stage.h * 0.5) break;
-    }
-    return box;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The newest row of the message flow, used when the ask surface has no backplate.
- *
- * A question appended as the last flow item exists immediately, before any role
- * or backdrop appears, so this keeps the hole stable across the first frames of
- * the question instead of dropping the blur for a beat.
- */
-function lastFlowRowBox(stage) {
-  if (typeof document === 'undefined' || stage === null) return null;
-  try {
-    const host = document.querySelector('#root [data-slot="conversation.chat.flow"]')
-      ?? document.querySelector('[data-slot="conversation.chat.flow"]');
-    if (host === null) return null;
-    const rows = [...(host.children ?? [])].filter(element => {
-      const rect = element.getBoundingClientRect();
-      if (!(rect.width > 200 && rect.height > 40)) return false;
-      return rect.bottom > stage.y && rect.top < stage.y + stage.h;
-    });
-    const last = rows.at(-1);
-    if (last === undefined) return null;
-    const rect = last.getBoundingClientRect();
-    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Whether a candidate is a usable hole: inside the message area, and small enough
- * that blurring the rest still reads as "the field".
- */
-function boxFitsStage(box, stage) {
-  if (stage.w <= 0 || stage.h <= 0) return false;
-  const inside = box.x >= stage.x - 8
-    && box.y >= stage.y - 8
-    && box.x + box.width <= stage.x + stage.w + 8
-    && box.y + box.height <= stage.y + stage.h + 8;
-  return inside && box.width * box.height <= stage.w * stage.h * 0.45;
-}
-
-/** The dialog's box in viewport coordinates, or null when it has none yet. */
-function dialogBox(element) {
-  if (element === null || typeof element.getBoundingClientRect !== 'function') return null;
-  const rect = element.getBoundingClientRect();
-  if (!(rect.width > 0) || !(rect.height > 0)) return null;
-  return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
-}
 
 function stringsOf(locale) {
   return /^en\b/i.test(String(locale ?? '')) ? STRINGS.en : STRINGS.zh;
@@ -411,18 +256,11 @@ export function applyClient(ctx, React) {
     // The hole is only accepted when it sits inside the message area and leaves
     // something to blur: a stray full-screen wrapper must never dissolve the
     // scrim, and a card covering everything means there is nothing left to blur.
-    // Only a pending question earns a hole: any other time the scrim stays whole,
-    // otherwise a persistent app frame would be mistaken for a dialog and leave a
-    // sharp rectangle behind after the question is answered.
-    //
-    // Every candidate is screened: it must sit inside the message area and leave
-    // most of the area blurred (a panel-sized box would look like no blur at all).
-    const hole = view.pending === true
-      ? [questionCardBox(stage), findDialogSurface(), lastFlowRowBox(stage)]
-        .find(box => box !== null && boxFitsStage(box, stage))
-        ?? null
-      : null;
-    const soft = view.pending === true && hole === null;
+    // The ask surface renders below the message area (over the composer), not
+    // inside it, so the plain scrim already leaves it sharp: no hole is cut, and
+    // the blur covers exactly the conversation.
+    const hole = null;
+    const soft = false;
     return wrap(React.createElement(FocusLayer, {
       view,
       stage,
