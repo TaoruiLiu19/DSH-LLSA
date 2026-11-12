@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/TaoruiLiu19/DSH-LLSA/contracts/hud-v1.schema.json",
+  "title": "LLSA read-only HUD snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["v", "seq", "now", "agents", "events", "eventsFromSeq", "stalledAfterMs"],
+  "properties": {
+    "v": {"const": 1},
+    "seq": {"type": "integer", "minimum": 0},
+    "now": {"type": "string", "format": "date-time"},
+    "stalledAfterMs": {"type": "integer", "minimum": 1},
+    "eventsFromSeq": {"type": "integer", "minimum": 0},
+    "agents": {"type": "array", "items": {"$ref": "#/definitions/agent"}},
+    "events": {"type": "array", "maxItems": 256, "items": {"$ref": "#/definitions/event"}}
+  },
+  "definitions": {
+    "state": {"enum": ["idle", "running", "waiting-human", "done", "failed"]},
+    "tool": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_.:-]{1,128}$"},
+    "lastEvent": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "at", "tool"],
+      "properties": {"kind": {"type": "string"}, "at": {"type": "string", "format": "date-time"}, "tool": {"$ref": "#/definitions/tool"}}
+    },
+    "agent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "label", "role", "parentId", "ticketId", "state", "since", "stalled", "lastEvent"],
+      "properties": {
+        "id": {"type": "string"}, "label": {"type": "string"}, "role": {"type": "string"},
+        "parentId": {"type": ["string", "null"]}, "ticketId": {"type": ["string", "null"]},
+        "state": {"$ref": "#/definitions/state"}, "since": {"type": "string", "format": "date-time"},
+        "stalled": {"type": "boolean"}, "lastEvent": {"anyOf": [{"type": "null"}, {"$ref": "#/definitions/lastEvent"}]}
+      }
+    },
+    "event": {
+      "type": "object", "additionalProperties": false, "required": ["seq", "agentId", "kind", "at", "tool"],
+      "properties": {
+        "seq": {"type": "integer", "minimum": 1}, "agentId": {"type": "string"},
+        "kind": {"type": "string"}, "at": {"type": "string", "format": "date-time"}, "tool": {"$ref": "#/definitions/tool"},
+        "from": {"$ref": "#/definitions/state"}, "to": {"$ref": "#/definitions/state"},
+        "reason": {"type": "string"}, "synthetic": {"type": "boolean"}
+      },
+      "if": {"properties": {"kind": {"const": "state.changed"}}},
+      "then": {"required": ["from", "to", "reason"]}
+    }
+  }
+}

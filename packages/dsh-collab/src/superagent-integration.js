@@ -13,6 +13,7 @@ export function connectSuperagent(manager, bridge) {
     const coordinatorId=bridge.snapshot().masterSessionId;
     if(coordinatorId&&coordinatorId!==sessionId&&!store.eventsByKind(binding.runId,'agent_relation').some(e=>e.payload.parentId===coordinatorId&&e.payload.childId===sessionId)) {
       store.appendEvent({runId:binding.runId,stepId:'native-coordination',kind:'agent_relation',payload:{parentId:coordinatorId,childId:sessionId,provenance:'host_superagent_lifecycle'}});
+      manager.hud.accept(binding.runId,{kind:'agent.register',agentId:sessionId,parentId:coordinatorId,role:'worker',ticketId:ticket.id,at:new Date().toISOString()});
     }
     return binding;
   };

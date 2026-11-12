@@ -48,6 +48,13 @@ test('panel and status are served with restrictive headers; no model call is inv
   assert.deepEqual(calls, []);
 });
 
+test('HUD view uses existing snapshot route and excludes all legacy raw fields',async t=>{
+  const hud={v:1,seq:3,now:'2026-11-12T00:00:00Z',agents:[],events:[]};
+  const {base,calls}=await fixture(t,{describeRun:()=>({hud,events:[{arguments:'PRIVATE_COMMAND'}],usage:{model:'PRIVATE_MODEL'}})});
+  const response=await fetch(base+'/collab/api/runs/r1?view=hud');
+  assert.equal(response.status,200);assert.deepEqual(await response.json(),hud);assert.deepEqual(calls,[]);
+});
+
 test('JSON display redacts credential values inside ordinary text and nested arrays', async t => {
   const fakeApiKey = 'sk-' + 'a'.repeat(32);
   const fakeGithubToken = 'ghp_' + 'b'.repeat(36);

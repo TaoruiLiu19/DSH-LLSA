@@ -22,18 +22,19 @@
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
-    "tar": "7.5.22",
-    "rolldown": "1.2.7"
+    "ajv": "8.20.0",
+    "rolldown": "1.2.7",
+    "tar": "7.5.22"
   },
   "dependencies": {
-    "@deepseek-ai/dsh": "0.2.2-rc.1",
     "@deepseek-ai/cordis": "4.1.0",
-    "@deepseek-ai/schemastery": "3.19.0",
+    "@deepseek-ai/dsh": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-app-boot": "0.2.2-rc.1",
     "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
     "@deepseek-ai/dsh-scope": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-app-boot": "0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "3.19.0",
+    "js-tiktoken": "1.0.21",
     "proper-lockfile": "4.1.2",
-    "zod": "4.4.3",
-    "js-tiktoken": "1.0.21"
+    "zod": "4.4.3"
   }
 }

@@ -6,6 +6,7 @@ import { normalizeQualityEvidence, MIN_EVIDENCE_SAMPLES, TASK_TYPES } from './en
 import { NativeInputs } from './native-inputs.js';
 import { summarizeAccounting } from './accounting.js';
 import { MoneyBudget } from './money-budget.js';
+import { HudProjection } from './hud-projection.js';
 
 /** @typedef {import('./types.js').JsonValue} JsonValue */
 /**
@@ -50,6 +51,7 @@ export class CollaborationManager {
     this.nativeInputs = new NativeInputs(store);
     this.runLimits = new Map();
     this.moneyBudget = moneyPolicy ? new MoneyBudget(store, moneyPolicy) : null;
+    this.hud = new HudProjection(store);
     this.starting = new Set(); this.settlements = new Map(); this.delivering = new Set(); this.closed = false; this.closePromise = null;
     if (!Number.isSafeInteger(closeTimeoutMs) || closeTimeoutMs < 1) fail('INVALID_ARGUMENT', 'closeTimeoutMs must be a positive safe integer');
     this.closeTimeoutMs = closeTimeoutMs;
@@ -104,7 +106,8 @@ export class CollaborationManager {
   describeRun(id) {
     const run = this.store.getRun(id); if (!run) fail('NOT_FOUND', 'Run not found');
     const events = [...this.#events(id)], usage = this.store.usageSummary(id);
-    return { run: { ...run, paused: this.held.has(id) }, agents: this.store.getAgents(id), workItems: this.store.getWorkItems(id), events, usage,
+    const hud=this.hud.snapshot(id);
+    return { v:1,seq:hud.seq,now:hud.now,hud,run: { ...run, paused: this.held.has(id) }, agents: this.store.getAgents(id), workItems: this.store.getWorkItems(id), events, usage,
       accounting: summarizeAccounting(this.store.listRequests(id), usage.usage, events),
       moneyBudget: this.moneyBudget?.snapshot(id) ?? { enabled: false } };
   }
@@ -113,10 +116,11 @@ export class CollaborationManager {
     const prior = this.bindings.get(sessionId);
     if (prior && (!details.runId || prior.runId === details.runId)) return prior;
     if (prior?.parentId) fail('FORBIDDEN', 'A child cannot be rebound as a root');
+    if(prior && prior.runId!==details.runId) this.hud.accept(prior.runId,{kind:'agent.cancel',agentId:sessionId,reason:'assignment_rebound',at:new Date().toISOString()});
     const id = details.runId ?? `run-${sessionId}`;
     if (!this.store.getRun(id)) this.store.createRun({ id, ticketId: details.ticketId ?? `local-${sessionId}`, assignmentId: details.assignmentId ?? 'local', title: details.title ?? 'DSH 协作会话', source: details.ticketId ? 'superagent' : 'dsh', rootSessionId: sessionId });
     const agent = this.store.saveAgent({ id: sessionId, runId: id, parentId: null, role: 'coordinator', state: 'active', managed: true });
-    this.bindings.set(sessionId, agent); return agent;
+    this.bindings.set(sessionId, agent); this.hud.register(agent); return agent;
   }
   binding(sessionId) { return this.bindings.get(sessionId); }
   /** Persist before issuing handles; old accepted results never satisfy new task inputs. */
@@ -125,6 +129,7 @@ export class CollaborationManager {
     for (const item of this.store.getWorkItems(runId)) {
       if (item.inputVersion === current.version || item.staleInput) continue;
       this.store.saveWorkItem({ ...item, state: 'rejected', staleInput: true });
+      this.hud.accept(runId,{kind:'agent.cancel',agentId:item.childId,reason:'input_invalidated',at:new Date().toISOString()});
       this.store.appendEvent({ runId, stepId: item.id, attemptId: item.attemptId, kind: 'input_invalidated',
         payload: { previousVersion: item.inputVersion ?? null, currentVersion: current.version, resultEventId: item.resultEventId ?? null } });
       this.pending.delete(item.childId);
@@ -172,7 +177,7 @@ export class CollaborationManager {
     return true;
   }
   authorize(sessionId, runId) { const b = this.bindings.get(sessionId); if (!b || b.runId !== runId) fail('FORBIDDEN', 'Agent is not bound to this run'); return b; }
-  #saveAgent(agent) { this.store.saveAgent(agent); this.bindings.set(agent.id, agent); return agent; }
+  #saveAgent(agent) { this.store.saveAgent(agent); this.bindings.set(agent.id, agent); this.hud.register(agent); return agent; }
   #item(runId, id) { const item = this.store.getWorkItems(runId).find(x => x.id === id); if (!item) fail('NOT_FOUND', 'Unknown work item'); return item; }
   #current(binding) { if (!binding.workItemId) return null; const item = this.#item(binding.runId, binding.workItemId); if (item.attemptId !== binding.attemptId) fail('STALE_ATTEMPT', 'Old activation cannot update the current attempt'); if (!this.isCurrentInput(item)) fail('STALE_INPUT', 'Task inputs changed; retry against the current input version'); return item; }
   #event(binding, stepId, kind, payload, parents = []) {
@@ -459,6 +464,7 @@ export class CollaborationManager {
     if (previous) return { duplicate: true, eventId: previous.id };
     const item = this.#item(binding.runId, binding.workItemId);
     const stale = item.attemptId !== binding.attemptId || this.bindings.get(binding.parentId)?.runId !== binding.runId || !this.isCurrentInput(item);
+    if(stale || result.stopReason==='aborted') this.hud.accept(binding.runId,{kind:'agent.cancel',agentId:childId,reason:stale?'stale_activation':'cancelled',at:new Date().toISOString()});
     const final = this.finalEvents.get(childId);
     const output = (result.output ?? []).filter(x => x.type !== 'reasoning');
     const raw = this.store.putArtifact(JSON.stringify({ ...result, output }), { mediaType: 'application/json' });

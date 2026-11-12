@@ -155,7 +155,14 @@ export function registerHttp(ctx, service) {
       const runId = identifier(match[1]);
       const tail = match[2] ?? '';
       if (req.method === 'GET') {
-        if (!tail) return send(res, 200, await service.describeRun(runId));
+        if (!tail) {
+          const snapshot=await service.describeRun(runId);
+          if(url.searchParams.get('view')==='hud') {
+            if(!snapshot || typeof snapshot!=='object' || !('hud' in snapshot) || !snapshot.hud)throw httpError(409,'HUD_UNAVAILABLE');
+            return send(res,200,snapshot.hud);
+          }
+          return send(res, 200, snapshot);
+        }
         const step = tail.match(/^steps\/([^/]+)$/);
         if (step) {
           /** @type {import('./types.js').StepQuery} */

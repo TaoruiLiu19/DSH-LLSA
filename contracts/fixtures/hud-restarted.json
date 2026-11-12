@@ -1,0 +1,216 @@
+{
+  "name": "unfinished turn recovered after process restart",
+  "steps": [
+    {
+      "input": {
+        "kind": "turn.start",
+        "agentId": "worker",
+        "turn": 1,
+        "at": "2026-11-12T00:00:01.000Z"
+      },
+      "state": "running",
+      "seq": 2
+    },
+    {
+      "input": {
+        "kind": "tool.start",
+        "agentId": "worker",
+        "callId": "c1",
+        "tool": "fs_write",
+        "at": "2026-11-12T00:00:02.000Z"
+      },
+      "state": "running",
+      "seq": 3
+    },
+    {
+      "input": {
+        "kind": "agent.recovered",
+        "agentId": "worker",
+        "reason": "process_restart",
+        "at": "2026-11-12T00:01:00.000Z"
+      },
+      "state": "idle",
+      "seq": 7
+    }
+  ],
+  "frames": [
+    {
+      "v": 1,
+      "seq": 2,
+      "now": "2026-11-12T00:00:01.000Z",
+      "stalledAfterMs": 30000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "running",
+          "since": "2026-11-12T00:00:01.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:01.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "seq": 3,
+      "now": "2026-11-12T00:00:02.000Z",
+      "stalledAfterMs": 30000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "running",
+          "since": "2026-11-12T00:00:01.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "tool.start",
+            "at": "2026-11-12T00:00:02.000Z",
+            "tool": "fs_write"
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "tool.start",
+          "at": "2026-11-12T00:00:02.000Z",
+          "tool": "fs_write"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "seq": 7,
+      "now": "2026-11-12T00:01:00.000Z",
+      "stalledAfterMs": 30000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "idle",
+          "since": "2026-11-12T00:01:00.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:01:00.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "tool.start",
+          "at": "2026-11-12T00:00:02.000Z",
+          "tool": "fs_write"
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "tool.end",
+          "at": "2026-11-12T00:01:00.000Z",
+          "tool": "fs_write",
+          "reason": "interrupted",
+          "synthetic": true
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:01:00.000Z",
+          "tool": null,
+          "reason": "process_restart",
+          "synthetic": true
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "agent.recovered",
+          "at": "2026-11-12T00:01:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:01:00.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "idle",
+          "reason": "process_restart"
+        }
+      ]
+    }
+  ]
+}

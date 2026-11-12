@@ -199,6 +199,21 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 
 ## 开发与验证
 
+### 可视化浮窗接口（只读）
+
+编排层已预留多智能体工作状态投影，不依赖 HUD 包，也不实现浮窗布局或动画。
+
+- 读取现有 `GET /collab/api/runs/:runId?view=hud`，获得符合 [HUD v1 Schema](contracts/hud-v1.schema.json) 的脱敏快照；不新增端点。
+- 原有完整任务快照保留兼容字段，新增 `hud`，以及与其一致的顶层 `v`、`seq`、`now`。浮窗应使用 `view=hud`，不要读取原始 `events` 或自行推导状态。
+- `agents` 提供稳定 ID、父子关系、工单、五态、状态起始时间、静默标记和最小活动事件。`label` 当前为空，避免把任务正文当短名泄漏；客户端可自行使用角色标签。父节点可能属于另一个工单快照，不能据此猜测其活动状态。
+- `seq` 在每个 run 内单调递增，重启不清零；跨 run 不可比较。轮询时间与 `stalled` 变化不会凭空增加事件序号。`stalledAfterMs` 当前为 30000，仅标记 running 静默，不推断失败。
+- `events` 是最近 256 条最小事件，`eventsFromSeq` 给出窗口起点。若客户端游标落后于窗口，直接采用最新状态并跳过丢失的动画，不回放猜测事件。事件的 `seq`、`agentId` 用于寻址；`state.changed` 额外提供 `from/to/reason`。
+- turn 正常结束的 `done` 只表示本轮结束，不代表工单验收通过。取消或输入作废为 `idle`；进程重启后未闭合 turn 清理为 `idle`。缺失的工具/turn 结束以 `synthetic: true` 和原因显式补齐，绝不冒充成功。工具 id 不含参数、路径、命令或输出。
+- 实际状态接入 `turn/start/end`、`tool/call/result`、审批对象与用户问题回复。等待确认不会因工具等待超时自动消失；收到用户回复后按是否有打开的 turn 恢复。历史上尚未接入的活动不补造。
+
+浮窗开发可以直接读取三份回放夹具中的 `frames`：
+[正常一轮](contracts/fixtures/hud-normal.json)、[输入作废](contracts/fixtures/hud-invalidated.json)、[重启清理](contracts/fixtures/hud-restarted.json)。无需导入 manager/store 或投影实现。`steps` 供编排侧回放测试；同一事件序列必须生成相同 frames。字段语义和五态含义在 v1 保持稳定；破坏性变化另发 v2。独立安装、单智能体降级和视觉材料映射由 HUD 实现方负责。
+
 ```text
 packages/dsh-collab/   协作通信与记录
 packages/superagent/   上游派生的执行插件

@@ -1,0 +1,347 @@
+{
+  "name": "normal turn",
+  "steps": [
+    {
+      "input": {
+        "kind": "agent.register",
+        "agentId": "worker",
+        "parentId": "root",
+        "role": "worker",
+        "ticketId": "t1",
+        "at": "2026-11-12T00:00:00.000Z"
+      },
+      "state": "idle",
+      "seq": 1
+    },
+    {
+      "input": {
+        "kind": "turn.start",
+        "agentId": "worker",
+        "turn": 1,
+        "at": "2026-11-12T00:00:01.000Z"
+      },
+      "state": "running",
+      "seq": 3
+    },
+    {
+      "input": {
+        "kind": "tool.start",
+        "agentId": "worker",
+        "callId": "c1",
+        "tool": "fs_read",
+        "at": "2026-11-12T00:00:02.000Z"
+      },
+      "state": "running",
+      "seq": 4
+    },
+    {
+      "input": {
+        "kind": "tool.end",
+        "agentId": "worker",
+        "callId": "c1",
+        "at": "2026-11-12T00:00:03.000Z"
+      },
+      "state": "running",
+      "seq": 5
+    },
+    {
+      "input": {
+        "kind": "turn.end",
+        "agentId": "worker",
+        "turn": 1,
+        "outcome": "completed",
+        "at": "2026-11-12T00:00:04.000Z"
+      },
+      "state": "done",
+      "seq": 7
+    }
+  ],
+  "frames": [
+    {
+      "v": 1,
+      "seq": 1,
+      "now": "2026-11-12T00:00:00.000Z",
+      "stalledAfterMs": 30000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "",
+          "role": "worker",
+          "parentId": "root",
+          "ticketId": "t1",
+          "state": "idle",
+          "since": "2026-11-12T00:00:00.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "agent.register",
+            "at": "2026-11-12T00:00:00.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "agent.register",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "seq": 3,
+      "now": "2026-11-12T00:00:01.000Z",
+      "stalledAfterMs": 30000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "",
+          "role": "worker",
+          "parentId": "root",
+          "ticketId": "t1",
+          "state": "running",
+          "since": "2026-11-12T00:00:01.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:01.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "agent.register",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "seq": 4,
+      "now": "2026-11-12T00:00:02.000Z",
+      "stalledAfterMs": 30000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "",
+          "role": "worker",
+          "parentId": "root",
+          "ticketId": "t1",
+          "state": "running",
+          "since": "2026-11-12T00:00:01.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "tool.start",
+            "at": "2026-11-12T00:00:02.000Z",
+            "tool": "fs_read"
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "agent.register",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "tool.start",
+          "at": "2026-11-12T00:00:02.000Z",
+          "tool": "fs_read"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "seq": 5,
+      "now": "2026-11-12T00:00:03.000Z",
+      "stalledAfterMs": 30000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "",
+          "role": "worker",
+          "parentId": "root",
+          "ticketId": "t1",
+          "state": "running",
+          "since": "2026-11-12T00:00:01.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "tool.end",
+            "at": "2026-11-12T00:00:03.000Z",
+            "tool": "fs_read"
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "agent.register",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "tool.start",
+          "at": "2026-11-12T00:00:02.000Z",
+          "tool": "fs_read"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "tool.end",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": "fs_read"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "seq": 7,
+      "now": "2026-11-12T00:00:04.000Z",
+      "stalledAfterMs": 30000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "",
+          "role": "worker",
+          "parentId": "root",
+          "ticketId": "t1",
+          "state": "done",
+          "since": "2026-11-12T00:00:04.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:04.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "agent.register",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "tool.start",
+          "at": "2026-11-12T00:00:02.000Z",
+          "tool": "fs_read"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "tool.end",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": "fs_read"
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "reason": "completed"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "done",
+          "reason": "turn_ended"
+        }
+      ]
+    }
+  ]
+}

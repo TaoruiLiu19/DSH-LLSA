@@ -289,7 +289,7 @@ test('cross-run communication and evidence reads reject before delivery',async t
   await assert.rejects(manager.send(root.id,{targetId:'other',result:{summary:'x'}}),{code:'FORBIDDEN'});
   const e=manager.publish(root.id,{stepId:'s',result:{secret:'only r1'}});
   assert.throws(()=>manager.readArtifact('r2',e.artifactRef),{code:'FORBIDDEN'});
-  assert.equal(backend.deliveries.length,0);assert.equal(store.listEvents('r2').length,0);
+  assert.equal(backend.deliveries.length,0);assert.ok(store.listEvents('r2').every(e=>e.kind==='hud_frame'&&e.payload.input.kind==='agent.register'));
 });
 
 test('historical query returns recorded old outcome and does not invoke agents',async t=>{
@@ -322,7 +322,7 @@ test('new Assignment may rebind reused root Session; prior child is archived sta
   await backend.complete(old.childId);
   assert.equal(backend.deliveries.length,0);
   assert.equal(store.listEvents('r1').filter(e=>e.kind==='activation_settled')[0].payload.stale,true);
-  assert.equal(store.listEvents('r2').length,0);
+  assert.ok(store.listEvents('r2').every(e=>e.kind==='hud_frame'&&e.payload.input.kind==='agent.register'));
 });
 
 test('parallel admission reservations cannot each spend same remaining budget',async t=>{

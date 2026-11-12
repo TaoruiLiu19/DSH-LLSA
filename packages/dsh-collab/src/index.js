@@ -384,10 +384,16 @@ export async function apply(ctx, rawConfig = {}) {
     registrations.set(agent, disposers);
   };
   ctx.on("agent/created", ({ agent }) => {
+    ensureRun(agent);
     install(agent);
     localWorkspace.configureAgent(agent);
   });
   ctx.on("agent/disposed", ({ agent }) => {
+    const binding=manager.binding(agent.id);
+    if(binding) {
+      const state=manager.hud.load(binding.runId).agents[agent.id];
+      if(state?.turn != null) manager.hud.accept(binding.runId,{kind:'agent.cancel',agentId:agent.id,at:new Date().toISOString(),reason:'disposed'});
+    }
     registrations.delete(agent);
   });
   ctx.on("agent/error", ({ agent, error }) => {
@@ -408,7 +414,7 @@ export async function apply(ctx, rawConfig = {}) {
     return next();
   });
   // AgentRegistry is iterable via list() in the pinned runtime.
-  for (const agent of ctx.agents.list?.() ?? []) install(agent);
+  for (const agent of ctx.agents.list?.() ?? []) { ensureRun(agent); install(agent); }
 
   ctx.on("session/event", (session, event) => {
     if (storeClosed) return;
@@ -417,6 +423,7 @@ export async function apply(ctx, rawConfig = {}) {
     toolIndex.observe(session, event);
     const binding = manager.binding(session.id);
     if (!binding) return;
+    manager.hud.observe(binding,event);
     if (event.type === "tool/result") {
       const result = event.data?.message ?? event.data;
       const identity = toolIndex.resolve(session, event);
