@@ -166,13 +166,43 @@ export function createCollector(options = {}) {
     }
   }
 
+  /**
+   * Seed the task line from the session log.
+   *
+   * A plugin activated mid-turn never sees the `user/message` that started it, so
+   * the centre would fall back to a generic word. `deriveMessages()` is a public
+   * read of the same log; it runs once per session and only for the last user
+   * message (never for tool output).
+   */
+  function seedFromSession(state, session) {
+    if (state.taskText !== '' || session === null || session === undefined) return;
+    if (typeof session.deriveMessages !== 'function') return;
+    try {
+      const messages = session.deriveMessages();
+      if (!Array.isArray(messages)) return;
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message === null || typeof message !== 'object' || message.role !== 'user') continue;
+        const text = textOfMessage(message);
+        if (text === '') continue;
+        state.taskText = text;
+        const agent = state.agents.get(state.id);
+        if (agent !== undefined) agent.label = hudLabel({ assignmentTitle: text, role: agent.role });
+        return;
+      }
+    } catch {
+      // A session that cannot derive messages simply has no task line.
+    }
+  }
+
   /** One durable `session/event`. Unknown types are ignored on purpose. */
-  function observeEvent(sessionId, event) {
+  function observeEvent(sessionId, event, session) {
     if (event === null || typeof event !== 'object') return;
     const state = stateFor(sessionId);
+    seedFromSession(state, session);
     const data = event.data !== null && typeof event.data === 'object' ? event.data : {};
     const at = Number.isFinite(event.time) ? event.time : Date.now();
-    const agent = agentFor(state, sessionId, { role: 'root', at });
+    const agent = agentFor(state, sessionId, { role: 'root', at, label: state.taskText });
 
     switch (event.type) {
       case 'user/message': {

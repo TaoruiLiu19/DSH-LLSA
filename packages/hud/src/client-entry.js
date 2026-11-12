@@ -14,7 +14,7 @@
  */
 import { createView, foldSnapshot, nextFocus, stepLifecycle } from './model.js';
 import { createFieldCanvas } from './render.js';
-import { createCapsule, createFocusLayer, createOfflinePill, createStageHook } from './focus.js';
+import { STYLES, createCapsule, createFocusLayer, createOfflinePill, createStageHook } from './focus.js';
 
 /** How often the snapshot is polled, by what the field is doing. */
 export const POLL_MS = Object.freeze({ running: 240, waiting: 600, settled: 800, empty: 1400 });
@@ -23,14 +23,32 @@ const STRINGS = Object.freeze({
   zh: {
     hint: '点击空白处或按 Esc 返回；右下角胶囊可以再进来',
     open: '点击返回',
+    capsule: '返回',
     offline: 'HUD 未连接',
   },
   en: {
     hint: 'Click the empty area or press Esc to leave; the capsule at the bottom right brings it back',
     open: 'Click to return',
+    capsule: 'Back',
     offline: 'HUD offline',
   },
 });
+
+/**
+ * A modal the field must never cover.
+ *
+ * Core mode cannot see approvals in the snapshot, so the page is asked directly:
+ * any open dialog suspends the field, and closing it brings the field back —
+ * which is what §4.6 wants for every ask surface, not just `ask_user_question`.
+ */
+function hasBlockingDialog() {
+  if (typeof document === 'undefined') return false;
+  try {
+    return document.querySelector('[aria-modal="true"], [role="dialog"], [role="alertdialog"]') !== null;
+  } catch {
+    return false;
+  }
+}
 
 function stringsOf(locale) {
   return /^en\b/i.test(String(locale ?? '')) ? STRINGS.en : STRINGS.zh;
@@ -56,6 +74,8 @@ function createStore(getLocale) {
     view: createView({ now: 0 }),
     focus: { taskId: null, active: false, dismissedTaskId: null, state: 'idle' },
     online: false,
+    /** An open modal suspends the field without dismissing it. */
+    dialogOpen: false,
     locale: 'zh',
     version: 0,
     listeners: new Set(),
@@ -104,6 +124,12 @@ function createStore(getLocale) {
     },
     open() {
       state.focus = { ...state.focus, active: true, dismissedTaskId: null };
+      notify();
+    },
+    /** A modal owns the screen: the field steps aside without being dismissed. */
+    setDialogOpen(open) {
+      if (state.dialogOpen === open) return;
+      state.dialogOpen = open;
       notify();
     },
   };
@@ -160,6 +186,7 @@ export function applyClient(ctx, React) {
       } finally {
         inFlight = false;
       }
+      store.setDialogOpen(hasBlockingDialog());
       const view = store.get().view;
       const delay = view.state === 'running'
         ? POLL_MS.running
@@ -226,34 +253,43 @@ export function applyClient(ctx, React) {
     }, []);
 
     const focused = state.focus.active && view.taskId !== null;
+    // The stylesheet lives on the entry, not on the layer: the capsule and the
+    // pill also mount while the layer is gone and must keep their rules.
+    const sheet = React.createElement('style', { 'data-dsh-hud': 'overlay' }, STYLES);
+    const wrap = node => React.createElement(React.Fragment, null, sheet, node);
     if (!focused) {
       const showCapsule = view.taskId !== null && state.focus.dismissedTaskId !== null;
       if (showCapsule) {
-        return React.createElement(Capsule, {
+        return wrap(React.createElement(Capsule, {
           view,
           stage,
           onOpen: () => store.open(),
-          labels: { open: strings.open },
-        });
+          labels: { open: strings.open, capsule: strings.capsule },
+        }));
       }
       // A session is known but the snapshot route never answered: say so instead
       // of showing the same blank screen as "nothing is happening".
-      if (state.sessionId !== null && state.online === false && stage.full === false) {
-        return React.createElement(OfflinePill, { stage, text: strings.offline });
+      if (state.sessionId !== null && state.online === false) {
+        return wrap(React.createElement(OfflinePill, { stage, text: strings.offline }));
       }
-      return null;
+      return wrap(null);
     }
-    return React.createElement(FocusLayer, {
+    return wrap(React.createElement(FocusLayer, {
       view,
       stage,
+      // A modal owns the input, not the picture: keep the field, but let the
+      // scrim stop swallowing clicks and stop dimming what it covers.
+      soft: state.dialogOpen === true,
       onDismiss: () => store.dismiss(),
       hint: strings.hint,
       canvasProps: { getView, getStage },
-    });
+    }));
   }
 
   ctx.slots.inject('shell.overlay', () => ctx.slots.register(
-    { name: 'shell.overlay', id: 'hud:focus', order: 40 },
+    // A negative order keeps the focus layer underneath every other overlay
+    // entry, so a dialog from another plugin paints above it (§4.4, §4.6).
+    { name: 'shell.overlay', id: 'hud:focus', order: -10 },
     OverlayEntry,
   ));
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(

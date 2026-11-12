@@ -115,11 +115,20 @@ function agent(id, state, extra = {}) {
 test('a single agent owns the centre', () => {
   const view = createView({ sessionId: 's', now: 0 });
   foldSnapshot(view, snapshot({
-    agents: [agent('worker', 'running', { role: 'worker', parentId: 'root' })],
+    agents: [{ ...agent('worker', 'running', { role: 'worker', parentId: 'root' }), label: '核对代码' }],
     events: [{ seq: 1, agentId: 'worker', kind: 'state.changed', at: '2026-11-12T03:20:11Z', tool: null, from: 'idle', to: 'running', reason: 'turn_started' }],
   }), 0, { sessionId: 's' });
   assert.equal(view.state, 'running');
-  assert.equal(centerText(view).main, 'worker', 'the run label names the task');
+  assert.equal(centerText(view).main, '核对代码', 'the run label names the task');
+});
+
+test('a bare role name never becomes the task line', () => {
+  const view = createView({ sessionId: 's', now: 0 });
+  foldSnapshot(view, snapshot({
+    agents: [agent('worker', 'running', { role: 'worker' })],
+    events: [{ seq: 1, agentId: 'worker', kind: 'state.changed', at: '2026-11-12T03:20:11Z', tool: null, from: 'idle', to: 'running', reason: 'turn_started' }],
+  }), 0, { sessionId: 's' });
+  assert.equal(centerText(view).main, '执行中', 'a placeholder word is better than a role name');
 });
 
 test('a delegation from the root lights no seat of its own', () => {

@@ -296,7 +296,11 @@ export function drawField(context, view, geometry, now, options = {}) {
       point,
       offset: 42 * k,
       label: node.label || materialLabel(node.id, view.locale),
-      sub: node.state === 'idle' ? '' : (node.verb || stateLabel(node.state, view.locale)),
+      // The verb belongs to the activity; once the call ends the node says how it
+      // ended (完成 / 未完成 / 等你确认) instead of freezing on 「读取中」.
+      sub: node.state === 'idle'
+        ? ''
+        : (node.state === 'running' ? (node.verb || stateLabel('running', view.locale)) : stateLabel(node.state, view.locale)),
       tone,
       k,
       labelSize: 14,

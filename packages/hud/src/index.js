@@ -86,7 +86,9 @@ export function apply(ctx, config) {
   ctx.on('session/event', (session, event) => {
     const sessionId = sessionIdOf(session);
     if (sessionId === '') return;
-    collector.observeEvent(sessionId, event);
+    // The session itself is passed along so the collector can seed the task line
+    // from the log when the plugin was activated mid-turn.
+    collector.observeEvent(sessionId, event, session);
   });
 
   ctx.on('agent/status', payload => {

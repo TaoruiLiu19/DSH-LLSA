@@ -88,7 +88,7 @@ test('apply registers both seats without throwing', () => {
   for (const entry of slots) assert.equal(typeof entry.component, 'function');
 });
 
-test('the overlay renders nothing on an idle field', () => {
+test('the overlay renders only its stylesheet on an idle field', () => {
   const registration = loadBundle();
   const React = stubReact();
   const api = registration.factory(spec => {
@@ -98,6 +98,10 @@ test('the overlay renders nothing on an idle field', () => {
   const { ctx, slots } = fakeContext();
   api.apply(ctx);
   const Overlay = slots[0].component;
-  // Hooks resolve against the stubs; an idle store has no task, so no element.
-  assert.equal(Overlay({}), null);
+  const element = Overlay({});
+  assert.equal(element.type, React.Fragment, 'the stylesheet must stay mounted for the capsule');
+  const visible = element.children.filter(child => child !== null && child !== undefined);
+  assert.equal(visible.length, 1, 'nothing but the stylesheet');
+  assert.equal(visible[0].type, 'style');
+  assert.match(String(visible[0].children.join('')), /\.dsh-hud-capsule/);
 });

@@ -460,12 +460,22 @@ function busiestMaterial(view) {
 }
 
 /** The label of the one agent that owns the field, if there is exactly one. */
+/** A label is display text; a bare role name is not a task name. */
+function usableLabel(node) {
+  const label = typeof node.label === 'string' ? node.label.trim() : '';
+  if (label === '') return '';
+  const role = typeof node.role === 'string' ? node.role.trim() : '';
+  if (role !== '' && label === role) return '';
+  if (label === 'root' || label === 'worker' || label === '智能体') return '';
+  return label;
+}
+
 export function primaryLabel(view) {
   const nodes = [...view.agents.values()];
-  if (nodes.length === 1) return nodes[0].label || '';
+  if (nodes.length === 1) return usableLabel(nodes[0]);
   if (nodes.length === 0) return '';
   const root = nodes.find(node => node.role === 'root' || node.parentId === null);
-  return root === undefined ? '' : root.label || '';
+  return root === undefined ? '' : usableLabel(root);
 }
 
 /**
