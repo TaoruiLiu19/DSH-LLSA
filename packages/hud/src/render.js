@@ -42,10 +42,13 @@ export function stageFor(viewport, center) {
   const height = clampInt(viewport?.height, 0);
   const full = { x: 0, y: 0, w: width, h: height, radius: 0, full: true };
   if (center === null || center === undefined) return full;
-  const left = clampInt(center.left, 0);
-  const right = clampInt(center.right, width);
-  const top = clampInt(center.top, 0);
-  const bottom = clampInt(center.bottom, height);
+  // A measured column can reach outside the viewport — the chat flow grows with
+  // its content and scrolls — so every edge is clamped before it becomes a box.
+  const clamp = (value, low, high, fallback) => Math.max(low, Math.min(high, clampInt(value, fallback)));
+  const left = clamp(center.left, 0, width, 0);
+  const right = clamp(center.right, 0, width, width);
+  const top = clamp(center.top, 0, height, 0);
+  const bottom = clamp(center.bottom, 0, height, height);
   const column = { x: left, y: top, w: Math.max(0, right - left), h: Math.max(0, bottom - top), radius: STAGE_RADIUS, full: false };
   const bothPanelsOpen = left > 1 && right < width - 1 && column.w > 240 && column.h > 240;
   return bothPanelsOpen ? column : full;

@@ -107,7 +107,7 @@ never an invisible node.
 ## Verification
 
 ```bash
-npm test --prefix packages/hud       # 77 assertions, no network, no browser
+npm test --prefix packages/hud       # 81 assertions, no network, no browser
 npm run check --prefix packages/hud  # the same plus a stale-bundle check
 ```
 

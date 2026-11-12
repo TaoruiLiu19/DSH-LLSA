@@ -920,10 +920,13 @@ function stageFor(viewport, center) {
   const height = clampInt(viewport?.height, 0);
   const full = { x: 0, y: 0, w: width, h: height, radius: 0, full: true };
   if (center === null || center === undefined) return full;
-  const left = clampInt(center.left, 0);
-  const right = clampInt(center.right, width);
-  const top = clampInt(center.top, 0);
-  const bottom = clampInt(center.bottom, height);
+  // A measured column can reach outside the viewport — the chat flow grows with
+  // its content and scrolls — so every edge is clamped before it becomes a box.
+  const clamp = (value, low, high, fallback) => Math.max(low, Math.min(high, clampInt(value, fallback)));
+  const left = clamp(center.left, 0, width, 0);
+  const right = clamp(center.right, 0, width, width);
+  const top = clamp(center.top, 0, height, 0);
+  const bottom = clamp(center.bottom, 0, height, height);
   const column = { x: left, y: top, w: Math.max(0, right - left), h: Math.max(0, bottom - top), radius: STAGE_RADIUS, full: false };
   const bothPanelsOpen = left > 1 && right < width - 1 && column.w > 240 && column.h > 240;
   return bothPanelsOpen ? column : full;
@@ -1360,24 +1363,26 @@ function resolveColumn(doc) {
 function measureStage(doc = typeof document === 'undefined' ? undefined : document) {
   if (doc === undefined) return stageFor({ width: 0, height: 0 }, null);
   const viewport = { width: doc.defaultView?.innerWidth ?? 0, height: doc.defaultView?.innerHeight ?? 0 };
+  const column = resolveColumn(doc);
+  const columnRect = column === null ? null : column.getBoundingClientRect();
   const flow = doc.querySelector(FLOW_SELECTOR);
+  const composer = doc.querySelector(COMPOSER_SELECTOR);
   let center = null;
   if (flow !== null) {
     const rect = flow.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
       center = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
     }
+  } else if (columnRect !== null && columnRect.width > 0) {
+    center = { left: columnRect.left, right: columnRect.right, top: columnRect.top, bottom: columnRect.bottom };
   }
-  if (center === null) {
-    const column = resolveColumn(doc);
-    if (column !== null) {
-      const rect = column.getBoundingClientRect();
-      const composer = doc.querySelector(COMPOSER_SELECTOR);
-      const bottom = composer === null ? rect.bottom : Math.min(rect.bottom, composer.getBoundingClientRect().top);
-      if (rect.width > 0 && bottom > rect.top) {
-        center = { left: rect.left, right: rect.right, top: rect.top, bottom };
-      }
-    }
+  if (center === null) return stageFor(viewport, null);
+  // The chat flow scrolls, so its box can start above the viewport; the composer
+  // and the column edges cap it so the scrim never covers the composer card.
+  if (composer !== null) center.bottom = Math.min(center.bottom, composer.getBoundingClientRect().top);
+  if (columnRect !== null) {
+    center.left = Math.max(center.left, columnRect.left);
+    center.right = Math.min(center.right, columnRect.right);
   }
   return stageFor(viewport, center);
 }
