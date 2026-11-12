@@ -18,6 +18,7 @@
     "client.js",
     "data",
     "scripts",
+    "test",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
