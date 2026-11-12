@@ -35,7 +35,7 @@ export const STAGE_TRANSITION = 'left .26s cubic-bezier(.22,.9,.2,1), top .26s c
  */
 export const STYLES = `
 .dsh-hud-scrim{position:fixed;z-index:1;background:rgba(6,9,14,.45);-webkit-backdrop-filter:blur(11px);backdrop-filter:blur(11px);transition:${STAGE_TRANSITION},background .2s ease}
-.dsh-hud-scrim-soft{background:rgba(6,9,14,.26);pointer-events:none}
+.dsh-hud-scrim-soft{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;pointer-events:none}
 .dsh-hud-field{position:fixed;z-index:2;pointer-events:none;transition:${STAGE_TRANSITION}}
 .dsh-hud-hint{position:fixed;z-index:2;pointer-events:none;text-align:center;font-size:11px;line-height:1.6;color:rgba(150,165,185,.75);letter-spacing:.02em;text-shadow:0 1px 6px rgba(0,0,0,.5)}
 .dsh-hud-capsule{position:fixed;z-index:3;display:inline-flex;align-items:center;gap:8px;padding:7px 14px 7px 11px;border-radius:999px;background:rgba(20,26,35,.55);border:1px solid rgba(255,255,255,.16);color:#dbe5f2;font-size:12px;line-height:1;cursor:pointer;pointer-events:auto;touch-action:manipulation;user-select:none;box-shadow:0 8px 26px rgba(0,0,0,.35);-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);transition:background .16s ease,border-color .16s ease,color .16s ease,transform .16s ease}
@@ -116,6 +116,44 @@ export function measureStage(doc = typeof document === 'undefined' ? undefined :
 }
 
 /**
+ * Split the scrim into the pieces around a hole.
+ *
+ * Four plain boxes instead of a CSS mask: no `mask-composite` support to depend
+ * on, and the hole's edge is exactly where the blur should stop. The pieces are
+ * click-through, so the surface inside the hole keeps receiving input.
+ *
+ * @param stage - the measured message area.
+ * @param hole - `{x, y, width, height}` of the surface to keep sharp, or null.
+ * @param pad - how far the sharp area extends past its own box.
+ * @returns the stage box itself when there is no hole, otherwise up to four boxes.
+ */
+export function scrimPieces(stage, hole, pad = 10) {
+  const stageBox = { x: stage.x, y: stage.y, w: stage.w, h: stage.h, radius: stage.radius ?? 0, full: stage.full === true };
+  if (hole === null || hole === undefined) return [stageBox];
+  const width = Number.isFinite(hole.width) ? hole.width : 0;
+  const height = Number.isFinite(hole.height) ? hole.height : 0;
+  if (!(width > 0) || !(height > 0)) return [stageBox];
+  const x = hole.x - pad;
+  const y = hole.y - pad;
+  const w = width + pad * 2;
+  const h = height + pad * 2;
+  const top = Math.max(stage.y, y);
+  const bottom = Math.min(stage.y + stage.h, y + h);
+  const left = Math.max(stage.x, x);
+  const right = Math.min(stage.x + stage.w, x + w);
+  const pieces = [
+    { x: stage.x, y: stage.y, w: stage.w, h: Math.max(0, top - stage.y) },
+    { x: stage.x, y: bottom, w: stage.w, h: Math.max(0, stage.y + stage.h - bottom) },
+    { x: stage.x, y: top, w: Math.max(0, left - stage.x), h: Math.max(0, bottom - top) },
+    { x: right, y: top, w: Math.max(0, stage.x + stage.w - right), h: Math.max(0, bottom - top) },
+  ];
+  const visible = pieces.filter(piece => piece.w > 0 && piece.h > 0);
+  // Nothing left to blur: the dialog covers the whole stage, so the scrim must
+  // get out of the way instead of covering it.
+  return visible.map(piece => ({ ...piece, radius: 0, full: false }));
+}
+
+/**
  * Track the stage. Recovers from boot swaps and panel animation without polling
  * the document on every streamed token: a rAF-debounced mutation watcher plus a
  * slow safety net.
@@ -169,24 +207,29 @@ export function createStageHook(React) {
 export function createFocusLayer(React, options = {}) {
   const FieldCanvas = options.FieldCanvas;
   return function FocusLayer(props) {
-    const { view, stage, onDismiss, hint, soft } = props;
+    const { view, stage, onDismiss, hint, soft, hole } = props;
     const box = hudBox(stage);
     const hintBottom = Math.max(12, (globalThis.innerHeight ?? 0) - (stage.y + stage.h) + 12);
+    const pieces = soft === true ? [] : scrimPieces(stage, hole);
+    const clickThrough = soft === true || pieces.length > 1;
+    const scrims = soft === true ? null : pieces.map((piece, index) => React.createElement('div', {
+      key: `scrim-${index}`,
+      className: 'dsh-hud-scrim',
+      onClick: clickThrough ? undefined : onDismiss,
+      'aria-hidden': true,
+      style: {
+        left: px(piece.x),
+        top: px(piece.y),
+        width: px(piece.w),
+        height: px(piece.h),
+        borderRadius: `${piece.radius ?? 0}px`,
+        pointerEvents: clickThrough ? 'none' : undefined,
+      },
+    }));
     return React.createElement(
       React.Fragment,
       null,
-      React.createElement('div', {
-        className: soft === true ? 'dsh-hud-scrim dsh-hud-scrim-soft' : 'dsh-hud-scrim',
-        onClick: soft === true ? undefined : onDismiss,
-        'aria-hidden': true,
-        style: {
-          left: px(stage.x),
-          top: px(stage.y),
-          width: px(stage.w),
-          height: px(stage.h),
-          borderRadius: `${stage.radius}px`,
-        },
-      }),
+      scrims,
       React.createElement(
         'div',
         {
@@ -195,7 +238,7 @@ export function createFocusLayer(React, options = {}) {
         },
         FieldCanvas === undefined || FieldCanvas === null ? null : React.createElement(FieldCanvas, props.canvasProps),
       ),
-      props.showHint === false
+      props.showHint === false || soft === true
         ? null
         : React.createElement(
           'div',

@@ -1357,7 +1357,7 @@ const STAGE_TRANSITION = 'left .26s cubic-bezier(.22,.9,.2,1), top .26s cubic-be
  */
 const STYLES = `
 .dsh-hud-scrim{position:fixed;z-index:1;background:rgba(6,9,14,.45);-webkit-backdrop-filter:blur(11px);backdrop-filter:blur(11px);transition:${STAGE_TRANSITION},background .2s ease}
-.dsh-hud-scrim-soft{background:rgba(6,9,14,.26);pointer-events:none}
+.dsh-hud-scrim-soft{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;pointer-events:none}
 .dsh-hud-field{position:fixed;z-index:2;pointer-events:none;transition:${STAGE_TRANSITION}}
 .dsh-hud-hint{position:fixed;z-index:2;pointer-events:none;text-align:center;font-size:11px;line-height:1.6;color:rgba(150,165,185,.75);letter-spacing:.02em;text-shadow:0 1px 6px rgba(0,0,0,.5)}
 .dsh-hud-capsule{position:fixed;z-index:3;display:inline-flex;align-items:center;gap:8px;padding:7px 14px 7px 11px;border-radius:999px;background:rgba(20,26,35,.55);border:1px solid rgba(255,255,255,.16);color:#dbe5f2;font-size:12px;line-height:1;cursor:pointer;pointer-events:auto;touch-action:manipulation;user-select:none;box-shadow:0 8px 26px rgba(0,0,0,.35);-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);transition:background .16s ease,border-color .16s ease,color .16s ease,transform .16s ease}
@@ -1438,6 +1438,44 @@ function measureStage(doc = typeof document === 'undefined' ? undefined : docume
 }
 
 /**
+ * Split the scrim into the pieces around a hole.
+ *
+ * Four plain boxes instead of a CSS mask: no `mask-composite` support to depend
+ * on, and the hole's edge is exactly where the blur should stop. The pieces are
+ * click-through, so the surface inside the hole keeps receiving input.
+ *
+ * @param stage - the measured message area.
+ * @param hole - `{x, y, width, height}` of the surface to keep sharp, or null.
+ * @param pad - how far the sharp area extends past its own box.
+ * @returns the stage box itself when there is no hole, otherwise up to four boxes.
+ */
+function scrimPieces(stage, hole, pad = 10) {
+  const stageBox = { x: stage.x, y: stage.y, w: stage.w, h: stage.h, radius: stage.radius ?? 0, full: stage.full === true };
+  if (hole === null || hole === undefined) return [stageBox];
+  const width = Number.isFinite(hole.width) ? hole.width : 0;
+  const height = Number.isFinite(hole.height) ? hole.height : 0;
+  if (!(width > 0) || !(height > 0)) return [stageBox];
+  const x = hole.x - pad;
+  const y = hole.y - pad;
+  const w = width + pad * 2;
+  const h = height + pad * 2;
+  const top = Math.max(stage.y, y);
+  const bottom = Math.min(stage.y + stage.h, y + h);
+  const left = Math.max(stage.x, x);
+  const right = Math.min(stage.x + stage.w, x + w);
+  const pieces = [
+    { x: stage.x, y: stage.y, w: stage.w, h: Math.max(0, top - stage.y) },
+    { x: stage.x, y: bottom, w: stage.w, h: Math.max(0, stage.y + stage.h - bottom) },
+    { x: stage.x, y: top, w: Math.max(0, left - stage.x), h: Math.max(0, bottom - top) },
+    { x: right, y: top, w: Math.max(0, stage.x + stage.w - right), h: Math.max(0, bottom - top) },
+  ];
+  const visible = pieces.filter(piece => piece.w > 0 && piece.h > 0);
+  // Nothing left to blur: the dialog covers the whole stage, so the scrim must
+  // get out of the way instead of covering it.
+  return visible.map(piece => ({ ...piece, radius: 0, full: false }));
+}
+
+/**
  * Track the stage. Recovers from boot swaps and panel animation without polling
  * the document on every streamed token: a rAF-debounced mutation watcher plus a
  * slow safety net.
@@ -1491,24 +1529,29 @@ function createStageHook(React) {
 function createFocusLayer(React, options = {}) {
   const FieldCanvas = options.FieldCanvas;
   return function FocusLayer(props) {
-    const { view, stage, onDismiss, hint, soft } = props;
+    const { view, stage, onDismiss, hint, soft, hole } = props;
     const box = hudBox(stage);
     const hintBottom = Math.max(12, (globalThis.innerHeight ?? 0) - (stage.y + stage.h) + 12);
+    const pieces = soft === true ? [] : scrimPieces(stage, hole);
+    const clickThrough = soft === true || pieces.length > 1;
+    const scrims = soft === true ? null : pieces.map((piece, index) => React.createElement('div', {
+      key: `scrim-${index}`,
+      className: 'dsh-hud-scrim',
+      onClick: clickThrough ? undefined : onDismiss,
+      'aria-hidden': true,
+      style: {
+        left: px(piece.x),
+        top: px(piece.y),
+        width: px(piece.w),
+        height: px(piece.h),
+        borderRadius: `${piece.radius ?? 0}px`,
+        pointerEvents: clickThrough ? 'none' : undefined,
+      },
+    }));
     return React.createElement(
       React.Fragment,
       null,
-      React.createElement('div', {
-        className: soft === true ? 'dsh-hud-scrim dsh-hud-scrim-soft' : 'dsh-hud-scrim',
-        onClick: soft === true ? undefined : onDismiss,
-        'aria-hidden': true,
-        style: {
-          left: px(stage.x),
-          top: px(stage.y),
-          width: px(stage.w),
-          height: px(stage.h),
-          borderRadius: `${stage.radius}px`,
-        },
-      }),
+      scrims,
       React.createElement(
         'div',
         {
@@ -1517,7 +1560,7 @@ function createFocusLayer(React, options = {}) {
         },
         FieldCanvas === undefined || FieldCanvas === null ? null : React.createElement(FieldCanvas, props.canvasProps),
       ),
-      props.showHint === false
+      props.showHint === false || soft === true
         ? null
         : React.createElement(
           'div',
@@ -1619,19 +1662,116 @@ const STRINGS = Object.freeze({
 });
 
 /**
- * A modal the field must never cover.
+ * Find the surface a dialog paints, if one is open.
  *
- * Core mode cannot see approvals in the snapshot, so the page is asked directly:
- * any open dialog suspends the field, and closing it brings the field back —
- * which is what §4.6 wants for every ask surface, not just `ask_user_question`.
+ * Dialogs arrive as a role-annotated element, or as a full-screen fixed backdrop
+ * (usually portaled next to the app root) with a card inside it. The card is the
+ * largest box inside the backdrop that is still smaller than the viewport.
  */
-function hasBlockingDialog() {
-  if (typeof document === 'undefined') return false;
+function findDialogSurface() {
+  if (typeof document === 'undefined' || document.body === null) return null;
   try {
-    return document.querySelector('[aria-modal="true"], [role="dialog"], [role="alertdialog"]') !== null;
+    const explicit = document.querySelector('[aria-modal="true"], [role="dialog"], [role="alertdialog"]');
+    if (explicit !== null) return dialogBox(explicit);
+
+    const viewportWidth = globalThis.innerWidth ?? 0;
+    const viewportHeight = globalThis.innerHeight ?? 0;
+    if (!(viewportWidth > 0) || !(viewportHeight > 0)) return null;
+
+    // Portals mount next to the app root, one or two levels deep: a shallow walk
+    // finds them without scanning the whole app on every frame.
+    const candidates = [];
+    const collect = (element, depth) => {
+      if (element === null || depth > 2 || candidates.length > 80) return;
+      candidates.push(element);
+      for (const child of element.children ?? []) collect(child, depth + 1);
+    };
+    for (const child of document.body.children) {
+      if (child.id === 'root') {
+        for (const inner of child.children) collect(inner, 0);
+        continue;
+      }
+      collect(child, 0);
+    }
+
+    let backdrop = null;
+    let bestZ = -Infinity;
+    for (const element of candidates) {
+      if (element.closest('[class*="dsh-hud"]') !== null) continue;
+      const style = getComputedStyle(element);
+      if (style.position !== 'fixed' && style.position !== 'absolute') continue;
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      const rect = element.getBoundingClientRect();
+      if (!(rect.width >= viewportWidth * 0.9 && rect.height >= viewportHeight * 0.9)) continue;
+      const z = Number.parseInt(style.zIndex, 10);
+      const rank = Number.isFinite(z) ? z : 0;
+      if (rank >= bestZ) {
+        bestZ = rank;
+        backdrop = element;
+      }
+    }
+    if (backdrop === null) return null;
+
+    let card = null;
+    let largest = 0;
+    for (const element of backdrop.querySelectorAll('*')) {
+      const rect = element.getBoundingClientRect();
+      const area = rect.width * rect.height;
+      if (area < 8000) continue;
+      if (rect.width >= viewportWidth - 2 && rect.height >= viewportHeight - 2) continue;
+      if (area > largest) {
+        largest = area;
+        card = element;
+      }
+    }
+    return dialogBox(card ?? backdrop);
   } catch {
-    return false;
+    return null;
   }
+}
+
+/**
+ * The card the user must answer, found from the controls they must press.
+ *
+ * A question rendered inside the message flow has no role and no backdrop, so the
+ * anchor is the last interactive control in the flow: walk up from it to the card
+ * that holds it. Bounded by the stage, so a stray button elsewhere is ignored.
+ */
+function questionCardBox(stage) {
+  if (typeof document === 'undefined' || stage === null) return null;
+  try {
+    const host = document.querySelector('#root [data-slot="conversation.chat.flow"]')
+      ?? document.querySelector('[data-slot="conversation.chat.flow"]');
+    if (host === null) return null;
+    const controls = [...host.querySelectorAll('button, [role="button"], input, textarea')];
+    const inside = controls.filter(element => {
+      const rect = element.getBoundingClientRect();
+      if (!(rect.width > 0 && rect.height > 0)) return false;
+      return rect.top >= stage.y - 4 && rect.bottom <= stage.y + stage.h + 4;
+    });
+    const anchor = inside.at(-1);
+    if (anchor === undefined) return null;
+    let box = null;
+    let node = anchor;
+    for (let hop = 0; hop < 6 && node !== null; hop += 1, node = node.parentElement) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width >= 240 && rect.height >= 56) {
+        box = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+      }
+      if (rect.width >= stage.w * 0.8) break;
+    }
+    return box;
+  } catch {
+    return null;
+  }
+}
+
+/** The dialog's box in viewport coordinates, or null when it has none yet. */
+function dialogBox(element) {
+  if (element === null || typeof element.getBoundingClientRect !== 'function') return null;
+  const rect = element.getBoundingClientRect();
+  if (!(rect.width > 0) || !(rect.height > 0)) return null;
+  return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
 }
 
 function stringsOf(locale) {
@@ -1658,8 +1798,6 @@ function createStore(getLocale) {
     view: createView({ now: 0 }),
     focus: { taskId: null, active: false, dismissedTaskId: null, state: 'idle' },
     online: false,
-    /** An open modal suspends the field without dismissing it. */
-    dialogOpen: false,
     locale: 'zh',
     version: 0,
     listeners: new Set(),
@@ -1708,12 +1846,6 @@ function createStore(getLocale) {
     },
     open() {
       state.focus = { ...state.focus, active: true, dismissedTaskId: null };
-      notify();
-    },
-    /** A modal owns the screen: the field steps aside without being dismissed. */
-    setDialogOpen(open) {
-      if (state.dialogOpen === open) return;
-      state.dialogOpen = open;
       notify();
     },
   };
@@ -1770,7 +1902,6 @@ function applyClient(ctx, React) {
       } finally {
         inFlight = false;
       }
-      store.setDialogOpen(hasBlockingDialog());
       const view = store.get().view;
       const delay = view.state === 'running'
         ? POLL_MS.running
@@ -1858,12 +1989,17 @@ function applyClient(ctx, React) {
       }
       return wrap(null);
     }
+    // The scrim is split around whatever the user must interact with: a modal
+    // card, or the answer controls of an inline question. The blur and the dim
+    // stay everywhere else, and the sharp area stays clickable. If neither can be
+    // located, the scrim steps aside rather than covering the question.
+    const hole = findDialogSurface() ?? (view.pending === true ? questionCardBox(stage) : null);
+    const soft = view.pending === true && hole === null;
     return wrap(React.createElement(FocusLayer, {
       view,
       stage,
-      // A modal owns the input, not the picture: keep the field, but let the
-      // scrim stop swallowing clicks and stop dimming what it covers.
-      soft: state.dialogOpen === true,
+      soft,
+      hole: soft ? null : hole,
       onDismiss: () => store.dismiss(),
       hint: strings.hint,
       canvasProps: { getView, getStage },
