@@ -317,7 +317,10 @@ test('old attempt cannot publish into or settle a replacement work attempt',asyn
 test('new Assignment may rebind reused root Session; prior child is archived stale',async t=>{
   const {manager,root,backend,store}=fixture(t);
   const old=await manager.delegate(root,{objective:'旧派工',workItemId:'old'});
-  const rebind=manager.bindRoot(root.id,{runId:'r2',ticketId:'t1',assignmentId:'a2'});
+  const rebind=manager.bindRoot(root.id,{runId:'r2',ticketId:'t1',assignmentId:'a2',assignmentTitle:'修复边界',threadTitle:'其它标题'});
+  assert.equal(manager.hud.snapshot('r2').agents[0].label,'修复边界');
+  manager.bindRoot(root.id,{runId:'r2',assignmentTitle:'不能随轮次变化'});
+  assert.equal(manager.hud.snapshot('r2').agents[0].label,'修复边界');
   assert.equal(rebind.runId,'r2');assert.equal(manager.binding(root.id).runId,'r2');
   await backend.complete(old.childId);
   assert.equal(backend.deliveries.length,0);

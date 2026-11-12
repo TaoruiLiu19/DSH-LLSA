@@ -1,0 +1,18 @@
+{
+  "name": "Deterministic display label boundaries",
+  "cases": [
+    {"input":{"assignmentTitle":"","threadTitle":"","role":"worker"},"expected":"worker"},
+    {"input":{"assignmentTitle":"一二三四五六七八九十甲乙丙丁","role":"worker"},"expected":"一二三四五六七八九十甲乙"},
+    {"input":{"assignmentTitle":"C:\\private\\source.py /tmp/private.json","role":"reviewer"},"expected":"reviewer"},
+    {"input":{"assignmentTitle":"","threadTitle":"核对数据","role":"worker"},"expected":"核对数据"},
+    {"input":{"assignmentTitle":"验证结果","threadTitle":"其它名称","role":"worker"},"expected":"验证结果"},
+    {"input":{"assignmentTitle":"https://private.test/a user@example.com 123456 `const secret = 1;`","role":""},"expected":"智能体"},
+    {"input":{"assignmentTitle":"核对\n结果 /tmp/a.js https://a.test","role":"worker"},"expected":"核对 结果"},
+    {"input":{"assignmentTitle":"abcdefghijklmnop","role":"worker"},"expected":"abcdefghijkl"},
+    {"input":{"assignmentTitle":"```js\nconst secret = 1;\n```","role":"tester"},"expected":"tester"},
+    {"input":{"assignmentTitle":"const secret = 1;","role":"tester"},"expected":"tester"},
+    {"input":{"assignmentTitle":"检查 \"C:\\My Project\\private.xlsx\" ftp://private.test/a","role":"tester"},"expected":"检查"},
+    {"input":{"assignmentTitle":"private.xlsx https://private.test user@example.com","role":"tester"},"expected":"tester"},
+    {"input":{"assignmentTitle":"𠀀𠀀𠀀𠀀𠀀𠀀𠀀𠀀𠀀𠀀𠀀𠀀𠀀","role":"tester"},"expected":"𠀀𠀀𠀀𠀀𠀀𠀀𠀀𠀀𠀀𠀀𠀀𠀀"}
+  ]
+}

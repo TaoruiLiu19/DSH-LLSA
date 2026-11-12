@@ -23,6 +23,7 @@ import { connectSuperagent } from "./superagent-integration.js";
 import { InputDelivery } from "./input-delivery.js";
 import { concludeSubmitted } from "./turn-completion.js";
 import { readEvidencePage } from "./evidence-page.js";
+import { syncHostQuestions, installBlockingAttention } from './hud-host.js';
 
 export const name = "dsh-collab";
 export const inject = [
@@ -33,6 +34,8 @@ export const inject = [
   "sessionPersistence",
   "subagents",
   "webServer",
+  "sessionProjections",
+  "userQuestions",
 ];
 export const Config = Schema.object({
   stateDir: Schema.string().default("./.dsh-collab"),
@@ -120,6 +123,7 @@ export async function apply(ctx, rawConfig = {}) {
   });
 
   const ensureRun = (agent) => {
+    const threadTitle=ctx.sessionProjections.snapshot(agent.session,['title']).values.title;
     const child = manager.binding(agent.id);
     if (child?.parentId) return child;
     const bridge = manager.bridge;
@@ -137,9 +141,12 @@ export async function apply(ctx, rawConfig = {}) {
           ticketId: row.ticket.id,
           assignmentId: row.assignmentId,
           title: row.ticket.title,
+          assignmentTitle: row.ticket.execution?.name || row.ticket.title,
+          threadTitle,
+          ...bridge.displayTitles?.(row.ticket.id),
         });
     }
-    return manager.bindRoot(agent.id);
+    return manager.bindRoot(agent.id,{threadTitle});
   };
   const install = (agent) => {
     if (registrations.has(agent) || closed) return;
@@ -392,7 +399,7 @@ export async function apply(ctx, rawConfig = {}) {
     const binding=manager.binding(agent.id);
     if(binding) {
       const state=manager.hud.load(binding.runId).agents[agent.id];
-      if(state?.turn != null) manager.hud.accept(binding.runId,{kind:'agent.cancel',agentId:agent.id,at:new Date().toISOString(),reason:'disposed'});
+      if(state?.turn != null || state?.attention.length) manager.hud.accept(binding.runId,{kind:'agent.cancel',agentId:agent.id,at:new Date().toISOString(),reason:'disposed'});
     }
     registrations.delete(agent);
   });
@@ -415,6 +422,7 @@ export async function apply(ctx, rawConfig = {}) {
   });
   // AgentRegistry is iterable via list() in the pinned runtime.
   for (const agent of ctx.agents.list?.() ?? []) { ensureRun(agent); install(agent); }
+  installBlockingAttention(ctx,manager,()=>storeClosed);
 
   ctx.on("session/event", (session, event) => {
     if (storeClosed) return;
@@ -424,6 +432,7 @@ export async function apply(ctx, rawConfig = {}) {
     const binding = manager.binding(session.id);
     if (!binding) return;
     manager.hud.observe(binding,event);
+    syncHostQuestions(ctx,manager.hud,binding,session,Number.isFinite(event.time)?new Date(event.time).toISOString():undefined,event);
     if (event.type === "tool/result") {
       const result = event.data?.message ?? event.data;
       const identity = toolIndex.resolve(session, event);

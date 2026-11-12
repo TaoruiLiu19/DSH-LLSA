@@ -8,10 +8,12 @@
         "parentId": "root",
         "role": "worker",
         "ticketId": "t1",
-        "at": "2026-11-12T00:00:00.000Z"
+        "at": "2026-11-12T00:00:00.000Z",
+        "label": "核对代码"
       },
       "state": "idle",
-      "seq": 1
+      "seq": 1,
+      "label": "核对代码"
     },
     {
       "input": {
@@ -28,7 +30,7 @@
         "kind": "tool.start",
         "agentId": "worker",
         "callId": "c1",
-        "tool": "fs_read",
+        "tool": "read",
         "at": "2026-11-12T00:00:02.000Z"
       },
       "state": "running",
@@ -59,14 +61,15 @@
   "frames": [
     {
       "v": 1,
+      "aliasVersion": 1,
       "seq": 1,
       "now": "2026-11-12T00:00:00.000Z",
-      "stalledAfterMs": 30000,
+      "stalledAfterMs": 20000,
       "eventsFromSeq": 1,
       "agents": [
         {
           "id": "worker",
-          "label": "",
+          "label": "核对代码",
           "role": "worker",
           "parentId": "root",
           "ticketId": "t1",
@@ -86,20 +89,22 @@
           "agentId": "worker",
           "kind": "agent.register",
           "at": "2026-11-12T00:00:00.000Z",
-          "tool": null
+          "tool": null,
+          "label": "核对代码"
         }
       ]
     },
     {
       "v": 1,
+      "aliasVersion": 1,
       "seq": 3,
       "now": "2026-11-12T00:00:01.000Z",
-      "stalledAfterMs": 30000,
+      "stalledAfterMs": 20000,
       "eventsFromSeq": 1,
       "agents": [
         {
           "id": "worker",
-          "label": "",
+          "label": "核对代码",
           "role": "worker",
           "parentId": "root",
           "ticketId": "t1",
@@ -119,7 +124,8 @@
           "agentId": "worker",
           "kind": "agent.register",
           "at": "2026-11-12T00:00:00.000Z",
-          "tool": null
+          "tool": null,
+          "label": "核对代码"
         },
         {
           "seq": 2,
@@ -142,14 +148,15 @@
     },
     {
       "v": 1,
+      "aliasVersion": 1,
       "seq": 4,
       "now": "2026-11-12T00:00:02.000Z",
-      "stalledAfterMs": 30000,
+      "stalledAfterMs": 20000,
       "eventsFromSeq": 1,
       "agents": [
         {
           "id": "worker",
-          "label": "",
+          "label": "核对代码",
           "role": "worker",
           "parentId": "root",
           "ticketId": "t1",
@@ -159,7 +166,7 @@
           "lastEvent": {
             "kind": "tool.start",
             "at": "2026-11-12T00:00:02.000Z",
-            "tool": "fs_read"
+            "tool": "read"
           }
         }
       ],
@@ -169,7 +176,8 @@
           "agentId": "worker",
           "kind": "agent.register",
           "at": "2026-11-12T00:00:00.000Z",
-          "tool": null
+          "tool": null,
+          "label": "核对代码"
         },
         {
           "seq": 2,
@@ -193,20 +201,21 @@
           "agentId": "worker",
           "kind": "tool.start",
           "at": "2026-11-12T00:00:02.000Z",
-          "tool": "fs_read"
+          "tool": "read"
         }
       ]
     },
     {
       "v": 1,
+      "aliasVersion": 1,
       "seq": 5,
       "now": "2026-11-12T00:00:03.000Z",
-      "stalledAfterMs": 30000,
+      "stalledAfterMs": 20000,
       "eventsFromSeq": 1,
       "agents": [
         {
           "id": "worker",
-          "label": "",
+          "label": "核对代码",
           "role": "worker",
           "parentId": "root",
           "ticketId": "t1",
@@ -216,7 +225,7 @@
           "lastEvent": {
             "kind": "tool.end",
             "at": "2026-11-12T00:00:03.000Z",
-            "tool": "fs_read"
+            "tool": "read"
           }
         }
       ],
@@ -226,7 +235,8 @@
           "agentId": "worker",
           "kind": "agent.register",
           "at": "2026-11-12T00:00:00.000Z",
-          "tool": null
+          "tool": null,
+          "label": "核对代码"
         },
         {
           "seq": 2,
@@ -250,27 +260,28 @@
           "agentId": "worker",
           "kind": "tool.start",
           "at": "2026-11-12T00:00:02.000Z",
-          "tool": "fs_read"
+          "tool": "read"
         },
         {
           "seq": 5,
           "agentId": "worker",
           "kind": "tool.end",
           "at": "2026-11-12T00:00:03.000Z",
-          "tool": "fs_read"
+          "tool": "read"
         }
       ]
     },
     {
       "v": 1,
+      "aliasVersion": 1,
       "seq": 7,
       "now": "2026-11-12T00:00:04.000Z",
-      "stalledAfterMs": 30000,
+      "stalledAfterMs": 20000,
       "eventsFromSeq": 1,
       "agents": [
         {
           "id": "worker",
-          "label": "",
+          "label": "核对代码",
           "role": "worker",
           "parentId": "root",
           "ticketId": "t1",
@@ -290,7 +301,8 @@
           "agentId": "worker",
           "kind": "agent.register",
           "at": "2026-11-12T00:00:00.000Z",
-          "tool": null
+          "tool": null,
+          "label": "核对代码"
         },
         {
           "seq": 2,
@@ -314,14 +326,14 @@
           "agentId": "worker",
           "kind": "tool.start",
           "at": "2026-11-12T00:00:02.000Z",
-          "tool": "fs_read"
+          "tool": "read"
         },
         {
           "seq": 5,
           "agentId": "worker",
           "kind": "tool.end",
           "at": "2026-11-12T00:00:03.000Z",
-          "tool": "fs_read"
+          "tool": "read"
         },
         {
           "seq": 6,

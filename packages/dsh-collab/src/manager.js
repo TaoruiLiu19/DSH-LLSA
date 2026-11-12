@@ -7,6 +7,7 @@ import { NativeInputs } from './native-inputs.js';
 import { summarizeAccounting } from './accounting.js';
 import { MoneyBudget } from './money-budget.js';
 import { HudProjection } from './hud-projection.js';
+import { hudLabel } from './hud-label.js';
 
 /** @typedef {import('./types.js').JsonValue} JsonValue */
 /**
@@ -111,7 +112,7 @@ export class CollaborationManager {
       accounting: summarizeAccounting(this.store.listRequests(id), usage.usage, events),
       moneyBudget: this.moneyBudget?.snapshot(id) ?? { enabled: false } };
   }
-  /** @param {string} sessionId @param {{runId?: string, ticketId?: string, assignmentId?: string, title?: string}} [details] */
+  /** @param {string} sessionId @param {{runId?: string, ticketId?: string, assignmentId?: string, title?: string, assignmentTitle?:string, threadTitle?:string}} [details] */
   bindRoot(sessionId, details = {}) {
     const prior = this.bindings.get(sessionId);
     if (prior && (!details.runId || prior.runId === details.runId)) return prior;
@@ -119,7 +120,8 @@ export class CollaborationManager {
     if(prior && prior.runId!==details.runId) this.hud.accept(prior.runId,{kind:'agent.cancel',agentId:sessionId,reason:'assignment_rebound',at:new Date().toISOString()});
     const id = details.runId ?? `run-${sessionId}`;
     if (!this.store.getRun(id)) this.store.createRun({ id, ticketId: details.ticketId ?? `local-${sessionId}`, assignmentId: details.assignmentId ?? 'local', title: details.title ?? 'DSH 协作会话', source: details.ticketId ? 'superagent' : 'dsh', rootSessionId: sessionId });
-    const agent = this.store.saveAgent({ id: sessionId, runId: id, parentId: null, role: 'coordinator', state: 'active', managed: true });
+    const label=hudLabel({assignmentTitle:details.assignmentTitle ?? details.title,threadTitle:details.threadTitle,role:'coordinator'});
+    const agent = this.store.saveAgent({ id: sessionId, runId: id, parentId: null, role: 'coordinator', hudLabel:label, state: 'active', managed: true });
     this.bindings.set(sessionId, agent); this.hud.register(agent); return agent;
   }
   binding(sessionId) { return this.bindings.get(sessionId); }
@@ -412,7 +414,7 @@ export class CollaborationManager {
       retryReason: old.staleInput ? 'input_changed' : old.state === 'unknown' ? 'recovery_unknown' :
         old.state === 'cancelled' ? 'cancelled' : old.state === 'rejected' ? 'acceptance_rejected' : 'execution_failed' } : {};
     this.store.appendEvent({ runId: b.runId, stepId: id, attemptId, kind: 'work_planned', payload: { ...item, ...retry } });
-    this.#saveAgent({ id: childId, runId: b.runId, parentId: parent.id, role, state: 'planned', workItemId: id, attemptId, epoch: item.epoch, managed: true });
+    this.#saveAgent({ id: childId, runId: b.runId, parentId: parent.id, role, hudLabel:hudLabel({assignmentTitle:objective,role}), state: 'planned', workItemId: id, attemptId, epoch: item.epoch, managed: true });
     this.pending.set(childId, { item, parent });
     await this.schedule(b.runId);
     return { workItemId: id, runId: b.runId, childId, attemptId, state: this.#item(b.runId, id).state };

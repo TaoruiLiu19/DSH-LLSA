@@ -1,0 +1,2345 @@
+{
+  "name": "Structured approvals and questions: duplicate, concurrent, delayed and cancelled",
+  "steps": [
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:00.000Z",
+        "kind": "turn.start",
+        "turn": 1
+      },
+      "state": "running",
+      "seq": 2
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:01.000Z",
+        "kind": "attention.raised",
+        "attentionId": "question:q1"
+      },
+      "state": "waiting-human",
+      "seq": 4
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:02.000Z",
+        "kind": "attention.raised",
+        "attentionId": "question:q1"
+      },
+      "state": "waiting-human",
+      "seq": 4
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:03.000Z",
+        "kind": "attention.resolved",
+        "attentionId": "question:q1"
+      },
+      "state": "running",
+      "seq": 6
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:04.000Z",
+        "kind": "attention.raised",
+        "attentionId": "question:q2"
+      },
+      "state": "waiting-human",
+      "seq": 8
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:05.000Z",
+        "kind": "attention.raised",
+        "attentionId": "approval:p1"
+      },
+      "state": "waiting-human",
+      "seq": 9
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:06.000Z",
+        "kind": "attention.resolved",
+        "attentionId": "question:q2"
+      },
+      "state": "waiting-human",
+      "seq": 10
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:07.000Z",
+        "kind": "attention.resolved",
+        "attentionId": "approval:p1"
+      },
+      "state": "running",
+      "seq": 12
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:08.000Z",
+        "kind": "attention.raised",
+        "attentionId": "question:late"
+      },
+      "state": "waiting-human",
+      "seq": 14
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:09.000Z",
+        "kind": "turn.end",
+        "turn": 1,
+        "outcome": "completed"
+      },
+      "state": "waiting-human",
+      "seq": 15
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:10.000Z",
+        "kind": "turn.start",
+        "turn": 2
+      },
+      "state": "waiting-human",
+      "seq": 16
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:11.000Z",
+        "kind": "attention.resolved",
+        "attentionId": "question:late"
+      },
+      "state": "running",
+      "seq": 18
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:12.000Z",
+        "kind": "attention.raised",
+        "attentionId": "question:cancel"
+      },
+      "state": "waiting-human",
+      "seq": 20
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:13.000Z",
+        "kind": "agent.cancel",
+        "reason": "cancelled"
+      },
+      "state": "idle",
+      "seq": 24
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:14.000Z",
+        "kind": "attention.raised",
+        "attentionId": "question:cancel"
+      },
+      "state": "idle",
+      "seq": 24
+    },
+    {
+      "input": {
+        "agentId": "worker",
+        "at": "2026-11-12T00:00:15.000Z",
+        "kind": "turn.end",
+        "turn": 2,
+        "outcome": "completed"
+      },
+      "state": "idle",
+      "seq": 24
+    }
+  ],
+  "frames": [
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 2,
+      "now": "2026-11-12T00:00:00.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "running",
+          "since": "2026-11-12T00:00:00.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:00.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 4,
+      "now": "2026-11-12T00:00:01.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "waiting-human",
+          "since": "2026-11-12T00:00:01.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:01.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 4,
+      "now": "2026-11-12T00:00:02.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "waiting-human",
+          "since": "2026-11-12T00:00:01.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:01.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 6,
+      "now": "2026-11-12T00:00:03.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "running",
+          "since": "2026-11-12T00:00:03.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:03.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 8,
+      "now": "2026-11-12T00:00:04.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "waiting-human",
+          "since": "2026-11-12T00:00:04.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:04.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 9,
+      "now": "2026-11-12T00:00:05.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "waiting-human",
+          "since": "2026-11-12T00:00:04.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "attention.raised",
+            "at": "2026-11-12T00:00:05.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 9,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:05.000Z",
+          "tool": null
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 10,
+      "now": "2026-11-12T00:00:06.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "waiting-human",
+          "since": "2026-11-12T00:00:04.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "attention.resolved",
+            "at": "2026-11-12T00:00:06.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 9,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:05.000Z",
+          "tool": null
+        },
+        {
+          "seq": 10,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:06.000Z",
+          "tool": null
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 12,
+      "now": "2026-11-12T00:00:07.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "running",
+          "since": "2026-11-12T00:00:07.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:07.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 9,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:05.000Z",
+          "tool": null
+        },
+        {
+          "seq": 10,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:06.000Z",
+          "tool": null
+        },
+        {
+          "seq": 11,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null
+        },
+        {
+          "seq": 12,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 14,
+      "now": "2026-11-12T00:00:08.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "waiting-human",
+          "since": "2026-11-12T00:00:08.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:08.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 9,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:05.000Z",
+          "tool": null
+        },
+        {
+          "seq": 10,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:06.000Z",
+          "tool": null
+        },
+        {
+          "seq": 11,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null
+        },
+        {
+          "seq": 12,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 13,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null
+        },
+        {
+          "seq": 14,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 15,
+      "now": "2026-11-12T00:00:09.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "waiting-human",
+          "since": "2026-11-12T00:00:08.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "turn.end",
+            "at": "2026-11-12T00:00:09.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 9,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:05.000Z",
+          "tool": null
+        },
+        {
+          "seq": 10,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:06.000Z",
+          "tool": null
+        },
+        {
+          "seq": 11,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null
+        },
+        {
+          "seq": 12,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 13,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null
+        },
+        {
+          "seq": 14,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 15,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:00:09.000Z",
+          "tool": null,
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 16,
+      "now": "2026-11-12T00:00:10.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "waiting-human",
+          "since": "2026-11-12T00:00:08.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "turn.start",
+            "at": "2026-11-12T00:00:10.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 9,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:05.000Z",
+          "tool": null
+        },
+        {
+          "seq": 10,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:06.000Z",
+          "tool": null
+        },
+        {
+          "seq": 11,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null
+        },
+        {
+          "seq": 12,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 13,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null
+        },
+        {
+          "seq": 14,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 15,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:00:09.000Z",
+          "tool": null,
+          "reason": "completed"
+        },
+        {
+          "seq": 16,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:10.000Z",
+          "tool": null
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 18,
+      "now": "2026-11-12T00:00:11.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "running",
+          "since": "2026-11-12T00:00:11.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:11.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 9,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:05.000Z",
+          "tool": null
+        },
+        {
+          "seq": 10,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:06.000Z",
+          "tool": null
+        },
+        {
+          "seq": 11,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null
+        },
+        {
+          "seq": 12,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 13,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null
+        },
+        {
+          "seq": 14,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 15,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:00:09.000Z",
+          "tool": null,
+          "reason": "completed"
+        },
+        {
+          "seq": 16,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:10.000Z",
+          "tool": null
+        },
+        {
+          "seq": 17,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:11.000Z",
+          "tool": null
+        },
+        {
+          "seq": 18,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:11.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 20,
+      "now": "2026-11-12T00:00:12.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "waiting-human",
+          "since": "2026-11-12T00:00:12.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:12.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 9,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:05.000Z",
+          "tool": null
+        },
+        {
+          "seq": 10,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:06.000Z",
+          "tool": null
+        },
+        {
+          "seq": 11,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null
+        },
+        {
+          "seq": 12,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 13,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null
+        },
+        {
+          "seq": 14,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 15,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:00:09.000Z",
+          "tool": null,
+          "reason": "completed"
+        },
+        {
+          "seq": 16,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:10.000Z",
+          "tool": null
+        },
+        {
+          "seq": 17,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:11.000Z",
+          "tool": null
+        },
+        {
+          "seq": 18,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:11.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 19,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:12.000Z",
+          "tool": null
+        },
+        {
+          "seq": 20,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:12.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 24,
+      "now": "2026-11-12T00:00:13.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "idle",
+          "since": "2026-11-12T00:00:13.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:13.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 9,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:05.000Z",
+          "tool": null
+        },
+        {
+          "seq": 10,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:06.000Z",
+          "tool": null
+        },
+        {
+          "seq": 11,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null
+        },
+        {
+          "seq": 12,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 13,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null
+        },
+        {
+          "seq": 14,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 15,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:00:09.000Z",
+          "tool": null,
+          "reason": "completed"
+        },
+        {
+          "seq": 16,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:10.000Z",
+          "tool": null
+        },
+        {
+          "seq": 17,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:11.000Z",
+          "tool": null
+        },
+        {
+          "seq": 18,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:11.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 19,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:12.000Z",
+          "tool": null
+        },
+        {
+          "seq": 20,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:12.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 21,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null,
+          "reason": "cancelled",
+          "synthetic": true
+        },
+        {
+          "seq": 22,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null,
+          "reason": "cancelled",
+          "synthetic": true
+        },
+        {
+          "seq": 23,
+          "agentId": "worker",
+          "kind": "agent.cancel",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null
+        },
+        {
+          "seq": 24,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "idle",
+          "reason": "cancelled"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 24,
+      "now": "2026-11-12T00:00:14.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "idle",
+          "since": "2026-11-12T00:00:13.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:13.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 9,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:05.000Z",
+          "tool": null
+        },
+        {
+          "seq": 10,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:06.000Z",
+          "tool": null
+        },
+        {
+          "seq": 11,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null
+        },
+        {
+          "seq": 12,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 13,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null
+        },
+        {
+          "seq": 14,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 15,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:00:09.000Z",
+          "tool": null,
+          "reason": "completed"
+        },
+        {
+          "seq": 16,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:10.000Z",
+          "tool": null
+        },
+        {
+          "seq": 17,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:11.000Z",
+          "tool": null
+        },
+        {
+          "seq": 18,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:11.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 19,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:12.000Z",
+          "tool": null
+        },
+        {
+          "seq": 20,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:12.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 21,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null,
+          "reason": "cancelled",
+          "synthetic": true
+        },
+        {
+          "seq": 22,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null,
+          "reason": "cancelled",
+          "synthetic": true
+        },
+        {
+          "seq": 23,
+          "agentId": "worker",
+          "kind": "agent.cancel",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null
+        },
+        {
+          "seq": 24,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "idle",
+          "reason": "cancelled"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "aliasVersion": 1,
+      "seq": 24,
+      "now": "2026-11-12T00:00:15.000Z",
+      "stalledAfterMs": 20000,
+      "eventsFromSeq": 1,
+      "agents": [
+        {
+          "id": "worker",
+          "label": "worker",
+          "role": "worker",
+          "parentId": null,
+          "ticketId": null,
+          "state": "idle",
+          "since": "2026-11-12T00:00:13.000Z",
+          "stalled": false,
+          "lastEvent": {
+            "kind": "state.changed",
+            "at": "2026-11-12T00:00:13.000Z",
+            "tool": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null
+        },
+        {
+          "seq": 2,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:00.000Z",
+          "tool": null,
+          "from": "idle",
+          "to": "running",
+          "reason": "turn_started"
+        },
+        {
+          "seq": 3,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null
+        },
+        {
+          "seq": 4,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:01.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 5,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null
+        },
+        {
+          "seq": 6,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:03.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 7,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null
+        },
+        {
+          "seq": 8,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:04.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 9,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:05.000Z",
+          "tool": null
+        },
+        {
+          "seq": 10,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:06.000Z",
+          "tool": null
+        },
+        {
+          "seq": 11,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null
+        },
+        {
+          "seq": 12,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:07.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 13,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null
+        },
+        {
+          "seq": 14,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:08.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 15,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:00:09.000Z",
+          "tool": null,
+          "reason": "completed"
+        },
+        {
+          "seq": 16,
+          "agentId": "worker",
+          "kind": "turn.start",
+          "at": "2026-11-12T00:00:10.000Z",
+          "tool": null
+        },
+        {
+          "seq": 17,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:11.000Z",
+          "tool": null
+        },
+        {
+          "seq": 18,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:11.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "running",
+          "reason": "confirmation_resolved"
+        },
+        {
+          "seq": 19,
+          "agentId": "worker",
+          "kind": "attention.raised",
+          "at": "2026-11-12T00:00:12.000Z",
+          "tool": null
+        },
+        {
+          "seq": 20,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:12.000Z",
+          "tool": null,
+          "from": "running",
+          "to": "waiting-human",
+          "reason": "confirmation_pending"
+        },
+        {
+          "seq": 21,
+          "agentId": "worker",
+          "kind": "turn.end",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null,
+          "reason": "cancelled",
+          "synthetic": true
+        },
+        {
+          "seq": 22,
+          "agentId": "worker",
+          "kind": "attention.resolved",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null,
+          "reason": "cancelled",
+          "synthetic": true
+        },
+        {
+          "seq": 23,
+          "agentId": "worker",
+          "kind": "agent.cancel",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null
+        },
+        {
+          "seq": 24,
+          "agentId": "worker",
+          "kind": "state.changed",
+          "at": "2026-11-12T00:00:13.000Z",
+          "tool": null,
+          "from": "waiting-human",
+          "to": "idle",
+          "reason": "cancelled"
+        }
+      ]
+    }
+  ]
+}

@@ -5,6 +5,8 @@ import type { DomainEvent, Engine, Ticket, WorkerReport } from '../core/index.ts
 import { workerSessionId } from '../executor/dsh.ts'
 import type { Store } from './store.ts'
 import { captureTaskInput } from './input-snapshot.ts'
+import { threadKey } from '../core/index.ts'
+import { threadTitle } from './views/records.ts'
 
 export interface CollabRelay { id: string; text: string }
 export interface CollabReportEvent {
@@ -146,6 +148,15 @@ export class CollabBridge extends Service {
   reportTicket(reportId:string):string {
     const report=this.readReport(reportId);if(!report)throw new Error('Unknown report');return report.ticketId;
   }
+  /** Host-only title sources; the HUD adapter sanitizes and pins the resulting assignment label. */
+  displayTitles(ticketId: string) {
+    const ticket = this.host.store.tickets.get(ticketId)
+    if (!ticket) return {}
+    const origin = this.host.store.triggers.get(ticket.origin.triggerId)
+    const thread = origin?.threads.map(ref => this.host.store.threads.get(threadKey(ref))).find(Boolean)
+    return { assignmentTitle: ticket.execution?.name || ticket.title, threadTitle: thread ? threadTitle(this.host.store, thread) : '' }
+  }
+
   /** Returns detached snapshots; the existing Engine remains the sole Ticket/Assignment authority. */
   snapshot(ticketId?: string) {
     this.active();

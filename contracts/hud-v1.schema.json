@@ -4,12 +4,13 @@
   "title": "LLSA read-only HUD snapshot v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["v", "seq", "now", "agents", "events", "eventsFromSeq", "stalledAfterMs"],
+  "required": ["v", "aliasVersion", "seq", "now", "agents", "events", "eventsFromSeq", "stalledAfterMs"],
   "properties": {
     "v": {"const": 1},
+    "aliasVersion": {"type": "integer", "minimum": 1, "description": "Immutable contracts/tool-aliases-v{aliasVersion}.json; tool remains the native ID."},
     "seq": {"type": "integer", "minimum": 0},
     "now": {"type": "string", "format": "date-time"},
-    "stalledAfterMs": {"type": "integer", "minimum": 1},
+    "stalledAfterMs": {"type": "integer", "minimum": 1, "description": "Server-owned threshold, default 20000ms. Clients display stalled as supplied; they do not recompute it."},
     "eventsFromSeq": {"type": "integer", "minimum": 0},
     "agents": {"type": "array", "items": {"$ref": "#/definitions/agent"}},
     "events": {"type": "array", "maxItems": 256, "items": {"$ref": "#/definitions/event"}}
@@ -25,7 +26,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["id", "label", "role", "parentId", "ticketId", "state", "since", "stalled", "lastEvent"],
       "properties": {
-        "id": {"type": "string"}, "label": {"type": "string"}, "role": {"type": "string"},
+        "id": {"type": "string"}, "label": {"type": "string", "maxLength": 12}, "role": {"type": "string"},
         "parentId": {"type": ["string", "null"]}, "ticketId": {"type": ["string", "null"]},
         "state": {"$ref": "#/definitions/state"}, "since": {"type": "string", "format": "date-time"},
         "stalled": {"type": "boolean"}, "lastEvent": {"anyOf": [{"type": "null"}, {"$ref": "#/definitions/lastEvent"}]}
@@ -37,7 +38,8 @@
         "seq": {"type": "integer", "minimum": 1}, "agentId": {"type": "string"},
         "kind": {"type": "string"}, "at": {"type": "string", "format": "date-time"}, "tool": {"$ref": "#/definitions/tool"},
         "from": {"$ref": "#/definitions/state"}, "to": {"$ref": "#/definitions/state"},
-        "reason": {"type": "string"}, "synthetic": {"type": "boolean"}
+        "reason": {"type": "string"}, "synthetic": {"type": "boolean"},
+        "label": {"type": "string", "maxLength": 12, "description": "Sanitized short name on agent.register."}
       },
       "if": {"properties": {"kind": {"const": "state.changed"}}},
       "then": {"required": ["from", "to", "reason"]}

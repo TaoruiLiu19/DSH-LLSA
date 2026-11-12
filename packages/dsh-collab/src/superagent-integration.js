@@ -7,13 +7,14 @@ export function connectSuperagent(manager, bridge) {
   const bindWorker=(ticket,sessionId)=>{
     const assignment=ticket.assignments.at(-1);
     if (!assignment || ticket.ended) throw new Error('Superagent ticket has no live assignment');
-    const binding = manager.bindRoot(sessionId,{runId:`super-${ticket.id}-${assignment.id}`,ticketId:ticket.id,assignmentId:assignment.id,title:ticket.title});
+    const binding = manager.bindRoot(sessionId,{runId:`super-${ticket.id}-${assignment.id}`,ticketId:ticket.id,assignmentId:assignment.id,title:ticket.title,
+      assignmentTitle:ticket.execution?.name || ticket.title,...bridge.displayTitles?.(ticket.id)});
     if (typeof bridge.inputSnapshot === 'function') manager.syncNativeInput(binding.runId, bridge.inputSnapshot(ticket.id, assignment.id));
     // Persist visualization-only topology, without granting the coordinator child-tool authority.
     const coordinatorId=bridge.snapshot().masterSessionId;
     if(coordinatorId&&coordinatorId!==sessionId&&!store.eventsByKind(binding.runId,'agent_relation').some(e=>e.payload.parentId===coordinatorId&&e.payload.childId===sessionId)) {
       store.appendEvent({runId:binding.runId,stepId:'native-coordination',kind:'agent_relation',payload:{parentId:coordinatorId,childId:sessionId,provenance:'host_superagent_lifecycle'}});
-      manager.hud.accept(binding.runId,{kind:'agent.register',agentId:sessionId,parentId:coordinatorId,role:'worker',ticketId:ticket.id,at:new Date().toISOString()});
+      manager.hud.register(binding);
     }
     return binding;
   };

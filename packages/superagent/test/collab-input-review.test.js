@@ -14,6 +14,7 @@ test('native report review tracks full source content; delivery markers do not i
   store.triggers.save(source);store.tickets.save(ticket);
   const accepted=[];const ctx=new Context(),bridge=new CollabBridge(ctx,{store,masterId:'main',sessions:{relay(){}},engine:{acceptReadyReport(...args){accepted.push(args);},note(){},stopTicket(){},retryTicket(){}}});
   bridge.registerLifecycle({bindWorker(){},beforeReady(){},reviewState(){return {items:[]};}});
+  assert.equal(bridge.displayTitles(ticket.id).assignmentTitle,'fixture');
   t.after(()=>{bridge.close();store.close();rmSync(dir,{recursive:true,force:true});});
   const report=bridge.recordReport(ticket,{state:'ready',summary:'{"allowed":false}'});
   ticket.inputs[0].readAt='2026-11-11T01:00:00Z';store.tickets.save(ticket);

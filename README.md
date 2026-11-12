@@ -205,14 +205,19 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 
 - 读取现有 `GET /collab/api/runs/:runId?view=hud`，获得符合 [HUD v1 Schema](contracts/hud-v1.schema.json) 的脱敏快照；不新增端点。
 - 原有完整任务快照保留兼容字段，新增 `hud`，以及与其一致的顶层 `v`、`seq`、`now`。浮窗应使用 `view=hud`，不要读取原始 `events` 或自行推导状态。
-- `agents` 提供稳定 ID、父子关系、工单、五态、状态起始时间、静默标记和最小活动事件。`label` 当前为空，避免把任务正文当短名泄漏；客户端可自行使用角色标签。父节点可能属于另一个工单快照，不能据此猜测其活动状态。
-- `seq` 在每个 run 内单调递增，重启不清零；跨 run 不可比较。轮询时间与 `stalled` 变化不会凭空增加事件序号。`stalledAfterMs` 当前为 30000，仅标记 running 静默，不推断失败。
+- `agents` 提供稳定 ID、父子关系、工单、五态、状态起始时间、静默标记和最小活动事件。`label` 是最多 12 个 Unicode 字符的短名：任务标题优先，其次会话标题；移除路径、URL、邮箱、纯数字 ID、代码与换行，过滤后为空则使用角色或“智能体”。原生 Assignment 无独立标题字段，适配器取关联任务的 `execution.name` / `ticket.title`；托管子任务使用分配时的 objective。每次 assignment 的短名持久化固定，变更经带 `label` 的 `agent.register` 发布。父节点可能属于另一个工单快照，不能据此猜测其活动状态。
+- `seq` 在每个 run 内单调递增，重启不清零；客户端按 `(runId, seq)` 维护游标，跨 run 不可比较。轮询时间与 `stalled` 变化不会增加序号。`stalledAfterMs` 默认为 20000；只有 `running` 可以静默。`stalled` 由服务端计算，客户端只展示服务端值，不自行判断失败或静默。
+- 每次快照包含 `aliasVersion: 1`，`tool` 仍是原生工具 ID。按版本读取并缓存 [tool-aliases-v1.json](contracts/tool-aliases-v1.json) 的 `aliases` 映射。初版别名与原生 ID 同名，今后原生 ID 改名时可继续指向稳定别名；表中不提供材料分类。已发布文件不可修改；映射更新新增版本文件并递增 `aliasVersion`，与 HUD 的 `v` 独立。自定义名称或第三方工具可落“其它”；测试覆盖锁定宿主及本项目内置工具声明，新增内置 ID 漏配会失败。
 - `events` 是最近 256 条最小事件，`eventsFromSeq` 给出窗口起点。若客户端游标落后于窗口，直接采用最新状态并跳过丢失的动画，不回放猜测事件。事件的 `seq`、`agentId` 用于寻址；`state.changed` 额外提供 `from/to/reason`。
 - turn 正常结束的 `done` 只表示本轮结束，不代表工单验收通过。取消或输入作废为 `idle`；进程重启后未闭合 turn 清理为 `idle`。缺失的工具/turn 结束以 `synthetic: true` 和原因显式补齐，绝不冒充成功。工具 id 不含参数、路径、命令或输出。
 - 实际状态接入 `turn/start/end`、`tool/call/result`、审批对象与用户问题回复。等待确认不会因工具等待超时自动消失；收到用户回复后按是否有打开的 turn 恢复。历史上尚未接入的活动不补造。
 
-浮窗开发可以直接读取三份回放夹具中的 `frames`：
-[正常一轮](contracts/fixtures/hud-normal.json)、[输入作废](contracts/fixtures/hud-invalidated.json)、[重启清理](contracts/fixtures/hud-restarted.json)。无需导入 manager/store 或投影实现。`steps` 供编排侧回放测试；同一事件序列必须生成相同 frames。字段语义和五态含义在 v1 保持稳定；破坏性变化另发 v2。独立安装、单智能体降级和视觉材料映射由 HUD 实现方负责。
+浮窗开发可以直接读取五份回放夹具中的 `frames`：
+[正常一轮](contracts/fixtures/hud-normal.json)、[输入作废](contracts/fixtures/hud-invalidated.json)、[重启清理](contracts/fixtures/hud-restarted.json)、[审批与提问等待／恢复](contracts/fixtures/hud-attention.json)、[20 秒静默边界](contracts/fixtures/hud-stalled.json)，另有 [短名边界用例](contracts/fixtures/hud-labels.json)。无需导入 manager/store 或投影实现。`steps` 的状态、序号与边界期望独立编写；同一事件序列必须生成相同 `frames`。`node scripts/update-hud-fixtures.mjs` 只刷新 frames，不修改期望值。
+
+待确认由宿主 `userQuestions` 结构化视图、阻塞请求生命周期和 `approval/asked` / `approval/decided` 驱动，HUD 不解析工具返回文本。统一使用既有 `attention.raised`、`attention.resolved`；只有状态实际改变才发 `state.changed`。多个对象须全部处理后才恢复：有打开的 turn 则 running，否则 idle；取消清空集合并回到 idle，迟到的旧对象不会重新点亮。
+
+兼容约定：本次保持 `v: 1`。加字段、kind 或状态属于约定的非破坏性扩展；既有字段语义保持不变。未来破坏性变更必须在同一个 PR 更新 schema、投影、夹具与回放测试；v1 继续默认，v2 由客户端显式选择，两个版本短期并存。只有可视化端明确确认迁移完成后才可弃用 v1。本版尚未发布 v2。独立安装、单智能体降级和视觉材料映射由 HUD 实现方负责。
 
 ```text
 packages/dsh-collab/   协作通信与记录

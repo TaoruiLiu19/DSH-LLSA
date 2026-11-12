@@ -16,7 +16,7 @@
         "kind": "tool.start",
         "agentId": "worker",
         "callId": "c1",
-        "tool": "fs_write",
+        "tool": "write",
         "at": "2026-11-12T00:00:02.000Z"
       },
       "state": "running",
@@ -36,14 +36,15 @@
   "frames": [
     {
       "v": 1,
+      "aliasVersion": 1,
       "seq": 2,
       "now": "2026-11-12T00:00:01.000Z",
-      "stalledAfterMs": 30000,
+      "stalledAfterMs": 20000,
       "eventsFromSeq": 1,
       "agents": [
         {
           "id": "worker",
-          "label": "",
+          "label": "worker",
           "role": "worker",
           "parentId": null,
           "ticketId": null,
@@ -79,14 +80,15 @@
     },
     {
       "v": 1,
+      "aliasVersion": 1,
       "seq": 3,
       "now": "2026-11-12T00:00:02.000Z",
-      "stalledAfterMs": 30000,
+      "stalledAfterMs": 20000,
       "eventsFromSeq": 1,
       "agents": [
         {
           "id": "worker",
-          "label": "",
+          "label": "worker",
           "role": "worker",
           "parentId": null,
           "ticketId": null,
@@ -96,7 +98,7 @@
           "lastEvent": {
             "kind": "tool.start",
             "at": "2026-11-12T00:00:02.000Z",
-            "tool": "fs_write"
+            "tool": "write"
           }
         }
       ],
@@ -123,20 +125,21 @@
           "agentId": "worker",
           "kind": "tool.start",
           "at": "2026-11-12T00:00:02.000Z",
-          "tool": "fs_write"
+          "tool": "write"
         }
       ]
     },
     {
       "v": 1,
+      "aliasVersion": 1,
       "seq": 7,
       "now": "2026-11-12T00:01:00.000Z",
-      "stalledAfterMs": 30000,
+      "stalledAfterMs": 20000,
       "eventsFromSeq": 1,
       "agents": [
         {
           "id": "worker",
-          "label": "",
+          "label": "worker",
           "role": "worker",
           "parentId": null,
           "ticketId": null,
@@ -173,14 +176,14 @@
           "agentId": "worker",
           "kind": "tool.start",
           "at": "2026-11-12T00:00:02.000Z",
-          "tool": "fs_write"
+          "tool": "write"
         },
         {
           "seq": 4,
           "agentId": "worker",
           "kind": "tool.end",
           "at": "2026-11-12T00:01:00.000Z",
-          "tool": "fs_write",
+          "tool": "write",
           "reason": "interrupted",
           "synthetic": true
         },
