@@ -1,0 +1,51 @@
+{
+  "name": "@dsh-llsa/hud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only HUD for DSH agent activity: a one-glance field of conclusions, materials and sub-agents, with a focus mode over the conversation.",
+  "license": "MIT",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "client.js",
+    "data",
+    "scripts",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "test:spawned": "node --test test/*.test.js",
+    "check": "node scripts/build-client.mjs --check && node scripts/run-tests.mjs"
+  },
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  }
+}
