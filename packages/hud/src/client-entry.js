@@ -14,7 +14,7 @@
  */
 import { createView, foldSnapshot, nextFocus, stepLifecycle } from './model.js';
 import { createFieldCanvas } from './render.js';
-import { createCapsule, createFocusLayer, createStageHook } from './focus.js';
+import { createCapsule, createFocusLayer, createOfflinePill, createStageHook } from './focus.js';
 
 /** How often the snapshot is polled, by what the field is doing. */
 export const POLL_MS = Object.freeze({ running: 240, waiting: 600, settled: 800, empty: 1400 });
@@ -23,10 +23,12 @@ const STRINGS = Object.freeze({
   zh: {
     hint: '点击空白处或按 Esc 返回；右下角胶囊可以再进来',
     open: '点击返回',
+    offline: 'HUD 未连接',
   },
   en: {
     hint: 'Click the empty area or press Esc to leave; the capsule at the bottom right brings it back',
     open: 'Click to return',
+    offline: 'HUD offline',
   },
 });
 
@@ -117,6 +119,7 @@ export function applyClient(ctx, React) {
   const FieldCanvas = createFieldCanvas(React);
   const FocusLayer = createFocusLayer(React, { FieldCanvas });
   const Capsule = createCapsule(React);
+  const OfflinePill = createOfflinePill(React);
   const useStage = createStageHook(React);
   const store = createStore(() => localeOf(ctx));
   store.setLocale(localeOf(ctx));
@@ -182,9 +185,12 @@ export function applyClient(ctx, React) {
 
   /** Captures the active session id; draws nothing. */
   function SessionBridge(props) {
+    // The slot catalog documents `sessionId`, but the owner also passes the
+    // session snapshot on some host versions; accept either without guessing.
+    const id = props.sessionId ?? props.session?.id ?? props.session?.sessionId ?? props.input?.sessionId;
     React.useEffect(() => {
-      store.setSession(typeof props.sessionId === 'string' ? props.sessionId : null);
-    }, [props.sessionId]);
+      store.setSession(typeof id === 'string' ? id : null);
+    }, [id]);
     return null;
   }
 
@@ -222,13 +228,20 @@ export function applyClient(ctx, React) {
     const focused = state.focus.active && view.taskId !== null;
     if (!focused) {
       const showCapsule = view.taskId !== null && state.focus.dismissedTaskId !== null;
-      if (!showCapsule) return null;
-      return React.createElement(Capsule, {
-        view,
-        stage,
-        onOpen: () => store.open(),
-        labels: { open: strings.open },
-      });
+      if (showCapsule) {
+        return React.createElement(Capsule, {
+          view,
+          stage,
+          onOpen: () => store.open(),
+          labels: { open: strings.open },
+        });
+      }
+      // A session is known but the snapshot route never answered: say so instead
+      // of showing the same blank screen as "nothing is happening".
+      if (state.sessionId !== null && state.online === false && stage.full === false) {
+        return React.createElement(OfflinePill, { stage, text: strings.offline });
+      }
+      return null;
     }
     return React.createElement(FocusLayer, {
       view,

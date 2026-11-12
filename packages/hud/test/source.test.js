@@ -111,6 +111,23 @@ test('a question raises and resolves attention with the tool pair', () => {
   assert.ok(answered.events.some(event => event.kind === 'attention.resolved'));
 });
 
+test('a tool call that arrives without an open turn adopts the turn', () => {
+  // The Host half was activated after `turn.start` (install, restart, HMR), so
+  // the first thing it sees is a tool call. It must show the run instead of
+  // staying blank until the next command.
+  const collector = createCollector();
+  const at = Date.parse('2026-11-12T03:20:00Z');
+  collector.observeEvent('s', { type: 'tool/call', seq: 1, time: at, data: { callId: 'c', name: 'read' } });
+  const snapshot = collector.snapshotFor('s');
+  assertSnapshotShape(snapshot);
+  assert.deepEqual(snapshot.events.map(event => event.kind), ['turn.start', 'state.changed', 'tool.start']);
+  assert.equal(snapshot.agents[0].state, 'running');
+  assert.equal(snapshot.events.at(-1).tool, 'read');
+
+  collector.observeEvent('s', { type: 'turn/end', seq: 2, time: at + 1000, data: { reason: { kind: 'completed' } } });
+  assert.equal(collector.snapshotFor('s').agents[0].state, 'done', 'the adopted turn closes normally');
+});
+
 test('published children join the run as worker agents', () => {
   const collector = createCollector();
   collector.observeEvent('s', { type: 'turn/start', seq: 1, time: Date.parse('2026-11-12T03:20:00Z'), data: { turn: 1 } });

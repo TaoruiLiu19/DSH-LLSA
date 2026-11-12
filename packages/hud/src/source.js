@@ -195,7 +195,16 @@ export function createCollector(options = {}) {
       }
       case 'tool/call': {
         const name = safeTool(data.name);
-        if (agent.turn === null || name === null) break;
+        if (name === null) break;
+        if (agent.turn === null) {
+          // Joined mid-turn: the Host half was activated after `turn.start`, so
+          // the first thing it sees is a tool call. Adopting the turn is what
+          // makes installing (or restarting) the plugin mid-run show the field
+          // instead of staying blank until the next command.
+          agent.turn = -1;
+          activity(state, agent, 'turn.start', at);
+          change(state, agent, agent.attention.size > 0 ? 'waiting-human' : 'running', 'turn_started', at);
+        }
         const callId = data.callId === undefined ? `call-${state.seq + 1}` : String(data.callId);
         if (agent.tools.has(callId)) break;
         agent.tools.set(callId, name);

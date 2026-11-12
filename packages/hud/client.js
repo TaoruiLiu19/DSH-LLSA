@@ -1480,6 +1480,32 @@ function createFocusLayer(React, options = {}) {
   };
 }
 
+/** Stylesheet entry for the "cannot reach the snapshot route" pill. */
+const OFFLINE_CSS = `
+.dsh-hud-offline{position:fixed;z-index:43;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:rgba(24,20,18,.9);border:1px solid rgba(255,95,109,.35);color:#e7b0b5;font-size:11px;line-height:1;pointer-events:none}
+`;
+
+/**
+ * A small pill shown only when the page cannot read its snapshot.
+ *
+ * A healthy field never draws it: it exists so "nothing is happening" and "the
+ * Host half is unreachable" are visibly different states instead of the same
+ * blank screen.
+ */
+function createOfflinePill(React) {
+  return function OfflinePill(props) {
+    const { stage, text } = props;
+    const left = Math.max(stage.x + 8, stage.x + stage.w - 132 - CAPSULE_INSET.right);
+    const top = Math.max(stage.y + 8, stage.y + stage.h - 26 - CAPSULE_INSET.bottom);
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement('style', { 'data-dsh-hud': 'offline' }, OFFLINE_CSS),
+      React.createElement('div', { className: 'dsh-hud-offline', style: { left: px(left), top: px(top) } }, text),
+    );
+  };
+}
+
 /**
  * The return capsule (§4.4): pinned inside the message area's bottom-right, so
  * it never overlaps the composer or the send/stop button.
@@ -1544,10 +1570,12 @@ const STRINGS = Object.freeze({
   zh: {
     hint: '点击空白处或按 Esc 返回；右下角胶囊可以再进来',
     open: '点击返回',
+    offline: 'HUD 未连接',
   },
   en: {
     hint: 'Click the empty area or press Esc to leave; the capsule at the bottom right brings it back',
     open: 'Click to return',
+    offline: 'HUD offline',
   },
 });
 
@@ -1638,6 +1666,7 @@ function applyClient(ctx, React) {
   const FieldCanvas = createFieldCanvas(React);
   const FocusLayer = createFocusLayer(React, { FieldCanvas });
   const Capsule = createCapsule(React);
+  const OfflinePill = createOfflinePill(React);
   const useStage = createStageHook(React);
   const store = createStore(() => localeOf(ctx));
   store.setLocale(localeOf(ctx));
@@ -1703,9 +1732,12 @@ function applyClient(ctx, React) {
 
   /** Captures the active session id; draws nothing. */
   function SessionBridge(props) {
+    // The slot catalog documents `sessionId`, but the owner also passes the
+    // session snapshot on some host versions; accept either without guessing.
+    const id = props.sessionId ?? props.session?.id ?? props.session?.sessionId ?? props.input?.sessionId;
     React.useEffect(() => {
-      store.setSession(typeof props.sessionId === 'string' ? props.sessionId : null);
-    }, [props.sessionId]);
+      store.setSession(typeof id === 'string' ? id : null);
+    }, [id]);
     return null;
   }
 
@@ -1743,13 +1775,20 @@ function applyClient(ctx, React) {
     const focused = state.focus.active && view.taskId !== null;
     if (!focused) {
       const showCapsule = view.taskId !== null && state.focus.dismissedTaskId !== null;
-      if (!showCapsule) return null;
-      return React.createElement(Capsule, {
-        view,
-        stage,
-        onOpen: () => store.open(),
-        labels: { open: strings.open },
-      });
+      if (showCapsule) {
+        return React.createElement(Capsule, {
+          view,
+          stage,
+          onOpen: () => store.open(),
+          labels: { open: strings.open },
+        });
+      }
+      // A session is known but the snapshot route never answered: say so instead
+      // of showing the same blank screen as "nothing is happening".
+      if (state.sessionId !== null && state.online === false && stage.full === false) {
+        return React.createElement(OfflinePill, { stage, text: strings.offline });
+      }
+      return null;
     }
     return React.createElement(FocusLayer, {
       view,

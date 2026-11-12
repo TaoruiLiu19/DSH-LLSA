@@ -59,6 +59,12 @@ When the answer lands, focus returns. The HUD never grows buttons.
 field only reports it — a dashed halo on the seat and a `停顿中` sub-line. The
 client never derives it from silence.
 
+**Late start.** Installing, restarting or hot-reloading the plugin mid-run adopts
+the current turn from the first tool call it sees, so the field appears
+immediately instead of waiting for the next command. If the snapshot route cannot
+be reached at all, a small `HUD 未连接` pill says so instead of leaving the same
+blank screen as "nothing is happening".
+
 ## Configuration
 
 All keys are optional; the loader row's `config` is read as plain JSON.
@@ -107,7 +113,7 @@ never an invisible node.
 ## Verification
 
 ```bash
-npm test --prefix packages/hud       # 81 assertions, no network, no browser
+npm test --prefix packages/hud       # 82 assertions, no network, no browser
 npm run check --prefix packages/hud  # the same plus a stale-bundle check
 ```
 

@@ -27,6 +27,10 @@ First HUD package.
 - `stalled` is read from `agents[].stalled` only; the client never derives a
   state from silence and never parses tool output. Both rules are enforced by
   source scans in the test suite.
+- A tool call that arrives without an open turn (install, restart or hot reload
+  mid-run) adopts the turn, so the field appears at once instead of staying blank
+  until the next command. When the snapshot route is unreachable the overlay says
+  `HUD 未连接` instead of rendering nothing.
 - Verification: the five contract fixtures (44 steps) replayed against the model,
   the 13 label cases, layout, focus, Host route, and a loader-shaped smoke test
   of the committed browser bundle.

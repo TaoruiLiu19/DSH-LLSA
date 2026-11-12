@@ -175,6 +175,32 @@ export function createFocusLayer(React, options = {}) {
   };
 }
 
+/** Stylesheet entry for the "cannot reach the snapshot route" pill. */
+const OFFLINE_CSS = `
+.dsh-hud-offline{position:fixed;z-index:43;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:rgba(24,20,18,.9);border:1px solid rgba(255,95,109,.35);color:#e7b0b5;font-size:11px;line-height:1;pointer-events:none}
+`;
+
+/**
+ * A small pill shown only when the page cannot read its snapshot.
+ *
+ * A healthy field never draws it: it exists so "nothing is happening" and "the
+ * Host half is unreachable" are visibly different states instead of the same
+ * blank screen.
+ */
+export function createOfflinePill(React) {
+  return function OfflinePill(props) {
+    const { stage, text } = props;
+    const left = Math.max(stage.x + 8, stage.x + stage.w - 132 - CAPSULE_INSET.right);
+    const top = Math.max(stage.y + 8, stage.y + stage.h - 26 - CAPSULE_INSET.bottom);
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement('style', { 'data-dsh-hud': 'offline' }, OFFLINE_CSS),
+      React.createElement('div', { className: 'dsh-hud-offline', style: { left: px(left), top: px(top) } }, text),
+    );
+  };
+}
+
 /**
  * The return capsule (§4.4): pinned inside the message area's bottom-right, so
  * it never overlaps the composer or the send/stop button.
