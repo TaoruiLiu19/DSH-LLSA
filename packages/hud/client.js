@@ -858,7 +858,9 @@ function nextFocus(focus, view) {
     return { taskId, active: false, dismissedTaskId: focus.dismissedTaskId, state, reason: 'idle' };
   }
   if (taskId !== focus.taskId) {
-    return { taskId, active: state === 'running', dismissedTaskId: null, state, reason: 'new-task' };
+    // A task first seen while it already waits for an answer still opens: the
+    // question belongs to that task, and the field must not go blank behind it.
+    return { taskId, active: state === 'running' || state === 'waiting-human', dismissedTaskId: null, state, reason: 'new-task' };
   }
   if (state === 'waiting-human') {
     // A question keeps the field. The ask surface renders above the overlay, so
@@ -1766,6 +1768,33 @@ function questionCardBox(stage) {
   }
 }
 
+/**
+ * The newest row of the message flow, used when the ask surface has no backplate.
+ *
+ * A question appended as the last flow item exists immediately, before any role
+ * or backdrop appears, so this keeps the hole stable across the first frames of
+ * the question instead of dropping the blur for a beat.
+ */
+function lastFlowRowBox(stage) {
+  if (typeof document === 'undefined' || stage === null) return null;
+  try {
+    const host = document.querySelector('#root [data-slot="conversation.chat.flow"]')
+      ?? document.querySelector('[data-slot="conversation.chat.flow"]');
+    if (host === null) return null;
+    const rows = [...(host.children ?? [])].filter(element => {
+      const rect = element.getBoundingClientRect();
+      if (!(rect.width > 200 && rect.height > 40)) return false;
+      return rect.bottom > stage.y && rect.top < stage.y + stage.h;
+    });
+    const last = rows.at(-1);
+    if (last === undefined) return null;
+    const rect = last.getBoundingClientRect();
+    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+  } catch {
+    return null;
+  }
+}
+
 /** The dialog's box in viewport coordinates, or null when it has none yet. */
 function dialogBox(element) {
   if (element === null || typeof element.getBoundingClientRect !== 'function') return null;
@@ -1991,9 +2020,20 @@ function applyClient(ctx, React) {
     }
     // The scrim is split around whatever the user must interact with: a modal
     // card, or the answer controls of an inline question. The blur and the dim
-    // stay everywhere else, and the sharp area stays clickable. If neither can be
-    // located, the scrim steps aside rather than covering the question.
-    const hole = findDialogSurface() ?? (view.pending === true ? questionCardBox(stage) : null);
+    // stay everywhere else, and the sharp area stays clickable.
+    //
+    // The hole is only accepted when it sits inside the message area and leaves
+    // something to blur: a stray full-screen wrapper must never dissolve the
+    // scrim, and a card covering everything means there is nothing left to blur.
+    const candidate = findDialogSurface()
+      ?? (view.pending === true ? (questionCardBox(stage) ?? lastFlowRowBox(stage)) : null);
+    const insideStage = candidate !== null
+      && candidate.x >= stage.x - 8
+      && candidate.y >= stage.y - 8
+      && candidate.x + candidate.width <= stage.x + stage.w + 8
+      && candidate.y + candidate.height <= stage.y + stage.h + 8
+      && candidate.width * candidate.height < stage.w * stage.h * 0.85;
+    const hole = insideStage ? candidate : null;
     const soft = view.pending === true && hole === null;
     return wrap(React.createElement(FocusLayer, {
       view,

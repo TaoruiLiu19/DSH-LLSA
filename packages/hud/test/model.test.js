@@ -254,6 +254,14 @@ test('a session switch resets the field', () => {
   assert.equal(view.taskId, null);
 });
 
+test('a task first seen while it already waits for an answer still opens', () => {
+  const base = { taskId: null, active: false, dismissedTaskId: null, state: 'idle' };
+  const asked = { ...createView({ sessionId: 's', now: 0 }), taskId: 't1', state: 'waiting-human', pending: true };
+  const focus = nextFocus(base, asked);
+  assert.equal(focus.active, true, 'the question belongs to this task; the field must not go blank');
+  assert.equal(focus.reason, 'new-task');
+});
+
 test('a question keeps the field, and answering it keeps it too', () => {
   const base = { taskId: null, active: false, dismissedTaskId: null, state: 'idle' };
   const running = { ...createView({ sessionId: 's', now: 0 }), taskId: 't1', state: 'running' };

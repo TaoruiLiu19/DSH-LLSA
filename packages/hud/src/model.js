@@ -557,7 +557,9 @@ export function nextFocus(focus, view) {
     return { taskId, active: false, dismissedTaskId: focus.dismissedTaskId, state, reason: 'idle' };
   }
   if (taskId !== focus.taskId) {
-    return { taskId, active: state === 'running', dismissedTaskId: null, state, reason: 'new-task' };
+    // A task first seen while it already waits for an answer still opens: the
+    // question belongs to that task, and the field must not go blank behind it.
+    return { taskId, active: state === 'running' || state === 'waiting-human', dismissedTaskId: null, state, reason: 'new-task' };
   }
   if (state === 'waiting-human') {
     // A question keeps the field. The ask surface renders above the overlay, so
