@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "task-reuse",
+  "version": "0.4.0",
+  "description": "Confirm a CSV deduplication rule once, then run it locally on new files.",
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "Task Reuse",
+        "shortDescription": "Save and reuse verified CSV deduplication rules.",
+        "longDescription": "Preview competing deduplication rules, confirm the intended result, and reuse the rule on later CSV exports. Data rows are processed by the local runner.",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"]
+      }
+    }
+  }
+}

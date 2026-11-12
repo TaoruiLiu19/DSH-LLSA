@@ -63,6 +63,10 @@ npm start
 
 </details>
 
+### 可选的 CSV 工作流
+
+Task Reuse 可在本机预览、保存并复用 CSV 筛选、去重和统计流程。演示启动命令与示例见 [Task Reuse 使用说明](task-reuse/README.md)。
+
 ## 第一次协作
 
 <details>
