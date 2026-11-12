@@ -1760,7 +1760,9 @@ function questionCardBox(stage) {
       if (rect.width >= 240 && rect.height >= 56) {
         box = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
       }
-      if (rect.width >= stage.w * 0.8) break;
+      // Stop at the card: a row that already spans most of the column is the
+      // message wrapper, not the question.
+      if (rect.width >= stage.w * 0.7 || rect.height >= stage.h * 0.5) break;
     }
     return box;
   } catch {
@@ -2025,8 +2027,12 @@ function applyClient(ctx, React) {
     // The hole is only accepted when it sits inside the message area and leaves
     // something to blur: a stray full-screen wrapper must never dissolve the
     // scrim, and a card covering everything means there is nothing left to blur.
-    const candidate = findDialogSurface()
-      ?? (view.pending === true ? (questionCardBox(stage) ?? lastFlowRowBox(stage)) : null);
+    // Only a pending question earns a hole: any other time the scrim stays whole,
+    // otherwise a persistent app frame would be mistaken for a dialog and leave a
+    // sharp rectangle behind after the question is answered.
+    const candidate = view.pending === true
+      ? (questionCardBox(stage) ?? findDialogSurface() ?? lastFlowRowBox(stage))
+      : null;
     const insideStage = candidate !== null
       && candidate.x >= stage.x - 8
       && candidate.y >= stage.y - 8
