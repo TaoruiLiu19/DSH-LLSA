@@ -203,7 +203,7 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 | DSH-LLSA 组合发行 / 启动器 | 0.4.2 |
 | `@dsh-llsa/collab` | 0.4.2 |
 | `@dsh-llsa/superagent` | 0.4.2 |
-| `@dsh-llsa/hud`（可选，单独安装） | 0.4.0 |
+| `@dsh-llsa/hud`（可选，单独安装） | 0.4.1 |
 | DeepSeek Harness | 0.2.2-rc.1 |
 
 包通过本地构建与随包文件安装，保持 `private: true`；这些名称不是已在 npm 发布的承诺。快速开始会启动指定版本的 Harness，尚不支持对任意已有实例一条 `dsh plugin add` 命令完成全部配置。

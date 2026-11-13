@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.1
+
+- **The field follows the host's theme.** It was drawn for a dark window only: on a
+  light one the dark scrim turned the conversation to grey mush and the white ink
+  vanished. The palette is now chosen from the surface the field actually sits on —
+  walk up from the `conversation.session` slot to the first ancestor that paints,
+  take its relative luminance, and treat anything brighter than 0.5 as light. No
+  theme API is consulted, because the shell may follow the OS, a profile setting or
+  a per-session override; a missing surface falls back to `prefers-color-scheme`,
+  then to dark.
+- The light palette inverts the scrim (pale instead of black), darkens the ink and
+  deepens every accent so it still carries contrast on white (`#4c9aff` is 2.6:1 on
+  white, the light blue is 4.6:1). Glows shrink to 32% and thin lines gain 35% alpha:
+  a glow smears on white and a hairline disappears.
+- The capsule, the hint and the offline pill switch with the same class, so the
+  whole layer changes together and a theme switch repaints on the next frame.
+- The README now shows the field in both themes and a runtime diagram (an
+  explorable HTML with its source specification under docs/).
+
+Tests: 117 (was 113).
+
 ## 0.4.0
 
 A design pass over the field: the ring stops re-flowing, and the centre stops

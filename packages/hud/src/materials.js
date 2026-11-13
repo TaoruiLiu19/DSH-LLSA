@@ -225,9 +225,9 @@ export const MATERIAL_BY_ALIAS = (() => {
 })();
 
 /**
- * State -> colour. This is the single mapping of §4.1; nothing else invents one.
- * `done` keeps its green here for the *run-level* conclusion; material nodes stop
- * using it (§6.2: a finished material goes quiet, it does not turn green).
+ * State -> colour, for the DARK field. `colorOf(state, theme)` is the real entry
+ * point: the light palette lives in {@link THEMES}. `done` keeps its green here
+ * for the run-level conclusion; a material node uses the same mapping.
  */
 export const STATE_COLORS = Object.freeze({
   running: '#4c9aff',
@@ -236,6 +236,60 @@ export const STATE_COLORS = Object.freeze({
   failed: '#ff5f6d',
   idle: '#96aac3',
 });
+
+/**
+ * Palettes, one per host surface.
+ *
+ * The field sits on a scrim over the host's own window, so a dark field on a
+ * light window reads as a bruise: the ink, the accents and the glow strength all
+ * have to follow. `ink`/`subInk` are already-computed `rgba()` strings because
+ * the canvas wants text alpha baked in; `colors` stay `#rrggbb` so `rgba()` can
+ * vary their alpha.
+ */
+export const THEMES = Object.freeze({
+  dark: Object.freeze({
+    ink: 'rgba(232,242,255,.95)',
+    labelInk: 'rgba(232,242,255,.92)',
+    subInk: 'rgba(150,175,205,.78)',
+    doneSub: 'rgba(150,210,185,.8)',
+    failedSub: 'rgba(255,140,150,.85)',
+    /** the centre halo: colour plus how much of its base alpha survives */
+    halo: '#4c9aff',
+    haloAlpha: 1,
+    /** glows are light on dark; on light they smear, so they shrink */
+    glowScale: 1,
+    /** thin lines need more alpha against a bright surface */
+    lineScale: 1,
+    colors: STATE_COLORS,
+  }),
+  light: Object.freeze({
+    ink: 'rgba(22,30,42,.92)',
+    labelInk: 'rgba(26,34,46,.9)',
+    subInk: 'rgba(70,84,102,.82)',
+    doneSub: 'rgba(18,104,72,.92)',
+    failedSub: 'rgba(166,38,54,.92)',
+    halo: '#0b1020',
+    haloAlpha: 0.45,
+    glowScale: 0.32,
+    lineScale: 1.35,
+    // Darker accents: #4c9aff on white is a 2.6:1 contrast, this is 4.6:1.
+    colors: Object.freeze({
+      running: '#2f6fd0',
+      'waiting-human': '#a8690a',
+      done: '#15805a',
+      failed: '#c62f3f',
+      idle: '#6b7a8d',
+    }),
+  }),
+});
+
+/** Every theme this build ships; the client may only ever name one of these. */
+export const THEME_NAMES = Object.freeze(Object.keys(THEMES));
+
+/** The palette for a theme name. An unknown name is the dark one, never a throw. */
+export function paletteOf(theme) {
+  return THEMES[theme] ?? THEMES.dark;
+}
 
 /**
  * Words for the RUN (§5.3). The centre and the capsule speak this vocabulary;
@@ -337,9 +391,10 @@ export function materialDoneLabel(locale) {
   return MATERIAL_DONE[languageOf(locale)];
 }
 
-/** Colour for a state; `idle` never draws a node, but the palette stays total. */
-export function colorOf(state) {
-  return STATE_COLORS[state] ?? STATE_COLORS.idle;
+/** Colour for a state, in one theme; `idle` never draws a node, but the palette stays total. */
+export function colorOf(state, theme) {
+  const colors = paletteOf(theme).colors;
+  return colors[state] ?? colors.idle;
 }
 
 /**

@@ -231,7 +231,9 @@ export function applyClient(ctx, React) {
   /** The focus layer and the capsule, both frame-wide. */
   function OverlayEntry() {
     useSnapshot();
-    const stage = useStage();
+    const stageState = useStage();
+    const stage = stageState.stage;
+    const theme = stageState.theme;
     const state = store.get();
     const view = state.view;
     const strings = stringsOf(state.locale);
@@ -242,6 +244,7 @@ export function applyClient(ctx, React) {
       return current;
     }, []);
     const getStage = React.useCallback(() => stage, [stage]);
+    const getTheme = React.useCallback(() => theme, [theme]);
 
     React.useEffect(() => {
       const onKey = event => {
@@ -280,6 +283,7 @@ export function applyClient(ctx, React) {
         return wrap(React.createElement(Capsule, {
           view,
           stage,
+          theme,
           onOpen: () => store.open(),
           labels: { open: strings.open },
         }));
@@ -288,7 +292,7 @@ export function applyClient(ctx, React) {
       // of showing the same blank screen as "nothing is happening". A field that
       // was switched off on purpose says nothing at all.
       if (enabled && shouldShowOffline(state.sessionId, state.online)) {
-        return wrap(React.createElement(OfflinePill, { stage, text: strings.offline }));
+        return wrap(React.createElement(OfflinePill, { stage, theme, text: strings.offline }));
       }
       return wrap(null);
     }
@@ -298,11 +302,12 @@ export function applyClient(ctx, React) {
     return wrap(React.createElement(FocusLayer, {
       view,
       stage,
+      theme,
       soft: false,
       hole: null,
       onDismiss: () => store.dismiss(),
       hint: strings.hint,
-      canvasProps: { getView, getStage },
+      canvasProps: { getView, getStage, getTheme },
     }));
   }
 

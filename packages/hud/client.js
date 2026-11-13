@@ -232,9 +232,9 @@ const MATERIAL_BY_ALIAS = (() => {
 })();
 
 /**
- * State -> colour. This is the single mapping of §4.1; nothing else invents one.
- * `done` keeps its green here for the *run-level* conclusion; material nodes stop
- * using it (§6.2: a finished material goes quiet, it does not turn green).
+ * State -> colour, for the DARK field. `colorOf(state, theme)` is the real entry
+ * point: the light palette lives in {@link THEMES}. `done` keeps its green here
+ * for the run-level conclusion; a material node uses the same mapping.
  */
 const STATE_COLORS = Object.freeze({
   running: '#4c9aff',
@@ -243,6 +243,60 @@ const STATE_COLORS = Object.freeze({
   failed: '#ff5f6d',
   idle: '#96aac3',
 });
+
+/**
+ * Palettes, one per host surface.
+ *
+ * The field sits on a scrim over the host's own window, so a dark field on a
+ * light window reads as a bruise: the ink, the accents and the glow strength all
+ * have to follow. `ink`/`subInk` are already-computed `rgba()` strings because
+ * the canvas wants text alpha baked in; `colors` stay `#rrggbb` so `rgba()` can
+ * vary their alpha.
+ */
+const THEMES = Object.freeze({
+  dark: Object.freeze({
+    ink: 'rgba(232,242,255,.95)',
+    labelInk: 'rgba(232,242,255,.92)',
+    subInk: 'rgba(150,175,205,.78)',
+    doneSub: 'rgba(150,210,185,.8)',
+    failedSub: 'rgba(255,140,150,.85)',
+    /** the centre halo: colour plus how much of its base alpha survives */
+    halo: '#4c9aff',
+    haloAlpha: 1,
+    /** glows are light on dark; on light they smear, so they shrink */
+    glowScale: 1,
+    /** thin lines need more alpha against a bright surface */
+    lineScale: 1,
+    colors: STATE_COLORS,
+  }),
+  light: Object.freeze({
+    ink: 'rgba(22,30,42,.92)',
+    labelInk: 'rgba(26,34,46,.9)',
+    subInk: 'rgba(70,84,102,.82)',
+    doneSub: 'rgba(18,104,72,.92)',
+    failedSub: 'rgba(166,38,54,.92)',
+    halo: '#0b1020',
+    haloAlpha: 0.45,
+    glowScale: 0.32,
+    lineScale: 1.35,
+    // Darker accents: #4c9aff on white is a 2.6:1 contrast, this is 4.6:1.
+    colors: Object.freeze({
+      running: '#2f6fd0',
+      'waiting-human': '#a8690a',
+      done: '#15805a',
+      failed: '#c62f3f',
+      idle: '#6b7a8d',
+    }),
+  }),
+});
+
+/** Every theme this build ships; the client may only ever name one of these. */
+const THEME_NAMES = Object.freeze(Object.keys(THEMES));
+
+/** The palette for a theme name. An unknown name is the dark one, never a throw. */
+function paletteOf(theme) {
+  return THEMES[theme] ?? THEMES.dark;
+}
 
 /**
  * Words for the RUN (§5.3). The centre and the capsule speak this vocabulary;
@@ -344,9 +398,10 @@ function materialDoneLabel(locale) {
   return MATERIAL_DONE[languageOf(locale)];
 }
 
-/** Colour for a state; `idle` never draws a node, but the palette stays total. */
-function colorOf(state) {
-  return STATE_COLORS[state] ?? STATE_COLORS.idle;
+/** Colour for a state, in one theme; `idle` never draws a node, but the palette stays total. */
+function colorOf(state, theme) {
+  const colors = paletteOf(theme).colors;
+  return colors[state] ?? colors.idle;
 }
 
 /**
@@ -1351,6 +1406,11 @@ function breathing(now, speed, phase) {
 function drawField(context, view, geometry, now, options = {}) {
   const { size, cx, cy, k } = geometry;
   const centerAlpha = Number.isFinite(options.centerAlpha) ? options.centerAlpha : 1;
+  // The host's own surface decides the palette: the same drawing is illegible on
+  // a bright window. Unknown names fall back to dark (§11).
+  const theme = options.theme === 'light' ? 'light' : 'dark';
+  const palette = paletteOf(theme);
+  const accent = colorOf('running', theme);
   context.clearRect(0, 0, size, size);
 
   const materials = [...view.materials.values()].filter(node => node.alpha > 0.01);
@@ -1375,8 +1435,8 @@ function drawField(context, view, geometry, now, options = {}) {
   const heart = Number.isFinite(view.heart) ? view.heart : 0;
   if (heart > 0.01) {
     const heat = materials.reduce((most, node) => Math.max(most, node.heat), 0);
-    const halo = Math.min(0.07, (0.04 * heart + 0.02 * heat) * (0.75 + 0.25 * breathing(now, 1.1, 0)));
-    glow(context, cx, cy, 0.28 * size, colorOf('running'), halo);
+    const base = Math.min(0.07, (0.04 * heart + 0.02 * heat) * (0.75 + 0.25 * breathing(now, 1.1, 0)));
+    glow(context, cx, cy, 0.28 * size, palette.halo, base * palette.haloAlpha);
   }
 
   // Material <-> agent tether: only for pairs that were active together.
@@ -1392,7 +1452,7 @@ function drawField(context, view, geometry, now, options = {}) {
         context.beginPath();
         context.moveTo(from.x, from.y);
         context.lineTo(to.x, to.y);
-        context.strokeStyle = rgba(colorOf('running'), Math.min(agent.alpha, node.alpha) * 0.12);
+        context.strokeStyle = rgba(accent, Math.min(agent.alpha, node.alpha) * 0.12 * palette.lineScale);
         context.lineWidth = 1;
         context.stroke();
       }
@@ -1417,11 +1477,11 @@ function drawField(context, view, geometry, now, options = {}) {
     const trim = Math.asin(Math.min(1, (22 * k) / Math.max(1, geometry.material)));
     const rise = age < TIMING.linkRiseMs ? age / TIMING.linkRiseMs : 1;
     const fall = age < 620 ? 1 : Math.max(0, 1 - (age - 620) / Math.max(1, TIMING.linkTtlMs - 620));
-    const alpha = 0.16 * Math.min(rise, fall);
+    const alpha = 0.16 * Math.min(rise, fall) * palette.lineScale;
     if (alpha <= 0.004) continue;
     context.beginPath();
     context.arc(cx, cy, geometry.material, lo + trim, hi - trim);
-    context.strokeStyle = rgba(colorOf('running'), alpha);
+    context.strokeStyle = rgba(accent, alpha);
     context.lineWidth = Math.max(1, k);
     context.stroke();
   }
@@ -1441,20 +1501,20 @@ function drawField(context, view, geometry, now, options = {}) {
       const to = seatPoint(geometry, seat[1], geometry.agent);
       const x = cx + (to.x - cx) * eased;
       const y = cy + (to.y - cy) * eased;
-      glow(context, x, y, 16 * k, colorOf('running'), 0.5 * (1 - progress * 0.4));
+      glow(context, x, y, 16 * k, accent, 0.5 * (1 - progress * 0.4) * palette.glowScale);
       context.beginPath();
       context.arc(x, y, 2.4 * k, 0, Math.PI * 2);
-      context.fillStyle = rgba(colorOf('running'), 0.95);
+      context.fillStyle = rgba(accent, 0.95);
       context.fill();
       continue;
     }
     const to = seatPoint(geometry, targetAngle, geometry.material);
     const x = cx + (to.x - cx) * eased;
     const y = cy + (to.y - cy) * eased;
-    glow(context, x, y, 16 * k, colorOf('running'), 0.5 * (1 - progress * 0.4));
+    glow(context, x, y, 16 * k, accent, 0.5 * (1 - progress * 0.4) * palette.glowScale);
     context.beginPath();
     context.arc(x, y, 2.4 * k, 0, Math.PI * 2);
-    context.fillStyle = rgba(colorOf('running'), 0.95);
+    context.fillStyle = rgba(accent, 0.95);
     context.fill();
   }
 
@@ -1463,7 +1523,7 @@ function drawField(context, view, geometry, now, options = {}) {
     const node = view.agents.get(agentId);
     if (node === undefined) continue;
     const point = seatPoint(geometry, angle, geometry.agent);
-    const tone = colorOf(node.state);
+    const tone = colorOf(node.state, theme);
     const working = node.state === 'running';
     const breath = working ? breathing(now, 1.9, node.phase) : 0;
     const strength = Math.min(1, (working ? 0.34 + breath * 0.26 : 0.14) + node.heat * 0.5);
@@ -1500,6 +1560,7 @@ function drawField(context, view, geometry, now, options = {}) {
       label: node.label,
       sub: node.state === 'idle' ? '' : stateLabel(node.state, view.locale),
       tone,
+      ink: palette.labelInk,
       k,
       labelSize: 13,
     });
@@ -1515,7 +1576,7 @@ function drawField(context, view, geometry, now, options = {}) {
     // 产品回调（2026-11-13）：完成态重新变绿——那一刻的绿色反馈是有价值的。
     // 它仍然停止呼吸，所以"在跑"和"做完了"除了颜色还有动效可以区分。
     const settled = node.state === 'done';
-    const tone = colorOf(node.state);
+    const tone = colorOf(node.state, theme);
     const breath = node.state === 'running' && !pinned ? breathing(now, 1.6, node.phase) : 0;
     const base = node.state === 'idle' ? 0.12 : 0.3 + breath * 0.28;
     const strength = Math.min(1, base + node.heat * 0.5);
@@ -1543,7 +1604,7 @@ function drawField(context, view, geometry, now, options = {}) {
     if (node.state === 'waiting-human') {
       context.beginPath();
       context.arc(point.x, point.y, radius + 6 * k, 0, Math.PI * 2);
-      context.strokeStyle = rgba(colorOf('waiting-human'), 0.18);
+      context.strokeStyle = rgba(colorOf('waiting-human', theme), 0.18);
       context.lineWidth = k;
       context.stroke();
     }
@@ -1564,6 +1625,7 @@ function drawField(context, view, geometry, now, options = {}) {
           ? (node.verb || stateLabel('running', view.locale))
           : materialDoneLabel(view.locale)),
       tone,
+      ink: palette.labelInk,
       k,
       labelSize: 14,
     });
@@ -1580,7 +1642,7 @@ function drawField(context, view, geometry, now, options = {}) {
     context.textBaseline = 'middle';
     const terminal = view.state === 'done' || view.state === 'failed';
     if (terminal) {
-      const tone = colorOf(view.state);
+      const tone = colorOf(view.state, theme);
       try {
         context.letterSpacing = `${3 * k}px`;
       } catch {
@@ -1595,7 +1657,7 @@ function drawField(context, view, geometry, now, options = {}) {
         // same
       }
       context.font = `400 ${12 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
-      context.fillStyle = view.state === 'failed' ? 'rgba(255,140,150,.85)' : 'rgba(150,210,185,.8)';
+      context.fillStyle = view.state === 'failed' ? palette.failedSub : palette.doneSub;
       context.fillText(center.sub, cx, cy + 20 * k);
       context.beginPath();
       context.arc(cx, cy, 52 * k, 0, Math.PI * 2);
@@ -1606,11 +1668,11 @@ function drawField(context, view, geometry, now, options = {}) {
       // §5: one state word, one size, always the same baseline. The centre is a
       // reading, not a sentence — so it can change word without changing shape.
       context.font = `600 ${26 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
-      context.fillStyle = view.state === 'waiting-human' ? rgba(colorOf('waiting-human'), 0.96) : 'rgba(232,242,255,.95)';
+      context.fillStyle = view.state === 'waiting-human' ? rgba(colorOf('waiting-human', theme), 0.96) : palette.ink;
       context.fillText(center.main, cx, cy - 8 * k);
       if (center.sub !== '') {
         context.font = `400 ${12 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
-        context.fillStyle = 'rgba(150,175,205,.78)';
+        context.fillStyle = palette.subInk;
         context.fillText(center.sub, cx, cy + 20 * k);
       }
     }
@@ -1620,12 +1682,13 @@ function drawField(context, view, geometry, now, options = {}) {
 
 function drawNodeLabel(context, options) {
   const { angle, point, offset, label, sub, tone, k, labelSize } = options;
+  const ink = typeof options.ink === 'string' ? options.ink : 'rgba(232,242,255,.92)';
   const anchor = labelAnchor(angle);
   const x = point.x + Math.cos(angle) * offset;
   const y = point.y + Math.sin(angle) * offset;
   context.textAlign = anchor;
   context.font = `600 ${labelSize * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
-  context.fillStyle = 'rgba(232,242,255,.92)';
+  context.fillStyle = ink;
   context.fillText(label, x, y - 5 * k);
   if (sub !== '') {
     context.font = `400 ${10.5 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
@@ -1642,7 +1705,7 @@ function drawNodeLabel(context, options) {
  */
 function createFieldCanvas(React) {
   return function FieldCanvas(props) {
-    const { getView, getStage } = props;
+    const { getView, getStage, getTheme } = props;
     const canvasRef = React.useRef(null);
     const alphaRef = React.useRef(1);
     const lastMainRef = React.useRef('');
@@ -1676,7 +1739,8 @@ function createFieldCanvas(React) {
             alphaRef.current = 0;
           }
           alphaRef.current = Math.min(1, alphaRef.current + 0.06);
-          drawField(context, view, ringGeometry(size), now, { centerAlpha: alphaRef.current });
+          const theme = typeof getTheme === 'function' ? getTheme() : 'dark';
+          drawField(context, view, ringGeometry(size), now, { centerAlpha: alphaRef.current, theme });
         }
         rafRef.current = globalThis.requestAnimationFrame(frame);
       };
@@ -1685,7 +1749,7 @@ function createFieldCanvas(React) {
         disposed = true;
         globalThis.cancelAnimationFrame(rafRef.current);
       };
-    }, [getView, getStage]);
+    }, [getView, getStage, getTheme]);
 
     return React.createElement('canvas', {
       ref: canvasRef,
@@ -1739,6 +1803,14 @@ const STYLES = `
 .dsh-hud-capsule:focus-visible{outline:2px solid rgba(76,154,255,.7);outline-offset:2px}
 .dsh-hud-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .dsh-hud-offline{position:fixed;z-index:3;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:rgba(24,20,18,.55);border:1px solid rgba(255,95,109,.35);color:#e7b0b5;font-size:11px;line-height:1;pointer-events:none;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+/* Light host surface: the same layer, inverted. The scrim goes pale instead of
+   black, the ink goes dark, and the frosted pill becomes white glass. */
+.dsh-hud-scrim.dsh-hud-light{background:rgba(248,249,252,.62);-webkit-backdrop-filter:blur(10px) saturate(1.05);backdrop-filter:blur(10px) saturate(1.05)}
+.dsh-hud-hint.dsh-hud-light{color:rgba(88,102,120,.8);text-shadow:none}
+.dsh-hud-capsule.dsh-hud-light{background:rgba(255,255,255,.8);border-color:rgba(15,23,42,.14);color:#1f2a3a;box-shadow:0 8px 24px rgba(15,23,42,.14)}
+.dsh-hud-capsule.dsh-hud-light:hover{background:#fff;border-color:rgba(47,111,208,.55);color:#0f172a}
+.dsh-hud-capsule.dsh-hud-light:focus-visible{outline-color:rgba(47,111,208,.6)}
+.dsh-hud-offline.dsh-hud-light{background:rgba(255,246,247,.85);border-color:rgba(198,47,63,.32);color:#8a2432}
 `;
 
 function px(value) {
@@ -1849,21 +1921,76 @@ function scrimPieces(stage, hole, pad = 10) {
 }
 
 /**
+ * Relative luminance of a computed CSS colour, or `null` when it is unknown or
+ * effectively transparent (the caller then keeps walking up the tree).
+ */
+function luminanceOf(css) {
+  const match = /^rgba?\(([^)]+)\)$/i.exec(typeof css === 'string' ? css.trim() : '');
+  if (match === null) return null;
+  const parts = match[1].split(/[,/\s]+/).filter(Boolean).map(value => Number.parseFloat(value));
+  if (parts.length < 3 || parts.slice(0, 3).some(value => !Number.isFinite(value))) return null;
+  const alpha = parts.length > 3 && Number.isFinite(parts[3]) ? parts[3] : 1;
+  if (alpha <= 0.05) return null;
+  const linear = value => {
+    const channel = value / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear(parts[0]) + 0.7152 * linear(parts[1]) + 0.0722 * linear(parts[2]);
+}
+
+/** Which palette suits a surface. Dark is the safe default. */
+function themeNameFor(luminance) {
+  return Number.isFinite(luminance) && luminance > 0.5 ? 'light' : 'dark';
+}
+
+/**
+ * Pick a palette from the host's own painted surface.
+ *
+ * Not a theme API: the shell may follow the OS, a profile setting or a
+ * per-session override, and only the rendered pixels know the answer. The slot
+ * hosts are `display: contents`, so the walk goes up until something paints.
+ */
+function measureTheme(doc = typeof document === 'undefined' ? undefined : document) {
+  if (doc === undefined || doc === null) return 'dark';
+  const view = doc.defaultView;
+  let node = slotHost(doc, COLUMN_ANCHORS[0]) ?? doc.body ?? null;
+  for (let hop = 0; hop < 12 && node !== null && node !== undefined; hop += 1) {
+    const style = view?.getComputedStyle(node);
+    const luminance = luminanceOf(style === undefined ? '' : style.backgroundColor);
+    if (luminance !== null) return themeNameFor(luminance);
+    node = node.parentElement;
+  }
+  try {
+    const media = view?.matchMedia?.('(prefers-color-scheme: dark)');
+    if (media !== undefined && media !== null) return media.matches === true ? 'dark' : 'light';
+  } catch {
+    // no media support: keep the dark default
+  }
+  return 'dark';
+}
+
+/**
  * Track the stage. Recovers from boot swaps and panel animation without polling
  * the document on every streamed token: a rAF-debounced mutation watcher plus a
- * slow safety net.
+ * slow safety net. The theme rides along on the same watcher, so a light/dark
+ * switch in the shell repaints the field on the next frame.
  */
 function createStageHook(React) {
   return function useStage() {
-    const [stage, setStage] = React.useState(() => measureStage());
+    const [state, setState] = React.useState(() => ({ stage: measureStage(), theme: measureTheme() }));
     React.useEffect(() => {
       let disposed = false;
       let scheduled = 0;
       let retry = 0;
       const measure = () => {
         if (disposed) return;
-        const next = measureStage();
-        setStage(prev => (prev.x === next.x && prev.y === next.y && prev.w === next.w && prev.h === next.h && prev.full === next.full ? prev : next));
+        const nextStage = measureStage();
+        const nextTheme = measureTheme();
+        setState(prev => (prev.stage.x === nextStage.x && prev.stage.y === nextStage.y
+          && prev.stage.w === nextStage.w && prev.stage.h === nextStage.h
+          && prev.stage.full === nextStage.full && prev.theme === nextTheme
+          ? prev
+          : { stage: nextStage, theme: nextTheme }));
       };
       const schedule = () => {
         if (scheduled !== 0) return;
@@ -1889,7 +2016,7 @@ function createStageHook(React) {
         globalThis.removeEventListener('resize', schedule);
       };
     }, []);
-    return stage;
+    return state;
   };
 }
 
@@ -1902,14 +2029,15 @@ function createStageHook(React) {
 function createFocusLayer(React, options = {}) {
   const FieldCanvas = options.FieldCanvas;
   return function FocusLayer(props) {
-    const { view, stage, onDismiss, hint, soft, hole } = props;
+    const { view, stage, onDismiss, hint, soft, hole, theme } = props;
+    const themeClass = theme === 'light' ? ' dsh-hud-light' : '';
     const box = hudBox(stage);
     const hintBottom = Math.max(12, (globalThis.innerHeight ?? 0) - (stage.y + stage.h) + 12);
     const pieces = soft === true ? [] : scrimPieces(stage, hole);
     const clickThrough = soft === true || pieces.length > 1;
     const scrims = soft === true ? null : pieces.map((piece, index) => React.createElement('div', {
       key: `scrim-${index}`,
-      className: 'dsh-hud-scrim',
+      className: `dsh-hud-scrim${themeClass}`,
       onClick: clickThrough ? undefined : onDismiss,
       'aria-hidden': true,
       style: {
@@ -1937,7 +2065,7 @@ function createFocusLayer(React, options = {}) {
         ? null
         : React.createElement(
           'div',
-          { className: 'dsh-hud-hint', style: { left: px(stage.x), width: px(stage.w), bottom: px(hintBottom) } },
+          { className: `dsh-hud-hint${themeClass}`, style: { left: px(stage.x), width: px(stage.w), bottom: px(hintBottom) } },
           hint,
         ),
     );
@@ -1953,10 +2081,11 @@ function createFocusLayer(React, options = {}) {
  */
 function createOfflinePill(React) {
   return function OfflinePill(props) {
-    const { stage, text } = props;
+    const { stage, text, theme } = props;
+    const themeClass = theme === 'light' ? ' dsh-hud-light' : '';
     const left = Math.max(stage.x + 8, stage.x + stage.w - 132 - CAPSULE_INSET.right);
     const top = Math.max(stage.y + 8, stage.y + stage.h - 26 - CAPSULE_INSET.bottom);
-    return React.createElement('div', { className: 'dsh-hud-offline', style: { left: px(left), top: px(top) } }, text);
+    return React.createElement('div', { className: `dsh-hud-offline${themeClass}`, style: { left: px(left), top: px(top) } }, text);
   };
 }
 
@@ -1970,8 +2099,10 @@ function createOfflinePill(React) {
  */
 function createCapsule(React) {
   return function Capsule(props) {
-    const { view, stage, onOpen, labels } = props;
+    const { view, stage, onOpen, labels, theme } = props;
+    const themeClass = theme === 'light' ? ' dsh-hud-light' : '';
     const state = capsuleOf(view);
+    const dot = colorOf(state.state, theme);
     const stageRight = stage.x + stage.w;
     const stageBottom = stage.y + stage.h;
     const insetRight = Math.max(0, (globalThis.innerWidth ?? stageRight) - stageRight) + CAPSULE_INSET.right;
@@ -1980,7 +2111,7 @@ function createCapsule(React) {
       'button',
       {
         type: 'button',
-        className: 'dsh-hud-capsule',
+        className: `dsh-hud-capsule${themeClass}`,
         onPointerDown: event => event.stopPropagation(),
         onClick: event => {
           event.preventDefault();
@@ -1993,7 +2124,7 @@ function createCapsule(React) {
       },
       React.createElement('i', {
         className: 'dsh-hud-dot',
-        style: { background: colorOf(state.state), boxShadow: `0 0 8px ${colorOf(state.state)}` },
+        style: { background: dot, boxShadow: `0 0 8px ${dot}` },
       }),
       // §5.3: the capsule speaks the run's vocabulary, so leaving the field is
       // lossless — the conclusion stays readable at the bottom-right corner.
@@ -2233,7 +2364,9 @@ function applyClient(ctx, React) {
   /** The focus layer and the capsule, both frame-wide. */
   function OverlayEntry() {
     useSnapshot();
-    const stage = useStage();
+    const stageState = useStage();
+    const stage = stageState.stage;
+    const theme = stageState.theme;
     const state = store.get();
     const view = state.view;
     const strings = stringsOf(state.locale);
@@ -2244,6 +2377,7 @@ function applyClient(ctx, React) {
       return current;
     }, []);
     const getStage = React.useCallback(() => stage, [stage]);
+    const getTheme = React.useCallback(() => theme, [theme]);
 
     React.useEffect(() => {
       const onKey = event => {
@@ -2282,6 +2416,7 @@ function applyClient(ctx, React) {
         return wrap(React.createElement(Capsule, {
           view,
           stage,
+          theme,
           onOpen: () => store.open(),
           labels: { open: strings.open },
         }));
@@ -2290,7 +2425,7 @@ function applyClient(ctx, React) {
       // of showing the same blank screen as "nothing is happening". A field that
       // was switched off on purpose says nothing at all.
       if (enabled && shouldShowOffline(state.sessionId, state.online)) {
-        return wrap(React.createElement(OfflinePill, { stage, text: strings.offline }));
+        return wrap(React.createElement(OfflinePill, { stage, theme, text: strings.offline }));
       }
       return wrap(null);
     }
@@ -2300,11 +2435,12 @@ function applyClient(ctx, React) {
     return wrap(React.createElement(FocusLayer, {
       view,
       stage,
+      theme,
       soft: false,
       hole: null,
       onDismiss: () => store.dismiss(),
       hint: strings.hint,
-      canvasProps: { getView, getStage },
+      canvasProps: { getView, getStage, getTheme },
     }));
   }
 

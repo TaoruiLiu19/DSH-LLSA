@@ -6,7 +6,7 @@
  * itself is artwork: literal colours from §4.1 are allowed here, and nothing
  * here reads the host's DOM or another plugin's styles.
  */
-import { colorOf, materialDoneLabel, materialLabel, seatIndexOf, stateLabel } from './materials.js';
+import { colorOf, materialDoneLabel, materialLabel, paletteOf, seatIndexOf, stateLabel } from './materials.js';
 import { TIMING, centerText, stepLifecycle } from './model.js';
 
 /** Distance from the stage edge the capsule keeps (§4.4). */
@@ -163,6 +163,11 @@ function breathing(now, speed, phase) {
 export function drawField(context, view, geometry, now, options = {}) {
   const { size, cx, cy, k } = geometry;
   const centerAlpha = Number.isFinite(options.centerAlpha) ? options.centerAlpha : 1;
+  // The host's own surface decides the palette: the same drawing is illegible on
+  // a bright window. Unknown names fall back to dark (§11).
+  const theme = options.theme === 'light' ? 'light' : 'dark';
+  const palette = paletteOf(theme);
+  const accent = colorOf('running', theme);
   context.clearRect(0, 0, size, size);
 
   const materials = [...view.materials.values()].filter(node => node.alpha > 0.01);
@@ -187,8 +192,8 @@ export function drawField(context, view, geometry, now, options = {}) {
   const heart = Number.isFinite(view.heart) ? view.heart : 0;
   if (heart > 0.01) {
     const heat = materials.reduce((most, node) => Math.max(most, node.heat), 0);
-    const halo = Math.min(0.07, (0.04 * heart + 0.02 * heat) * (0.75 + 0.25 * breathing(now, 1.1, 0)));
-    glow(context, cx, cy, 0.28 * size, colorOf('running'), halo);
+    const base = Math.min(0.07, (0.04 * heart + 0.02 * heat) * (0.75 + 0.25 * breathing(now, 1.1, 0)));
+    glow(context, cx, cy, 0.28 * size, palette.halo, base * palette.haloAlpha);
   }
 
   // Material <-> agent tether: only for pairs that were active together.
@@ -204,7 +209,7 @@ export function drawField(context, view, geometry, now, options = {}) {
         context.beginPath();
         context.moveTo(from.x, from.y);
         context.lineTo(to.x, to.y);
-        context.strokeStyle = rgba(colorOf('running'), Math.min(agent.alpha, node.alpha) * 0.12);
+        context.strokeStyle = rgba(accent, Math.min(agent.alpha, node.alpha) * 0.12 * palette.lineScale);
         context.lineWidth = 1;
         context.stroke();
       }
@@ -229,11 +234,11 @@ export function drawField(context, view, geometry, now, options = {}) {
     const trim = Math.asin(Math.min(1, (22 * k) / Math.max(1, geometry.material)));
     const rise = age < TIMING.linkRiseMs ? age / TIMING.linkRiseMs : 1;
     const fall = age < 620 ? 1 : Math.max(0, 1 - (age - 620) / Math.max(1, TIMING.linkTtlMs - 620));
-    const alpha = 0.16 * Math.min(rise, fall);
+    const alpha = 0.16 * Math.min(rise, fall) * palette.lineScale;
     if (alpha <= 0.004) continue;
     context.beginPath();
     context.arc(cx, cy, geometry.material, lo + trim, hi - trim);
-    context.strokeStyle = rgba(colorOf('running'), alpha);
+    context.strokeStyle = rgba(accent, alpha);
     context.lineWidth = Math.max(1, k);
     context.stroke();
   }
@@ -253,20 +258,20 @@ export function drawField(context, view, geometry, now, options = {}) {
       const to = seatPoint(geometry, seat[1], geometry.agent);
       const x = cx + (to.x - cx) * eased;
       const y = cy + (to.y - cy) * eased;
-      glow(context, x, y, 16 * k, colorOf('running'), 0.5 * (1 - progress * 0.4));
+      glow(context, x, y, 16 * k, accent, 0.5 * (1 - progress * 0.4) * palette.glowScale);
       context.beginPath();
       context.arc(x, y, 2.4 * k, 0, Math.PI * 2);
-      context.fillStyle = rgba(colorOf('running'), 0.95);
+      context.fillStyle = rgba(accent, 0.95);
       context.fill();
       continue;
     }
     const to = seatPoint(geometry, targetAngle, geometry.material);
     const x = cx + (to.x - cx) * eased;
     const y = cy + (to.y - cy) * eased;
-    glow(context, x, y, 16 * k, colorOf('running'), 0.5 * (1 - progress * 0.4));
+    glow(context, x, y, 16 * k, accent, 0.5 * (1 - progress * 0.4) * palette.glowScale);
     context.beginPath();
     context.arc(x, y, 2.4 * k, 0, Math.PI * 2);
-    context.fillStyle = rgba(colorOf('running'), 0.95);
+    context.fillStyle = rgba(accent, 0.95);
     context.fill();
   }
 
@@ -275,7 +280,7 @@ export function drawField(context, view, geometry, now, options = {}) {
     const node = view.agents.get(agentId);
     if (node === undefined) continue;
     const point = seatPoint(geometry, angle, geometry.agent);
-    const tone = colorOf(node.state);
+    const tone = colorOf(node.state, theme);
     const working = node.state === 'running';
     const breath = working ? breathing(now, 1.9, node.phase) : 0;
     const strength = Math.min(1, (working ? 0.34 + breath * 0.26 : 0.14) + node.heat * 0.5);
@@ -312,6 +317,7 @@ export function drawField(context, view, geometry, now, options = {}) {
       label: node.label,
       sub: node.state === 'idle' ? '' : stateLabel(node.state, view.locale),
       tone,
+      ink: palette.labelInk,
       k,
       labelSize: 13,
     });
@@ -327,7 +333,7 @@ export function drawField(context, view, geometry, now, options = {}) {
     // 产品回调（2026-11-13）：完成态重新变绿——那一刻的绿色反馈是有价值的。
     // 它仍然停止呼吸，所以"在跑"和"做完了"除了颜色还有动效可以区分。
     const settled = node.state === 'done';
-    const tone = colorOf(node.state);
+    const tone = colorOf(node.state, theme);
     const breath = node.state === 'running' && !pinned ? breathing(now, 1.6, node.phase) : 0;
     const base = node.state === 'idle' ? 0.12 : 0.3 + breath * 0.28;
     const strength = Math.min(1, base + node.heat * 0.5);
@@ -355,7 +361,7 @@ export function drawField(context, view, geometry, now, options = {}) {
     if (node.state === 'waiting-human') {
       context.beginPath();
       context.arc(point.x, point.y, radius + 6 * k, 0, Math.PI * 2);
-      context.strokeStyle = rgba(colorOf('waiting-human'), 0.18);
+      context.strokeStyle = rgba(colorOf('waiting-human', theme), 0.18);
       context.lineWidth = k;
       context.stroke();
     }
@@ -376,6 +382,7 @@ export function drawField(context, view, geometry, now, options = {}) {
           ? (node.verb || stateLabel('running', view.locale))
           : materialDoneLabel(view.locale)),
       tone,
+      ink: palette.labelInk,
       k,
       labelSize: 14,
     });
@@ -392,7 +399,7 @@ export function drawField(context, view, geometry, now, options = {}) {
     context.textBaseline = 'middle';
     const terminal = view.state === 'done' || view.state === 'failed';
     if (terminal) {
-      const tone = colorOf(view.state);
+      const tone = colorOf(view.state, theme);
       try {
         context.letterSpacing = `${3 * k}px`;
       } catch {
@@ -407,7 +414,7 @@ export function drawField(context, view, geometry, now, options = {}) {
         // same
       }
       context.font = `400 ${12 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
-      context.fillStyle = view.state === 'failed' ? 'rgba(255,140,150,.85)' : 'rgba(150,210,185,.8)';
+      context.fillStyle = view.state === 'failed' ? palette.failedSub : palette.doneSub;
       context.fillText(center.sub, cx, cy + 20 * k);
       context.beginPath();
       context.arc(cx, cy, 52 * k, 0, Math.PI * 2);
@@ -418,11 +425,11 @@ export function drawField(context, view, geometry, now, options = {}) {
       // §5: one state word, one size, always the same baseline. The centre is a
       // reading, not a sentence — so it can change word without changing shape.
       context.font = `600 ${26 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
-      context.fillStyle = view.state === 'waiting-human' ? rgba(colorOf('waiting-human'), 0.96) : 'rgba(232,242,255,.95)';
+      context.fillStyle = view.state === 'waiting-human' ? rgba(colorOf('waiting-human', theme), 0.96) : palette.ink;
       context.fillText(center.main, cx, cy - 8 * k);
       if (center.sub !== '') {
         context.font = `400 ${12 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
-        context.fillStyle = 'rgba(150,175,205,.78)';
+        context.fillStyle = palette.subInk;
         context.fillText(center.sub, cx, cy + 20 * k);
       }
     }
@@ -432,12 +439,13 @@ export function drawField(context, view, geometry, now, options = {}) {
 
 function drawNodeLabel(context, options) {
   const { angle, point, offset, label, sub, tone, k, labelSize } = options;
+  const ink = typeof options.ink === 'string' ? options.ink : 'rgba(232,242,255,.92)';
   const anchor = labelAnchor(angle);
   const x = point.x + Math.cos(angle) * offset;
   const y = point.y + Math.sin(angle) * offset;
   context.textAlign = anchor;
   context.font = `600 ${labelSize * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
-  context.fillStyle = 'rgba(232,242,255,.92)';
+  context.fillStyle = ink;
   context.fillText(label, x, y - 5 * k);
   if (sub !== '') {
     context.font = `400 ${10.5 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
@@ -454,7 +462,7 @@ function drawNodeLabel(context, options) {
  */
 export function createFieldCanvas(React) {
   return function FieldCanvas(props) {
-    const { getView, getStage } = props;
+    const { getView, getStage, getTheme } = props;
     const canvasRef = React.useRef(null);
     const alphaRef = React.useRef(1);
     const lastMainRef = React.useRef('');
@@ -488,7 +496,8 @@ export function createFieldCanvas(React) {
             alphaRef.current = 0;
           }
           alphaRef.current = Math.min(1, alphaRef.current + 0.06);
-          drawField(context, view, ringGeometry(size), now, { centerAlpha: alphaRef.current });
+          const theme = typeof getTheme === 'function' ? getTheme() : 'dark';
+          drawField(context, view, ringGeometry(size), now, { centerAlpha: alphaRef.current, theme });
         }
         rafRef.current = globalThis.requestAnimationFrame(frame);
       };
@@ -497,7 +506,7 @@ export function createFieldCanvas(React) {
         disposed = true;
         globalThis.cancelAnimationFrame(rafRef.current);
       };
-    }, [getView, getStage]);
+    }, [getView, getStage, getTheme]);
 
     return React.createElement('canvas', {
       ref: canvasRef,
