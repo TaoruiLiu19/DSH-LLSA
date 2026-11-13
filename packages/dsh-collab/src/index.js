@@ -22,7 +22,7 @@ import { LocalWorkspace } from "./local-workspace.js";
 import { connectSuperagent } from "./superagent-integration.js";
 import { InputDelivery } from "./input-delivery.js";
 import { concludeSubmitted } from "./turn-completion.js";
-import { readEvidencePage } from "./evidence-page.js";
+import { readTaskEvidence } from "./evidence-page.js";
 import { syncHostQuestions, installBlockingAttention } from './hud-host.js';
 
 export const name = "dsh-collab";
@@ -330,11 +330,17 @@ export async function apply(ctx, rawConfig = {}) {
           assignmentId: z.string().optional(),
           start: z.number().int().nonnegative().default(0),
           bytes: z.number().int().min(1).max(64000).default(8000),
+          contains: z.string().trim().min(1).max(160).optional(),
+          mode: z.enum(['auto', 'page']).default('auto'),
         })
         .strict(),
       (args) => {
-        return readEvidencePage(manager, historyScope(manager, agent.id, args).runId,
-          args.ref, args.start, args.bytes);
+        const { runId } = historyScope(manager, agent.id, args);
+        if (args.contains) {
+          const meta = manager.readArtifact(runId, args.ref, { start: 0, end: 0 });
+          return readTaskEvidence(manager, runId, { label: args.ref, bytes: meta.totalBytes }, args, agent.id);
+        }
+        return readTaskEvidence(manager, runId, null, args, agent.id);
       },
     );
     register(
