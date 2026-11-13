@@ -1,0 +1,14 @@
+DSH-LLSA — attribution and license notices
+
+packages/superagent/ derives from https://github.com/deepseek-ai/dsh-superagent-prototype
+Copyright (c) 2026 DeepSeek Harness Team. MIT License.
+Upstream snapshot: 8c32a9dc5d72c033816c6a8110b37f40cf94fba4.
+Local modifications include local-content task entry, managed task lifecycle integration,
+report acceptance, runtime compatibility, packaging and user-interface changes.
+The original license is retained in packages/superagent/LICENSE.
+This project is not an official DeepSeek release or endorsement.
+
+packages/dsh-collab/, packages/launcher/, release tooling and presentation assets:
+Copyright (c) 2026 DSH-LLSA contributors. MIT License.
+
+@deepseek-ai/* and other installed dependencies retain their own licenses.

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "HUD focus view",
+    "description": "Draws the agent's live activity as one glanceable field: the conclusion at the centre, materials around it, sub-agents in between; sending a command opens focus mode."
+  }
+}

@@ -1,0 +1,6 @@
+# @dsh-llsa/hud — one loader entry for the package. The Host half serves the
+# read-only activity snapshot; the browser half ships through `dsh.client`
+# and registers the focus layer in `shell.overlay`.
+- insert:
+    - id: hud
+      name: '@dsh-llsa/hud'
