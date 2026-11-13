@@ -22,7 +22,6 @@ import {
   nextFocus,
   nextOnline,
   shouldShowOffline,
-  shortenTask,
   stepLifecycle,
 } from '../src/model.js';
 import { hasContracts, loadFixtures, timeline } from './contract.js';
@@ -116,14 +115,16 @@ function agent(id, state, extra = {}) {
   };
 }
 
-test('a single agent owns the centre', () => {
+test('the centre is a state word, never the task name', () => {
   const view = createView({ sessionId: 's', now: 0 });
   foldSnapshot(view, snapshot({
     agents: [{ ...agent('worker', 'running', { role: 'worker', parentId: 'root' }), label: '核对代码' }],
     events: [{ seq: 1, agentId: 'worker', kind: 'state.changed', at: '2026-11-12T03:20:11Z', tool: null, from: 'idle', to: 'running', reason: 'turn_started' }],
   }), 0, { sessionId: 's' });
   assert.equal(view.state, 'running');
-  assert.equal(centerText(view).main, '核对代码', 'the run label names the task');
+  // §5.4: the label is still stored, but the field stopped repeating the task.
+  assert.equal(centerText(view).main, '思考中');
+  assert.equal(centerText(view).sub, '');
 });
 
 test('a bare role name never becomes the task line', () => {
@@ -132,7 +133,7 @@ test('a bare role name never becomes the task line', () => {
     agents: [agent('worker', 'running', { role: 'worker' })],
     events: [{ seq: 1, agentId: 'worker', kind: 'state.changed', at: '2026-11-12T03:20:11Z', tool: null, from: 'idle', to: 'running', reason: 'turn_started' }],
   }), 0, { sessionId: 's' });
-  assert.equal(centerText(view).main, '执行中', 'a placeholder word is better than a role name');
+  assert.equal(centerText(view).main, '思考中', 'a placeholder word is better than a role name');
 });
 
 test('a delegation from the root lights no seat of its own', () => {
@@ -167,7 +168,7 @@ test('a question is not a material and outranks activity', () => {
   assert.equal(centerText(view).main, '等你确认');
 });
 
-test('a failure names the material and says what survived', () => {
+test('a failure says what survived, without naming a step', () => {
   const view = createView({ sessionId: 's', now: 0 });
   foldSnapshot(view, snapshot({
     seq: 6,
@@ -182,9 +183,8 @@ test('a failure names the material and says what survived', () => {
     ],
   }), 0, { sessionId: 's' });
   const center = centerText(view);
-  assert.equal(center.main, 'FAIL');
-  assert.match(center.sub, /在「/);
-  assert.match(center.sub, /前面的结果已保留/);
+  assert.equal(center.main, '失败', '§5.3: the run says 失败, the material says 完成');
+  assert.equal(center.sub, '前面的结果已保留', 'no step is named: material failure is not observable');
   assert.ok(view.materials.get('doc').state === 'done');
 });
 
@@ -415,8 +415,88 @@ test('aggregate state prefers a question, then activity, then outcome', () => {
   assert.equal(aggregateState(nodes([['a', 'done'], ['b', 'idle']])), 'done');
 });
 
-test('the task line is one short sentence', () => {
-  assert.equal(shortenTask('  把报价单核对一下。剩下的以后再说  '), '把报价单核对一下');
-  assert.equal(shortenTask(''), '');
-  assert.ok(shortenTask('一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十').length <= CAPS.taskTextChars);
+test('bookkeeping says 计划中, and a material names the object', () => {
+  const planning = createView({ sessionId: 's', now: 0 });
+  foldSnapshot(planning, snapshot({
+    seq: 2,
+    agents: [agent('worker', 'running')],
+    events: [
+      { seq: 1, agentId: 'worker', kind: 'turn.start', at: '2026-11-12T03:20:00Z', tool: null },
+      { seq: 2, agentId: 'worker', kind: 'tool.start', at: '2026-11-12T03:20:01Z', tool: 'todo_write' },
+    ],
+  }), 0, { sessionId: 's' });
+  assert.equal(planning.materials.size, 0, '§2.2: bookkeeping draws nothing on the ring');
+  assert.equal(centerText(planning).main, '计划中');
+  assert.equal(centerText(planning).sub, '');
+
+  const working = createView({ sessionId: 's', now: 0 });
+  foldSnapshot(working, snapshot({
+    seq: 2,
+    agents: [agent('worker', 'running')],
+    events: [
+      { seq: 1, agentId: 'worker', kind: 'turn.start', at: '2026-11-12T03:20:00Z', tool: null },
+      { seq: 2, agentId: 'worker', kind: 'tool.start', at: '2026-11-12T03:20:01Z', tool: 'grep' },
+    ],
+  }), 0, { sessionId: 's' });
+  assert.equal(centerText(working).main, '执行中');
+  assert.equal(centerText(working).sub, '检索', '§5.1: the second line is the object');
+});
+
+test('a file call is re-routed to the code seat by the producer hint', () => {
+  const view = createView({ sessionId: 's', now: 0 });
+  foldSnapshot(view, snapshot({
+    seq: 2,
+    agents: [agent('worker', 'running')],
+    events: [
+      { seq: 1, agentId: 'worker', kind: 'turn.start', at: '2026-11-12T03:20:00Z', tool: null },
+      { seq: 2, agentId: 'worker', kind: 'tool.start', at: '2026-11-12T03:20:01Z', tool: 'write' },
+    ],
+  }), 0, { sessionId: 's', materials: { 2: 'code' } });
+  const code = view.materials.get('code');
+  assert.ok(code !== undefined, 'the override wins over the alias default');
+  assert.equal(code.verb, '编写中');
+  assert.equal(view.materials.has('doc'), false);
+});
+
+test('a short execution never lights the code seat', () => {
+  const view = createView({ sessionId: 's', now: 1000 });
+  foldSnapshot(view, snapshot({
+    seq: 2,
+    agents: [agent('worker', 'running')],
+    events: [
+      { seq: 1, agentId: 'worker', kind: 'turn.start', at: 1000, tool: null },
+      { seq: 2, agentId: 'worker', kind: 'tool.start', at: 1000, tool: 'pwsh' },
+    ],
+  }), 1000, { sessionId: 's', exec: 'python' });
+  // 200ms later the call is already over: nothing was promoted, no arc.
+  foldSnapshot(view, snapshot({
+    seq: 3,
+    agents: [agent('worker', 'running')],
+    events: [
+      { seq: 3, agentId: 'worker', kind: 'tool.end', at: 1200, tool: 'pwsh' },
+    ],
+  }), 1200, { sessionId: 's', exec: 'python' });
+  stepLifecycle(view, 1300);
+  assert.equal(view.materials.has('code'), false, '§6.4: under minExecMs nothing shows');
+  assert.equal(view.links.length, 0);
+});
+
+test('a long execution promotes the code seat and draws one arc', () => {
+  const view = createView({ sessionId: 's', now: 1000 });
+  foldSnapshot(view, snapshot({
+    seq: 2,
+    agents: [agent('worker', 'running')],
+    events: [
+      { seq: 1, agentId: 'worker', kind: 'turn.start', at: 1000, tool: null },
+      { seq: 2, agentId: 'worker', kind: 'tool.start', at: 1000, tool: 'pwsh' },
+    ],
+  }), 1000, { sessionId: 's', exec: 'python' });
+  stepLifecycle(view, 1000 + TIMING.minExecMs + 16);
+  const code = view.materials.get('code');
+  assert.ok(code !== undefined, 'the code seat lit up');
+  assert.equal(code.verb, '执行中');
+  assert.equal(code.executing, true);
+  assert.equal(view.links.length, 1, '§3: exactly one pre-set arc');
+  // The centre names the subject, not the transport.
+  assert.equal(centerText(view).sub, 'Python');
 });

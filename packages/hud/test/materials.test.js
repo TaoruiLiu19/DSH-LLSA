@@ -14,13 +14,16 @@ import {
   MATERIAL_BY_ALIAS,
   MATERIALS,
   MATERIAL_ORDER,
+  RUN_LABELS,
+  SEAT_ORDER,
   STATE_COLORS,
-  STATE_LABELS,
   aliasTable,
   colorOf,
   intentOfAlias,
   isAgentAlias,
   isAskAlias,
+  isPlanAlias,
+  materialDoneLabel,
   materialForTool,
   materialLabel,
   stateLabel,
@@ -48,20 +51,32 @@ test('every published alias has exactly one destination', () => {
   }
 });
 
-test('there are exactly eight materials and every state has a colour and a word', () => {
-  assert.deepEqual(MATERIAL_ORDER, ['python', 'sheet', 'data', 'doc', 'web', 'mail', 'shell', 'other']);
+test('six materials, one seat table, and a word for every run state', () => {
+  assert.deepEqual(MATERIAL_ORDER, ['code', 'sheet', 'search', 'doc', 'web', 'shell', 'other']);
   for (const id of MATERIAL_ORDER) {
     assert.ok(materialLabel(id, 'zh') !== '');
     assert.ok(materialLabel(id, 'en') !== '');
     assert.ok(MATERIALS[id] !== undefined);
   }
+  // §1.1: eight slots, six occupied, three and nine o'clock left open.
+  assert.equal(SEAT_ORDER.length, 8);
+  assert.equal(SEAT_ORDER.filter(id => id !== null).length, 6);
+  assert.equal(SEAT_ORDER[2], null);
+  assert.equal(SEAT_ORDER[6], null);
+  assert.ok(SEAT_ORDER.includes('shell') && SEAT_ORDER.includes('code'));
+  // The two seats of §3's arc must stay adjacent.
+  assert.equal(Math.abs(SEAT_ORDER.indexOf('shell') - SEAT_ORDER.indexOf('code')), 1);
   for (const state of ['running', 'waiting-human', 'done', 'failed', 'idle']) {
     assert.match(colorOf(state), /^#[0-9a-f]{6}$/);
     assert.ok(stateLabel(state, 'zh') !== '');
     assert.ok(stateLabel(state, 'en') !== '');
     assert.ok(STATE_COLORS[state] !== undefined);
-    assert.ok(STATE_LABELS[state] !== undefined);
+    assert.ok(RUN_LABELS[state] !== undefined);
   }
+  // §5.3: the run says 成功/失败; a material says 完成. Two scopes, two words.
+  assert.equal(stateLabel('done', 'zh'), '成功');
+  assert.equal(stateLabel('failed', 'zh'), '失败');
+  assert.equal(materialDoneLabel('zh'), '完成');
   // §4.1's table, verbatim: the four signal colours.
   assert.equal(colorOf('running'), '#4c9aff');
   assert.equal(colorOf('waiting-human'), '#f2b544');
@@ -71,24 +86,24 @@ test('there are exactly eight materials and every state has a colour and a word'
 
 test('an unknown state degrades to the idle colour instead of throwing', () => {
   assert.equal(colorOf('nonsense'), STATE_COLORS.idle);
-  assert.equal(stateLabel('nonsense', 'zh'), STATE_LABELS.idle.zh);
+  assert.equal(stateLabel('nonsense', 'zh'), RUN_LABELS.idle.zh);
   assert.equal(materialLabel('nonsense', 'zh'), MATERIALS.other.zh);
 });
 
-test('the sample tools land in the eight buckets', () => {
+test('the sample tools land in the six buckets', () => {
   const cases = [
     ['read', 'doc', '文档'],
     ['read_image', 'doc', '文档'],
     ['write', 'doc', '文档'],
     ['apply_patch', 'doc', '文档'],
-    ['grep', 'data', '数据'],
-    ['glob', 'data', '数据'],
+    ['grep', 'search', '检索'],
+    ['glob', 'search', '检索'],
     ['bash', 'shell', '终端'],
     ['pwsh', 'shell', '终端'],
     ['terminal_open', 'shell', '终端'],
     ['web_fetch', 'web', '网页'],
     ['web_search', 'web', '网页'],
-    ['run_code', 'python', 'Python'],
+    ['run_code', 'code', '代码'],
     ['skill', 'other', '其它'],
   ];
   for (const [tool, material, label] of cases) {
@@ -96,6 +111,15 @@ test('the sample tools land in the eight buckets', () => {
     assert.equal(resolved.material, material, tool);
     assert.equal(resolved.known, true, tool);
     assert.equal(materialLabel(resolved.material, 'zh'), label, tool);
+  }
+});
+
+test('bookkeeping lights nothing: the centre says 计划中 instead', () => {
+  for (const tool of ['todo_write', 'create_goal', 'update_goal', 'get_goal', 'schedule_create', 'schedule_edit', 'schedule_list', 'schedule_view']) {
+    const resolved = materialForTool(tool);
+    assert.equal(resolved.material, null, tool);
+    assert.equal(isPlanAlias(resolved.alias), true, tool);
+    assert.equal(isAgentAlias(resolved.alias), false, tool);
   }
 });
 
@@ -116,7 +140,8 @@ test('an unknown tool is 其它 without losing the node', () => {
   assert.equal(resolved.material, 'other');
   assert.equal(resolved.known, false);
   assert.equal(resolved.aliasOk, true);
-  assert.equal(verbFor(resolved.alias, 'zh'), '读取中');
+  // §4.2: the bin never claims to know what happened.
+  assert.equal(verbFor(resolved.material, resolved.alias, 'zh'), '处理中');
 });
 
 test('a null or non-string tool id still resolves', () => {
@@ -134,11 +159,18 @@ test('an alias version this build does not ship degrades every label', () => {
   assert.equal(resolved.known, false);
 });
 
-test('verbs are per-intent and always present', () => {
-  assert.equal(verbFor('read', 'zh'), '读取中');
-  assert.equal(verbFor('bash', 'zh'), '执行中');
-  assert.equal(verbFor('grep', 'zh'), '校验中');
-  assert.equal(verbFor('write', 'zh'), '整理中');
-  assert.equal(verbFor(null, 'en'), 'Reading');
+test('verbs are material x intent, always present', () => {
+  assert.equal(verbFor('doc', 'read', 'zh'), '读取中');
+  assert.equal(verbFor('shell', 'bash', 'zh'), '执行中');
+  // §4.2: 检索 scans, 网页 fetches, 其它 processes — one intent, three words.
+  assert.equal(verbFor('search', 'grep', 'zh'), '扫描中');
+  assert.equal(verbFor('web', 'web_fetch', 'zh'), '获取中');
+  assert.equal(verbFor('other', 'skill', 'zh'), '处理中');
+  // The code seat writes code; the document seat still writes files.
+  assert.equal(verbFor('doc', 'write', 'zh'), '整理中');
+  assert.equal(verbFor('code', 'write', 'zh'), '编写中');
+  assert.equal(verbFor('code', 'read', 'zh'), '阅读中');
+  assert.equal(verbFor('code', 'run_code', 'zh'), '执行中');
+  assert.equal(verbFor('doc', null, 'en'), 'Reading');
   assert.equal(intentOfAlias('subagent'), 'handoff');
 });

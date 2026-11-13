@@ -19,7 +19,7 @@
  * parsed (§5.6).
  */
 import { hudLabel } from './labels.js';
-import { ALIAS_VERSION } from './materials.js';
+import { ALIAS_VERSION, materialForTool } from './materials.js';
 
 /** The event window of §2.1. Older events are dropped, and `eventsFromSeq` moves. */
 export const EVENT_WINDOW = 256;
@@ -56,6 +56,106 @@ export function textOfMessage(message) {
   return '';
 }
 
+/**
+ * How long a classified execution stays declared after its call ends.
+ *
+ * The snapshot is sampled every ~240ms, so a 300ms script would otherwise be
+ * invisible to both polls. The latch makes sure one poll sees it (§7.1).
+ */
+export const EXEC_LATCH_MS = 1000;
+
+/**
+ * Interpreters a shell command may be *declared* to run (§7.1).
+ *
+ * A closed vocabulary checked against the first word only. Anything else — a
+ * pipeline, a `cd` prefix, a wrapper — produces `null`, which means "do not
+ * claim". Erring toward silence is deliberate: a wrong claim is worse than none.
+ */
+const EXEC_TOKENS = Object.freeze({
+  python: 'python',
+  python3: 'python',
+  py: 'python',
+  node: 'node',
+  nodejs: 'node',
+  deno: 'deno',
+  bun: 'bun',
+});
+
+/** Tools whose first argument names a file on disk (§2.3). */
+const PATH_TOOLS = new Set(['read', 'write', 'edit', 'apply_patch', 'str_replace_editor']);
+
+/** Keys a tool call may use for that path, in preference order. */
+const PATH_KEYS = Object.freeze(['path', 'file_path', 'filePath', 'target']);
+
+/** Extensions that make the file a code seat rather than a document (§2.3). */
+const CODE_EXTENSIONS = new Set([
+  'py', 'js', 'ts', 'tsx', 'jsx', 'rs', 'go', 'java', 'c', 'h', 'cpp', 'cs', 'rb', 'php',
+  'swift', 'kt', 'lua', 'sql', 'sh', 'ps1', 'vue', 'svelte',
+  'json', 'yaml', 'yml', 'toml', 'ini',
+]);
+
+/**
+ * The tool call's arguments, as an object, without ever forwarding them.
+ *
+ * `arguments` arrives as a JSON string in the session log. Anything we cannot
+ * read becomes `null`, which degrades both derived hints to "unknown".
+ */
+function argumentsOf(data) {
+  const raw = data.arguments ?? data.input ?? data.args;
+  if (typeof raw === 'string') {
+    const text = raw.trim();
+    if (text === '') return null;
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(text);
+        return parsed !== null && typeof parsed === 'object' ? parsed : null;
+      } catch {
+        return { command: text };
+      }
+    }
+    return { command: text };
+  }
+  if (raw !== null && typeof raw === 'object') return raw;
+  return null;
+}
+
+/**
+ * The language a shell call declares, or `null`.
+ *
+ * Only the first word is consulted, after stripping a directory prefix and a
+ * Windows `.exe` suffix. A command that chains (`cd x && python y.py`) is a miss
+ * on purpose: one miss costs a missing arc, one guess costs the field's credit.
+ */
+export function execLanguageOf(args) {
+  if (args === null || typeof args !== 'object') return null;
+  const command = typeof args.command === 'string' ? args.command : (typeof args.cmd === 'string' ? args.cmd : '');
+  if (command === '') return null;
+  const first = command.trim().split(/[\s|;&]+/)[0];
+  if (first === '') return null;
+  const bare = first.replace(/^.*[\\/]/, '').replace(/\.exe$/i, '').toLowerCase();
+  return Object.hasOwn(EXEC_TOKENS, bare) ? EXEC_TOKENS[bare] : null;
+}
+
+/**
+ * The material a file call belongs to: `code` for a source file, `doc` otherwise.
+ *
+ * The whitelist only ever answers "is this code"; everything else — including an
+ * unreadable path — stays a document, which is the behaviour this build shipped
+ * before the code seat existed.
+ */
+export function materialHintOf(args) {
+  if (args === null || typeof args !== 'object') return null;
+  for (const key of PATH_KEYS) {
+    const value = args[key];
+    if (typeof value !== 'string' || value === '') continue;
+    const dot = value.lastIndexOf('.');
+    if (dot < 0) return null;
+    const extension = value.slice(dot + 1).toLowerCase();
+    return CODE_EXTENSIONS.has(extension) ? 'code' : 'doc';
+  }
+  return null;
+}
+
 function createAgent(id, options = {}) {
   return {
     id,
@@ -85,6 +185,12 @@ function createSessionState(id) {
     session: null,
     /** Set when the log may have moved; cleared once attention is reconciled. */
     dirty: false,
+    /** §7.1: `{ lang, callId, until }` — the declared code execution, if any. */
+    exec: null,
+    /** §7.2: event seq -> material, only for calls the extension re-routed. */
+    materialOverrides: new Map(),
+    /** callId -> material, so the matching `tool.end` carries the same override. */
+    callMaterials: new Map(),
   };
 }
 
@@ -124,7 +230,11 @@ export function createCollector(options = {}) {
     if (extra.synthetic === true) event.synthetic = true;
     if (extra.label !== undefined) event.label = extra.label;
     state.events.push(event);
-    if (state.events.length > EVENT_WINDOW) state.events.splice(0, state.events.length - EVENT_WINDOW);
+    if (state.events.length > EVENT_WINDOW) {
+      const dropped = state.events.splice(0, state.events.length - EVENT_WINDOW);
+      // §7.2: the override table is pruned with the window it describes.
+      for (const old of dropped) state.materialOverrides.delete(old.seq);
+    }
     state.lastActivity = typeof at === 'number' ? at : state.lastActivity;
     return event;
   }
@@ -155,10 +265,27 @@ export function createCollector(options = {}) {
     agent.lastEvent = emit(state, agent.id, kind, at, extra);
   }
 
+  /**
+   * Emit `tool.end` for one call, carrying its material override across.
+   *
+   * The client routes both the start and the end of a call, so the override has
+   * to exist under both sequence numbers — otherwise the node would light under
+   * 代码 and never settle.
+   */
+  function closeOneTool(state, agent, callId, name, at, extra = {}) {
+    const ended = activity(state, agent, 'tool.end', at, { tool: name, ...extra });
+    const material = state.callMaterials.get(callId);
+    if (material !== undefined) {
+      state.materialOverrides.set(ended.seq, material);
+      state.callMaterials.delete(callId);
+    }
+    return ended;
+  }
+
   /** Close every open tool with a synthetic `tool.end` (an interrupted call). */
   function closeTools(state, agent, at, reason = 'interrupted') {
-    for (const name of agent.tools.values()) {
-      activity(state, agent, 'tool.end', at, { tool: name, reason, synthetic: true });
+    for (const [callId, name] of agent.tools) {
+      closeOneTool(state, agent, callId, name, at, { reason, synthetic: true });
     }
     agent.tools.clear();
   }
@@ -262,7 +389,21 @@ export function createCollector(options = {}) {
         const callId = data.callId === undefined ? `call-${state.seq + 1}` : String(data.callId);
         if (agent.tools.has(callId)) break;
         agent.tools.set(callId, name);
-        activity(state, agent, 'tool.start', at, { tool: name });
+        const started = activity(state, agent, 'tool.start', at, { tool: name });
+        // §7: two hints, both derived, neither forwarded. The raw arguments (and
+        // any command text) never leave this block.
+        const args = argumentsOf(data);
+        if (PATH_TOOLS.has(name)) {
+          const hint = materialHintOf(args);
+          if (hint !== null) {
+            state.materialOverrides.set(started.seq, hint);
+            state.callMaterials.set(callId, hint);
+          }
+        }
+        if (materialForTool(name).material === 'shell') {
+          const lang = execLanguageOf(args);
+          if (lang !== null) state.exec = { lang, callId, until: Number.MAX_SAFE_INTEGER };
+        }
         if (name === 'ask_user_question') {
           // Raise on the call only. The result is *not* evidence of an answer: a
           // timed-out wait returns `{ pending: true }` and the question stays
@@ -282,7 +423,9 @@ export function createCollector(options = {}) {
         const name = agent.tools.get(callId);
         if (name === undefined) break;
         agent.tools.delete(callId);
-        activity(state, agent, 'tool.end', at, { tool: name });
+        closeOneTool(state, agent, callId, name, at);
+        // §7.1: the latch keeps a short execution visible to the next poll.
+        if (state.exec !== null && state.exec.callId === callId) state.exec.until = at + EXEC_LATCH_MS;
         if (name === 'ask_user_question') {
           // The call ended, but "ended" is not "answered": the result is either a
           // real answer (which then arrives as a user message) or `pending: true`.
@@ -493,6 +636,20 @@ export function createCollector(options = {}) {
     taskTextOf(sessionId) {
       const state = sessions.get(String(sessionId));
       return state === undefined ? '' : state.taskText;
+    },
+    /** §7.1: the declared language, while its latch is still open (else null). */
+    execOf(sessionId) {
+      const state = sessions.get(String(sessionId));
+      if (state === undefined || state.exec === null) return null;
+      return Date.now() < state.exec.until ? state.exec.lang : null;
+    },
+    /** §7.2: event seq -> material, for the overrides still inside the window. */
+    materialsOf(sessionId) {
+      const state = sessions.get(String(sessionId));
+      if (state === undefined) return {};
+      const table = {};
+      for (const [seq, material] of state.materialOverrides) table[seq] = material;
+      return table;
     },
     forget(sessionId) {
       sessions.delete(String(sessionId));

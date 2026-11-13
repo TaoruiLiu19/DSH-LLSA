@@ -141,7 +141,12 @@ export function apply(ctx, config) {
     if (options.hudEndpoint !== '') {
       const external = await fetchHudSnapshot(options.hudEndpoint, sessionId, { timeoutMs: options.hudTimeoutMs });
       if (external !== undefined) {
-        return { snapshot: external, meta: { sessionId, source: 'hud', taskText: '', focusMode: options.focusMode } };
+        // An orchestrator already speaks hud-v1; it owns its own hints, so the
+        // derived ones stay empty rather than guessing on its behalf.
+        return {
+          snapshot: external,
+          meta: { sessionId, source: 'hud', taskText: '', focusMode: options.focusMode, exec: null, materials: {} },
+        };
       }
     }
     const children = await childrenOf(sessionId);
@@ -153,6 +158,9 @@ export function apply(ctx, config) {
         taskText: collector.taskTextOf(sessionId),
         // Rides in `meta`, not the snapshot: the frozen schema forbids extra keys.
         focusMode: options.focusMode,
+        // §7: derived enums only — never the call's raw arguments.
+        exec: collector.execOf(sessionId),
+        materials: collector.materialsOf(sessionId),
       },
     };
   }

@@ -21,8 +21,12 @@
  */
 import {
   ALIAS_VERSION,
+  LINKS,
+  codeLanguageLabel,
   colorOf,
   isAgentAlias,
+  isPlanAlias,
+  isShellAlias,
   materialForTool,
   materialLabel,
   stateLabel,
@@ -45,10 +49,22 @@ export const TIMING = Object.freeze({
   pulseGapMs: 300,
   /** pulse: how long a travelling dot lives. */
   pulseTtlMs: 1600,
+  /** pulse: how far a dot actually travels before it is done (§3: 720ms of flight). */
+  pulseFlightMs: 720,
+  /** link: one declared co-activation keeps its arc for this long (§3.3). */
+  linkTtlMs: 1200,
+  /** link: the fast rise of that arc. */
+  linkRiseMs: 120,
+  /** code seat: an execution must last this long before it is shown (§6.4). */
+  minExecMs: 400,
+  /** plan: how long 「计划中」 outlives the last bookkeeping call (§5). */
+  planHoldMs: 2400,
+  /** material: one settle ripple on `running -> done` (§6.2). */
+  rippleMs: 400,
 });
 
 /** Hard caps: a long session must not grow the view without bound. */
-export const CAPS = Object.freeze({ pulses: 32, agents: 12, taskTextChars: 26 });
+export const CAPS = Object.freeze({ pulses: 32, links: 4, agents: 12 });
 
 /** The states a node can hold (§4.1). `idle` means "not drawn". */
 const STATES = new Set(['idle', 'running', 'waiting-human', 'done', 'failed']);
@@ -82,6 +98,34 @@ function normalizeState(state) {
   return STATES.has(state) ? state : 'idle';
 }
 
+/** The producer's per-event material override (§7.2), or the alias default. */
+function overrideMaterial(options, seq, fallback) {
+  const table = options.materials;
+  if (table === null || table === undefined) return fallback;
+  const value = table[String(seq)];
+  return typeof value === 'string' ? value : fallback;
+}
+
+/**
+ * Close a classified code execution (§6.4).
+ *
+ * The code seat settles together with the terminal, and the arc dies with the
+ * call — it is an event window, never a standing relationship (§3.2).
+ */
+function finishExec(view, at) {
+  if (view.codeExec.active && view.codeExec.promoted) {
+    const code = view.materials.get('code');
+    if (code !== undefined) {
+      code.state = 'done';
+      code.lastAt = at;
+      code.doneAt = at;
+      code.executing = false;
+    }
+  }
+  view.codeExec = { at: 0, active: false, promoted: false, lang: null };
+  view.links = [];
+}
+
 /** A blank view for one session. */
 export function createView(options = {}) {
   const now = finite(options.now, 0);
@@ -108,6 +152,14 @@ export function createView(options = {}) {
     materials: new Map(),
     agents: new Map(),
     pulses: [],
+    /** §3: arcs for declared co-activations, alive for `linkTtlMs`. */
+    links: [],
+    /** §5 halo: the centre's presence, 0..1, follows the run and not the nodes. */
+    heart: 0,
+    /** §5: bookkeeping tools draw no node; the centre says 「计划中」 for a while. */
+    plan: { at: -Infinity, active: false },
+    /** §6.4: a shell call declared to run code promotes the code seat after `minExecMs`. */
+    codeExec: { at: 0, active: false, promoted: false, lang: null },
   };
 }
 
@@ -130,10 +182,16 @@ function ensureMaterial(view, id, alias) {
     node = {
       id,
       label: materialLabel(id, view.locale),
+      /** §2.4: the declared language of the code seat, when one is known. */
+      language: null,
       alias: alias ?? null,
       state: 'idle',
       verb: '',
       lastAt: 0,
+      /** when the last `tool.end` landed; the settle ripple counts from here (§6.2) */
+      doneAt: 0,
+      /** true while this seat is carrying a declared code execution (§3) */
+      executing: false,
       hits: 0,
       alpha: 0,
       heat: 0,
@@ -142,7 +200,10 @@ function ensureMaterial(view, id, alias) {
     };
     view.materials.set(id, node);
   }
-  node.label = materialLabel(id, view.locale);
+  // A language label survives later touches; a locale switch still re-renders it.
+  node.label = id === 'code' && node.language !== null
+    ? codeLanguageLabel(node.language, view.locale)
+    : materialLabel(id, view.locale);
   if (alias !== null && alias !== undefined) node.alias = alias;
   return node;
 }
@@ -216,9 +277,12 @@ function applyEvent(view, event, options) {
     case 'tool.start': {
       const resolved = materialForTool(event.tool, { aliasVersion: view.aliasVersion });
       if (resolved.material === null) {
-        // A delegation lights a seat in the inner ring; an ask lights nothing —
-        // it stops the field instead, and its pose comes from the state event.
-        if (isAgentAlias(resolved.alias) && agentId !== '') {
+        if (isPlanAlias(resolved.alias)) {
+          // Bookkeeping is not a material (§2.2): no node, the centre says 计划中.
+          view.plan = { at, active: true };
+        } else if (isAgentAlias(resolved.alias) && agentId !== '') {
+          // A delegation lights a seat in the inner ring; an ask lights nothing —
+          // it stops the field instead, and its pose comes from the state event.
           const seat = ensureAgent(view, agentId);
           seat.lastAt = at;
           seat.heat = Math.min(1, seat.heat + 0.5);
@@ -226,29 +290,46 @@ function applyEvent(view, event, options) {
         }
         break;
       }
-      const node = ensureMaterial(view, resolved.material, resolved.alias);
+      // §2.3: the producer may re-route a file call to the code seat by extension.
+      const materialId = overrideMaterial(options, event.seq, resolved.material);
+      const node = ensureMaterial(view, materialId, resolved.alias);
       node.state = 'running';
       node.alias = resolved.alias;
-      node.verb = verbFor(resolved.alias, view.locale);
+      node.verb = verbFor(materialId, resolved.alias, view.locale);
       node.lastAt = at;
       node.hits += 1;
       node.heat = Math.min(1, node.heat + 0.6);
+      node.doneAt = 0;
       if (animate && at - node.lastPulseAt >= TIMING.pulseGapMs) {
         node.lastPulseAt = at;
         view.pulses.push({ to: node.id, agentId: agentId === '' ? null : agentId, at, intent: resolved.alias });
+      }
+      // §6.4: a terminal call that the producer classified as "executing code"
+      // arms the code seat. It only lights after `minExecMs` (see stepLifecycle),
+      // so a 200ms probe never flashes.
+      if (resolved.material === 'shell' && typeof options.exec === 'string' && options.exec !== '') {
+        view.codeExec = { at, active: true, promoted: false, lang: options.exec };
       }
       break;
     }
     case 'tool.end': {
       const resolved = materialForTool(event.tool, { aliasVersion: view.aliasVersion });
-      if (resolved.material === null) break;
-      const node = view.materials.get(resolved.material);
-      if (node === undefined) break;
-      // A synthetic/interrupted close still ends the call: the run's own state
-      // (cancel/restart) carries the meaning, not a red ring.
-      node.state = 'done';
-      node.lastAt = at;
-      if (event.reason === 'interrupted') node.interrupted = true;
+      if (resolved.material === null) {
+        if (isPlanAlias(resolved.alias)) view.plan = { at: view.plan.at, active: false };
+        break;
+      }
+      const materialId = overrideMaterial(options, event.seq, resolved.material);
+      const node = view.materials.get(materialId);
+      if (node !== undefined) {
+        // A synthetic/interrupted close still ends the call: the run's own state
+        // (cancel/restart) carries the meaning, not a red ring.
+        node.state = 'done';
+        node.lastAt = at;
+        node.doneAt = at;
+        node.executing = false;
+        if (event.reason === 'interrupted') node.interrupted = true;
+      }
+      if (resolved.material === 'shell') finishExec(view, at);
       break;
     }
     case 'attention.raised':
@@ -378,7 +459,12 @@ export function foldSnapshot(view, snapshot, now = view.frameAt, meta = {}) {
   const snapshotNow = typeof snapshot.now === 'string' ? Date.parse(snapshot.now) : NaN;
   const skew = Number.isFinite(snapshotNow) ? now - snapshotNow : 0;
 
-  for (const event of fresh) applyEvent(view, event, { animate: !gap, now, skew });
+  // §7.2: the producer may re-route one call's material by file extension; the
+  // table is keyed by event seq and carries only the entries that differ.
+  const overrides = meta.materials !== null && typeof meta.materials === 'object' ? meta.materials : null;
+  const exec = typeof meta.exec === 'string' && meta.exec !== '' ? meta.exec : null;
+
+  for (const event of fresh) applyEvent(view, event, { animate: !gap, now, skew, materials: overrides, exec });
 
   if (fresh.length > 0) view.cursor = Math.max(view.cursor, fresh[fresh.length - 1].seq);
   else if (view.seq > view.cursor) view.cursor = view.seq;
@@ -409,6 +495,12 @@ export function stepLifecycle(view, now) {
   const dt = Math.min(Math.max(now - view.frameAt, 0), 48);
   view.frameAt = now;
 
+  // §5 halo: the centre stays alive while the run does — that is what fills the
+  // field when nothing is lit (思考中 / 计划中). A conclusion hands the middle
+  // over to the 52k ring, so the presence fades out instead of lingering.
+  const heartTarget = view.state === 'running' ? 1 : 0;
+  view.heart += (heartTarget - view.heart) * Math.min(1, dt / 320);
+
   for (const node of view.materials.values()) {
     const pinned = node.state === 'waiting-human' || node.state === 'failed';
     const holding = now - node.lastAt < TIMING.materialHoldMs;
@@ -435,6 +527,43 @@ export function stepLifecycle(view, now) {
     if (view.pulses.length > CAPS.pulses) view.pulses = view.pulses.slice(-CAPS.pulses);
   }
 
+  // §6.4: the code seat is promoted only once the execution has lasted long
+  // enough that showing it is not a flash. A command shorter than `minExecMs`
+  // therefore leaves the field untouched.
+  const exec = view.codeExec;
+  if (exec.active && exec.promoted !== true && now - exec.at >= TIMING.minExecMs) {
+    exec.promoted = true;
+    const code = ensureMaterial(view, 'code', 'run_code');
+    if (typeof exec.lang === 'string' && exec.lang !== '') {
+      // §2.4: the seat names the language while it is executing that language.
+      code.language = exec.lang;
+      code.label = codeLanguageLabel(exec.lang, view.locale);
+    }
+    code.state = 'running';
+    code.alias = 'run_code';
+    code.verb = verbFor('code', 'run_code', view.locale);
+    // +1ms so the centre names the *subject* (「执行中 / Python」), not the
+    // transport, when both seats carry the same timestamp.
+    code.lastAt = now + 1;
+    code.doneAt = 0;
+    code.executing = true;
+    code.hits += 1;
+    code.heat = Math.min(1, code.heat + 0.5);
+    if (now - code.lastPulseAt >= TIMING.pulseGapMs) {
+      code.lastPulseAt = now;
+      view.pulses.push({ to: 'code', agentId: null, at: now, intent: 'run_code' });
+    }
+    // §3: the arc lives in an event window, not in the nodes' visibility. The
+    // pair itself comes from the table, so a second link needs no new code here.
+    const link = LINKS[0];
+    view.links.push({ a: link.a, b: link.b, at: now });
+  }
+
+  if (view.links.length > 0) {
+    view.links = view.links.filter(link => now - link.at < TIMING.linkTtlMs);
+    if (view.links.length > CAPS.links) view.links = view.links.slice(-CAPS.links);
+  }
+
   if (view.agents.size > CAPS.agents) {
     const retired = [...view.agents.values()]
       .filter(node => node.alpha === 0 && node.state !== 'running' && node.state !== 'waiting-human' && node.state !== 'failed')
@@ -445,74 +574,58 @@ export function stepLifecycle(view, now) {
   return view;
 }
 
-/** First sentence / first line of the user's command, shortened for the centre. */
-export function shortenTask(text) {
-  if (typeof text !== 'string') return '';
-  const line = text.replace(/\s+/g, ' ').trim();
-  if (line === '') return '';
-  const cut = line.search(/[。！？!?；;\n]/);
-  const sentence = cut > 0 ? line.slice(0, cut) : line;
-  if (sentence.length <= CAPS.taskTextChars) return sentence;
-  return `${sentence.slice(0, CAPS.taskTextChars - 1)}…`;
-}
-
-/** The busiest material currently being used, for the running sub-line. */
+/**
+ * The busiest material currently being used, for the centre's object line.
+ *
+ * A declared code execution outranks its transport: when the terminal is running
+ * the code seat, the centre should name the subject (「执行中 / Python」) rather
+ * than the shell.
+ */
 function busiestMaterial(view) {
   let best = null;
   for (const node of view.materials.values()) {
     if (node.state !== 'running' && node.state !== 'waiting-human' && node.state !== 'failed') continue;
+    if (node.executing === true) return node;
     if (best === null || node.lastAt > best.lastAt) best = node;
   }
   return best;
 }
 
-/** The label of the one agent that owns the field, if there is exactly one. */
-/** A label is display text; a bare role name is not a task name. */
-function usableLabel(node) {
-  const label = typeof node.label === 'string' ? node.label.trim() : '';
-  if (label === '') return '';
-  const role = typeof node.role === 'string' ? node.role.trim() : '';
-  if (role !== '' && label === role) return '';
-  if (label === 'root' || label === 'worker' || label === '智能体') return '';
-  return label;
-}
-
-export function primaryLabel(view) {
-  const nodes = [...view.agents.values()];
-  if (nodes.length === 1) return usableLabel(nodes[0]);
-  if (nodes.length === 0) return '';
-  const root = nodes.find(node => node.role === 'root' || node.parentId === null);
-  return root === undefined ? '' : usableLabel(root);
+/** True while a bookkeeping call is recent enough for the centre to say 计划中. */
+function isPlanning(view) {
+  if (view.plan === undefined) return false;
+  if (view.plan.active === true) return true;
+  return view.frameAt - view.plan.at < TIMING.planHoldMs;
 }
 
 /**
- * The centre block of §4.3 — the only place that decides what the centre says.
+ * The centre block of §5 — the only place that decides what the centre says.
+ *
+ * One state word and one object. The task name is deliberately absent (§5.4):
+ * a command almost never fits, so the centre stopped repeating it.
  * Pure: the renderer draws exactly this.
  */
 export function centerText(view) {
   const locale = view.locale;
   switch (view.state) {
     case 'running': {
-      const main = shortenTask(view.taskText) || primaryLabel(view) || pick(locale, '执行中', 'Working');
       const busiest = busiestMaterial(view);
-      const workingAgents = [...view.agents.values()].filter(node => node.state === 'running').length;
-      let sub;
-      if (busiest !== null) {
-        sub = pick(locale, `正在${busiest.verb || '处理'} · ${busiest.label}`, `${busiest.verb || 'Working'} · ${busiest.label}`);
-      } else if (workingAgents > 0) {
-        sub = view.agents.size > 1
-          ? pick(locale, `${workingAgents} 个子 Agent 在跑`, `${workingAgents} sub-agents working`)
-          : pick(locale, '准备中', 'Getting ready');
-      } else {
-        sub = pick(locale, '准备中', 'Getting ready');
-      }
       // The producer stamps `stalled` per agent; the field only reports it.
       if (view.stalled) {
-        sub = busiest === null
-          ? pick(locale, '停顿中 · 等待响应', 'Stalled · waiting for a response')
-          : pick(locale, `停顿中 · ${busiest.label}`, `Stalled · ${busiest.label}`);
+        return {
+          main: pick(locale, '停顿中', 'Stalled'),
+          sub: busiest === null ? pick(locale, '等待响应', 'Waiting for a response') : busiest.label,
+          tone: 'running',
+        };
       }
-      return { main, sub, tone: 'running' };
+      if (busiest !== null) {
+        return { main: stateLabel('running', locale), sub: busiest.label, tone: 'running' };
+      }
+      if (isPlanning(view)) {
+        return { main: pick(locale, '计划中', 'Planning'), sub: '', tone: 'running' };
+      }
+      // Nothing is being touched: the model is generating, not preparing.
+      return { main: pick(locale, '思考中', 'Thinking'), sub: '', tone: 'running' };
     }
     case 'waiting-human':
       return {
@@ -523,20 +636,20 @@ export function centerText(view) {
     case 'done': {
       const count = [...view.materials.values()].filter(node => node.state === 'done').length;
       return {
-        main: 'SUCCESS',
-        sub: pick(locale, `成功 · ${count} 个材料`, `Success · ${count} material${count === 1 ? '' : 's'}`),
+        main: stateLabel('done', locale),
+        sub: pick(locale, `用了 ${count} 个材料`, `${count} material${count === 1 ? '' : 's'} used`),
         tone: 'done',
       };
     }
     case 'failed': {
-      const node = view.failedMaterial === null ? null : view.materials.get(view.failedMaterial);
-      const label = node === undefined || node === null ? pick(locale, '执行', 'the run') : node.label;
+      // §5 material-level failure is not observable, so the line never claims to
+      // know which step broke; it only reports what survived.
       const kept = [...view.materials.values()].some(other => other.state === 'done');
       return {
-        main: 'FAIL',
+        main: stateLabel('failed', locale),
         sub: kept
-          ? pick(locale, `在「${label}」这一步失败 · 前面的结果已保留`, `Failed at “${label}” · earlier results are kept`)
-          : pick(locale, `在「${label}」这一步失败 · 没有产生结果`, `Failed at “${label}” · nothing was produced`),
+          ? pick(locale, '前面的结果已保留', 'Earlier results are kept')
+          : pick(locale, '没有产生结果', 'Nothing was produced'),
         tone: 'failed',
       };
     }

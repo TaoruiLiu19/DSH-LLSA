@@ -333,12 +333,20 @@ test('§5.5: the client never turns time into a state', () => {
   }
 });
 
-test('§5.6: no tool output is parsed to learn a pending state', () => {
+test('§5.6: tool output is never parsed; only the call input yields two enums', () => {
+  // The wall stands where it matters: no result body is ever read.
   for (const [name, text] of Object.entries(sources)) {
-    assert.ok(!/JSON\.parse/.test(text), `${name} parses JSON`);
     assert.ok(!/toolResult\.(content|output|text)/.test(text), `${name} reads tool output`);
   }
-  // The only body read is the user's own message text, for the centre line.
+  // §7 allows exactly one exception: `argumentsOf` reads the *call's* input to
+  // derive two closed enums (a language and a material). It never forwards the
+  // text, and it is the only JSON.parse in the package.
+  for (const [name, text] of Object.entries(sources)) {
+    const parses = (text.match(/JSON\.parse/g) ?? []).length;
+    assert.equal(parses, name === 'source.js' ? 1 : 0, `${name}: JSON.parse appears ${parses} time(s)`);
+  }
+  assert.match(sources['source.js'], /function argumentsOf\(data\)/);
+  // The only body read is still the user's own message text.
   const callSites = sources['source.js'].split('\n').filter(line => /textOfMessage\(data\)/.test(line));
   assert.equal(callSites.length, 1, 'textOfMessage runs on the user message only');
   assert.match(sources['source.js'], /case 'user\/message'/);
