@@ -11,7 +11,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-80cbc4" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/Node.js-24.11%2B-89b4fa" alt="Node.js 24.11+">
 </p>
-<p align="center"><a href="#快速开始">快速开始</a> · <a href="#第一次协作">第一次协作</a> · <a href="#认识-leanlink">认识 LeanLink</a> · <a href="#使用帮助">使用帮助</a></p>
+<p align="center"><a href="#快速开始">快速开始</a> · <a href="#第一次协作">第一次协作</a> · <a href="#认识-leanlink">认识 LeanLink</a> · <a href="#hud-专注视图">HUD 专注视图</a> · <a href="#使用帮助">使用帮助</a></p>
 
 ---
 
@@ -62,6 +62,16 @@ npm start
 保留完整目录，特别是 `vendor/` 中的三个组件包。安装仍需要下载运行依赖，真实任务仍需模型 API。旧版 `0.4.0` 包不适用于本页。
 
 </details>
+
+### HUD 专注视图
+
+**不用盯着滚动日志，也能知道 Agent 正在做什么。** 可选 HUD 为 Harness 会话增加实时浮层：中心显示执行、等待确认与完成状态，外圈以固定位置展示终端、代码、检索、文档、网页等活动，多 Agent 时显示子 Agent 状态。
+
+- 按 **Esc** 返回对话，点击状态胶囊重新查看；`Ctrl/Cmd+Shift+H` 临时隐藏。
+- **HUD 自身不调用模型**；LeanLink 优化协作通信，HUD 帮你看清运行状态。准确用量仍在 `/collab` 查看。
+- 当前 HUD 需在 Harness 插件页通过本地目录 `packages/hud` **单独安装并启用**。根目录 `npm start` 与组合构建包不会自动装入 HUD；浮层显示在 Harness 会话页。
+
+→ **[HUD 安装、使用与常见问题](packages/hud/README.md)**
 
 ### 可选的 CSV 工作流
 
@@ -193,6 +203,7 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 | DSH-LLSA 组合发行 / 启动器 | 0.4.2 |
 | `@dsh-llsa/collab` | 0.4.2 |
 | `@dsh-llsa/superagent` | 0.4.2 |
+| `@dsh-llsa/hud`（可选，单独安装） | 0.4.0 |
 | DeepSeek Harness | 0.2.2-rc.1 |
 
 包通过本地构建与随包文件安装，保持 `private: true`；这些名称不是已在 npm 发布的承诺。快速开始会启动指定版本的 Harness，尚不支持对任意已有实例一条 `dsh plugin add` 命令完成全部配置。
