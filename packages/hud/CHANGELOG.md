@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.4.0
+
+A design pass over the field: the ring stops re-flowing, and the centre stops
+repeating the command.
+
+- **Seats are fixed.** Every material owns one angle on an eight-slot ladder
+  (12:00 终端, 1:30 代码, 4:30 检索, 6:00 其它, 7:30 网页, 10:30 文档; 3:00 and 9:00
+  left open). The ring used to space nodes by how many were visible, so a
+  material jumped — up to 180° — whenever a sibling appeared or faded: 13–19
+  jumps per six-call run, and none now.
+- **Six materials.** `mail` had no tool mapping at all and is gone; `data` becomes
+  `search`/检索; `todo_write`, goals and schedules draw nothing (the centre says
+  计划中 for their duration), because bookkeeping is not a material.
+- **The code seat.** `run_code` lands there, and so does a `read`/`write`/`edit` of
+  a source file. The Host half derives `meta.materials` from the call's path
+  (27 extensions) and `meta.exec` from a shell command's first word; the client
+  then promotes the seat — with its language label — only after the execution has
+  lasted 400 ms, so a one-line probe never flashes. Neither hint forwards the
+  raw arguments.
+- **One pre-set link.** 终端 and 代码 are joined by a 45° arc that lights only
+  inside a declared execution window (0 → 0.16 in 120 ms, gone 400 ms after the
+  call) and never because two nodes happen to be visible. Its ends are trimmed by
+  6.7° so the arc cannot run into a node's centre.
+- **The centre is a state word.** 执行中 / 计划中 / 思考中 / 停顿中 / 等你确认 /
+  成功 / 失败 / 待命 at one 26px size, with the object on the second line
+  (「执行中 / Python」). The task name, its 26-character cap and the two-line wrap
+  are gone: the command almost never fit, and echoing it badly was worse than not
+  echoing it.
+- **Two vocabularies, by scope.** 成功/失败 describe the run (centre and capsule);
+  完成 describes one material. A finished node turns green again, stops breathing
+  and ripples once, so "running" and "done" differ in motion as well as in hue.
+- **A halo holds the middle.** A 0.06-alpha radial whisper, driven by how alive the
+  run is plus the hottest material, so 思考中 and 计划中 are not a word floating in
+  an empty ring.
+
+Tests: 111 (was 106).
+
 ## 0.3.2
 
 - **The route now waits for the web carrier.** `apply` read `ctx.get('webServer')`
