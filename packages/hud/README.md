@@ -77,7 +77,12 @@ reaches the wire.
 
 **Late start.** Installing, restarting or hot-reloading the plugin mid-run adopts
 the current turn from the first tool call it sees, so the field appears
-immediately instead of waiting for the next command. If the snapshot route cannot
+immediately instead of waiting for the next command.
+
+**No carrier yet.** The route registration waits for `webServer`: a restart can
+activate this row before the web carrier exists, and asking once would leave the
+page with no route for the whole session. Registration retries with backoff until
+the service appears, and the effect removes both routes on dispose. If the snapshot route cannot
 be reached at all, a small `HUD 未连接` pill says so instead of leaving the same
 blank screen as "nothing is happening".
 

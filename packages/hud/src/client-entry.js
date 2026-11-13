@@ -12,12 +12,12 @@
  * The half is read-only by construction: it polls one JSON route and draws.
  * There is no write path, no tool, and no session event (§6).
  */
-import { createView, focusGate, foldSnapshot, isStaleAnswer, nextFocus, stepLifecycle } from './model.js';
+import { createView, focusGate, foldSnapshot, isStaleAnswer, nextFocus, nextOnline, shouldShowOffline, stepLifecycle } from './model.js';
 import { createFieldCanvas } from './render.js';
 import { STYLES, createCapsule, createFocusLayer, createOfflinePill, createStageHook } from './focus.js';
 
 /** How often the snapshot is polled, by what the field is doing. */
-export const POLL_MS = Object.freeze({ running: 240, waiting: 600, settled: 800, empty: 1400 });
+export const POLL_MS = Object.freeze({ running: 240, waiting: 600, settled: 800, empty: 1400, connect: 320 });
 
 const STRINGS = Object.freeze({
   zh: {
@@ -57,7 +57,10 @@ function createStore(getLocale) {
     sessionId: null,
     view: createView({ now: 0 }),
     focus: { taskId: null, active: false, dismissedTaskId: null, state: 'idle' },
-    online: false,
+    /** `null` until the first poll settles: see {@link nextOnline}. */
+    online: null,
+    attempts: 0,
+    everOnline: false,
     /** The plugin's `focusMode` setting, mirrored from `meta` on every poll. */
     configFocus: true,
     /** Session-local override from the shortcut; never written to the profile. */
@@ -92,7 +95,7 @@ function createStore(getLocale) {
     },
     fold(snapshot, now, meta) {
       foldSnapshot(state.view, snapshot, now, { ...meta, sessionId: state.sessionId });
-      state.online = true;
+      Object.assign(state, nextOnline(state, 'ok'));
       // Absent means on, the same default the schema declares.
       state.configFocus = meta === null || meta === undefined ? true : meta.focusMode !== false;
       const focus = nextFocus(state.focus, state.view);
@@ -102,8 +105,12 @@ function createStore(getLocale) {
       return changedFocus;
     },
     offline() {
-      if (state.online === false) return;
-      state.online = false;
+      // One failed poll is not "offline": a restart brings the page up before the
+      // Host half has registered its route. Only a lost connection (or a run of
+      // failures on a fresh page) is worth telling the user about.
+      const next = nextOnline(state, 'fail', Date.now());
+      if (state.online === next.online && state.attempts === next.attempts) return;
+      Object.assign(state, next);
       notify();
     },
     dismiss() {
@@ -185,9 +192,14 @@ export function applyClient(ctx, React) {
         inFlight = false;
       }
       const view = store.get().view;
-      const delay = view.state === 'running'
-        ? POLL_MS.running
-        : (view.state === 'waiting-human' ? POLL_MS.waiting : POLL_MS.settled);
+      const connected = store.get().online === true;
+      const delay = !connected
+        // Boot or reconnect: retry quickly, so a route that comes up a moment
+        // after the page is picked up instead of waiting out a settled cadence.
+        ? POLL_MS.connect
+        : view.state === 'running'
+          ? POLL_MS.running
+          : (view.state === 'waiting-human' ? POLL_MS.waiting : POLL_MS.settled);
       if (!disposed) timer = globalThis.setTimeout(tick, delay);
     };
     timer = globalThis.setTimeout(tick, 60);
@@ -277,7 +289,7 @@ export function applyClient(ctx, React) {
       // A session is known but the snapshot route never answered: say so instead
       // of showing the same blank screen as "nothing is happening". A field that
       // was switched off on purpose says nothing at all.
-      if (enabled && state.sessionId !== null && state.online === false) {
+      if (enabled && shouldShowOffline(state.sessionId, state.online)) {
         return wrap(React.createElement(OfflinePill, { stage, text: strings.offline }));
       }
       return wrap(null);

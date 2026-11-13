@@ -889,6 +889,47 @@ function nextFocus(focus, view) {
 }
 
 /**
+ * How many failed polls a *fresh* page tolerates before it calls itself offline.
+ *
+ * A restart brings the page up before the Host half has registered its route, so
+ * the first polls can fail on a perfectly healthy install. "Not yet connected" and
+ * "lost the connection" are different states; only the second one is worth a pill.
+ */
+const OFFLINE_AFTER_ATTEMPTS = 3;
+
+/** A fresh page also gets this long, in wall-clock time, before it says "offline". */
+const OFFLINE_AFTER_MS = 2500;
+
+/**
+ * Next connection state.
+ *
+ * - `null` — still trying, nothing has failed for long enough to matter;
+ * - `true` — the last poll answered;
+ * - `false` — the connection is genuinely down.
+ *
+ * Once a page has been online, a single failure is reported immediately. Before
+ * that, both a run of failures and a minimum wall-clock window must pass, so a
+ * slow boot never paints an outage.
+ */
+function nextOnline(previous, outcome, now = 0) {
+  const attempts = Number.isFinite(previous?.attempts) ? previous.attempts : 0;
+  const everOnline = previous?.everOnline === true;
+  if (outcome === 'ok') return { online: true, attempts: 0, everOnline: true, since: 0 };
+  const failed = attempts + 1;
+  const since = Number.isFinite(previous?.since) && previous.since > 0 ? previous.since : now;
+  const waited = now === 0 ? true : now - since >= OFFLINE_AFTER_MS;
+  if (everOnline || (failed >= OFFLINE_AFTER_ATTEMPTS && waited)) {
+    return { online: false, attempts: failed, everOnline, since };
+  }
+  return { online: null, attempts: failed, everOnline, since };
+}
+
+/** The pill is for a lost connection, never for a page that is still connecting. */
+function shouldShowOffline(sessionId, online) {
+  return sessionId !== null && online === false;
+}
+
+/**
  * Whether a snapshot answer belongs to a session the page already left.
  *
  * Switching from A to B while A's request is in flight would otherwise paint A's
@@ -1676,7 +1717,7 @@ function createCapsule(React) {
  */
 
 /** How often the snapshot is polled, by what the field is doing. */
-const POLL_MS = Object.freeze({ running: 240, waiting: 600, settled: 800, empty: 1400 });
+const POLL_MS = Object.freeze({ running: 240, waiting: 600, settled: 800, empty: 1400, connect: 320 });
 
 const STRINGS = Object.freeze({
   zh: {
@@ -1716,7 +1757,10 @@ function createStore(getLocale) {
     sessionId: null,
     view: createView({ now: 0 }),
     focus: { taskId: null, active: false, dismissedTaskId: null, state: 'idle' },
-    online: false,
+    /** `null` until the first poll settles: see {@link nextOnline}. */
+    online: null,
+    attempts: 0,
+    everOnline: false,
     /** The plugin's `focusMode` setting, mirrored from `meta` on every poll. */
     configFocus: true,
     /** Session-local override from the shortcut; never written to the profile. */
@@ -1751,7 +1795,7 @@ function createStore(getLocale) {
     },
     fold(snapshot, now, meta) {
       foldSnapshot(state.view, snapshot, now, { ...meta, sessionId: state.sessionId });
-      state.online = true;
+      Object.assign(state, nextOnline(state, 'ok'));
       // Absent means on, the same default the schema declares.
       state.configFocus = meta === null || meta === undefined ? true : meta.focusMode !== false;
       const focus = nextFocus(state.focus, state.view);
@@ -1761,8 +1805,12 @@ function createStore(getLocale) {
       return changedFocus;
     },
     offline() {
-      if (state.online === false) return;
-      state.online = false;
+      // One failed poll is not "offline": a restart brings the page up before the
+      // Host half has registered its route. Only a lost connection (or a run of
+      // failures on a fresh page) is worth telling the user about.
+      const next = nextOnline(state, 'fail', Date.now());
+      if (state.online === next.online && state.attempts === next.attempts) return;
+      Object.assign(state, next);
       notify();
     },
     dismiss() {
@@ -1844,9 +1892,14 @@ function applyClient(ctx, React) {
         inFlight = false;
       }
       const view = store.get().view;
-      const delay = view.state === 'running'
-        ? POLL_MS.running
-        : (view.state === 'waiting-human' ? POLL_MS.waiting : POLL_MS.settled);
+      const connected = store.get().online === true;
+      const delay = !connected
+        // Boot or reconnect: retry quickly, so a route that comes up a moment
+        // after the page is picked up instead of waiting out a settled cadence.
+        ? POLL_MS.connect
+        : view.state === 'running'
+          ? POLL_MS.running
+          : (view.state === 'waiting-human' ? POLL_MS.waiting : POLL_MS.settled);
       if (!disposed) timer = globalThis.setTimeout(tick, delay);
     };
     timer = globalThis.setTimeout(tick, 60);
@@ -1936,7 +1989,7 @@ function applyClient(ctx, React) {
       // A session is known but the snapshot route never answered: say so instead
       // of showing the same blank screen as "nothing is happening". A field that
       // was switched off on purpose says nothing at all.
-      if (enabled && state.sessionId !== null && state.online === false) {
+      if (enabled && shouldShowOffline(state.sessionId, state.online)) {
         return wrap(React.createElement(OfflinePill, { stage, text: strings.offline }));
       }
       return wrap(null);

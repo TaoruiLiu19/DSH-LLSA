@@ -20,6 +20,8 @@ import {
   isStaleAnswer,
   foldSnapshot,
   nextFocus,
+  nextOnline,
+  shouldShowOffline,
   shortenTask,
   stepLifecycle,
 } from '../src/model.js';
@@ -254,6 +256,36 @@ test('a session switch resets the field', () => {
   assert.equal(view.materials.size, 0);
   assert.equal(view.cursor, 0);
   assert.equal(view.taskId, null);
+});
+
+test('a fresh page is not "offline" just because the route is not up yet', () => {
+  // A restart brings the page up before the Host half registers its route; the
+  // first polls fail on a healthy install, so they must not raise the pill.
+  const fresh = { online: null, attempts: 0, everOnline: false, since: 0 };
+  const first = nextOnline(fresh, 'fail', 1000);
+  assert.equal(first.online, null, 'still connecting');
+  assert.equal(shouldShowOffline('s', first.online), false);
+  const second = nextOnline(first, 'fail', 1320);
+  assert.equal(second.online, null, 'still connecting after two tries');
+  // Three failures but only 640ms: a slow boot still must not paint an outage.
+  const third = nextOnline(second, 'fail', 1640);
+  assert.equal(third.online, null, 'the minimum window has not elapsed');
+  const later = nextOnline(third, 'fail', 3800);
+  assert.equal(later.online, false, 'enough failures and enough time is a real outage');
+  assert.equal(shouldShowOffline('s', later.online), true);
+});
+
+test('a connection that was already up reports a loss immediately', () => {
+  const connected = nextOnline({ online: null, attempts: 0, everOnline: false, since: 0 }, 'ok');
+  assert.equal(connected.online, true);
+  assert.equal(shouldShowOffline('s', connected.online), false);
+  const lost = nextOnline(connected, 'fail', 5000);
+  assert.equal(lost.online, false, 'a page that was online knows what a failure means');
+  assert.equal(lost.attempts, 1);
+});
+
+test('no session id means no pill at all', () => {
+  assert.equal(shouldShowOffline(null, false), false);
 });
 
 test('a stale answer for another session is dropped', () => {

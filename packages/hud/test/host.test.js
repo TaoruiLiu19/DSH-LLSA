@@ -165,6 +165,42 @@ test('without a web carrier the plugin activates and registers nothing', () => {
   assert.ok(host.handlers.has('session/event'), 'the collector stays live for a later carrier');
 });
 
+test('routes are attached when the web carrier starts after the plugin', async () => {
+  // An app restart can activate this row before `webServer` exists. Asking once
+  // would leave the page with no route for the whole session — that is the
+  // "HUD 未连接" that never cleared. Registration must wait for the service.
+  const routes = new Map();
+  const disposers = [];
+  let server;
+  const ctx = {
+    on: () => () => {},
+    effect(factory) {
+      disposers.push(factory());
+      return () => {};
+    },
+    get(name) {
+      return name === 'webServer' ? server : undefined;
+    },
+  };
+  apply(ctx, {});
+  assert.equal(routes.size, 0, 'no carrier yet');
+
+  server = {
+    register(route) {
+      routes.set(route.path, route.resource);
+      return () => routes.delete(route.path);
+    },
+  };
+  await new Promise(resolve => setTimeout(resolve, 260));
+  assert.ok(routes.has(ROUTE), 'the snapshot route appears once the carrier is up');
+  assert.ok(routes.has(PING_ROUTE));
+
+  for (const dispose of disposers) {
+    if (typeof dispose === 'function') dispose();
+  }
+  assert.equal(routes.size, 0, 'disposal removes both routes');
+});
+
 test('a disposed session is forgotten', async () => {
   const host = fakeHost();
   apply(host.ctx, {});

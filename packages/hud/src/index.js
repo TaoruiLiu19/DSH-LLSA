@@ -175,15 +175,61 @@ export function apply(ctx, config) {
     }
   };
 
-  const server = ctx.get('webServer');
-  if (server === undefined || typeof server.register !== 'function') {
-    // The bundle is inert without a browser carrier; the client half simply
-    // never receives a snapshot. No throw: a non-web profile must stay bootable.
-    return;
-  }
+  /**
+   * Register both routes on the web carrier, if it exists right now.
+   *
+   * The carrier may not exist yet: on an app restart the Loader can activate this
+   * row before `webServer` is up, and asking once would leave the page with no
+   * route for the rest of the session ("HUD 未连接" forever). So registration is
+   * retried until the service appears, and the effect removes it on dispose.
+   *
+   * @returns a disposer when the routes were registered, otherwise `null`.
+   */
+  const attachRoutes = () => {
+    const server = ctx.get('webServer');
+    if (server === undefined || typeof server.register !== 'function') return null;
+    const detachRoute = server.register({ kind: 'exact', path: ROUTE, resource: handler });
+    const detachPing = server.register({ kind: 'exact', path: PING_ROUTE, resource: handler });
+    return () => {
+      try {
+        detachRoute();
+      } catch {
+        // a carrier that already dropped the route must not break disposal
+      }
+      try {
+        detachPing();
+      } catch {
+        // same
+      }
+    };
+  };
 
-  ctx.effect(() => server.register({ kind: 'exact', path: ROUTE, resource: handler }));
-  ctx.effect(() => server.register({ kind: 'exact', path: PING_ROUTE, resource: handler }));
+  ctx.effect(() => {
+    let detach = attachRoutes();
+    let timer = 0;
+    let delay = 200;
+    // Bounded backoff: a non-web profile never gets a carrier, so the wait must
+    // become cheap instead of polling forever at 5 Hz.
+    const wait = () => {
+      if (detach !== null) return;
+      timer = globalThis.setTimeout(() => {
+        timer = 0;
+        detach = attachRoutes();
+        if (detach === null) {
+          delay = Math.min(delay * 2, 2000);
+          wait();
+        }
+      }, delay);
+      // A Host-side plugin must never hold the process open while it waits for a
+      // carrier that may never exist (a TUI profile, a test harness).
+      timer?.unref?.();
+    };
+    if (detach === null) wait();
+    return () => {
+      if (timer !== 0) globalThis.clearTimeout(timer);
+      if (detach !== null) detach();
+    };
+  });
 }
 
 /**

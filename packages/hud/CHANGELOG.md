@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.2
+
+- **The route now waits for the web carrier.** `apply` read `ctx.get('webServer')`
+  once, so a start that activated the plugin row before the carrier left the page
+  with no route for the whole session — the `HUD 未连接` pill that never cleared
+  after a restart. Registration retries (200 ms, backing off to 2 s) until the
+  service appears, and the effect removes both routes on dispose. The wait timer is
+  unref'd so a profile without a carrier never holds the Host process open.
+- **"Not connected yet" is no longer "offline".** The connection is tri-state
+  (`null` connecting / `true` / `false`). A fresh page needs three failed polls
+  *and* 2.5 s of wall clock before the pill appears, and retries every 320 ms while
+  connecting; a page that was already online still reports a loss immediately.
+
 ## 0.3.1
 
 State fixes found in review. All five are covered by regression tests.

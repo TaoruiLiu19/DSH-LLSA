@@ -588,6 +588,47 @@ export function nextFocus(focus, view) {
 }
 
 /**
+ * How many failed polls a *fresh* page tolerates before it calls itself offline.
+ *
+ * A restart brings the page up before the Host half has registered its route, so
+ * the first polls can fail on a perfectly healthy install. "Not yet connected" and
+ * "lost the connection" are different states; only the second one is worth a pill.
+ */
+export const OFFLINE_AFTER_ATTEMPTS = 3;
+
+/** A fresh page also gets this long, in wall-clock time, before it says "offline". */
+export const OFFLINE_AFTER_MS = 2500;
+
+/**
+ * Next connection state.
+ *
+ * - `null` — still trying, nothing has failed for long enough to matter;
+ * - `true` — the last poll answered;
+ * - `false` — the connection is genuinely down.
+ *
+ * Once a page has been online, a single failure is reported immediately. Before
+ * that, both a run of failures and a minimum wall-clock window must pass, so a
+ * slow boot never paints an outage.
+ */
+export function nextOnline(previous, outcome, now = 0) {
+  const attempts = Number.isFinite(previous?.attempts) ? previous.attempts : 0;
+  const everOnline = previous?.everOnline === true;
+  if (outcome === 'ok') return { online: true, attempts: 0, everOnline: true, since: 0 };
+  const failed = attempts + 1;
+  const since = Number.isFinite(previous?.since) && previous.since > 0 ? previous.since : now;
+  const waited = now === 0 ? true : now - since >= OFFLINE_AFTER_MS;
+  if (everOnline || (failed >= OFFLINE_AFTER_ATTEMPTS && waited)) {
+    return { online: false, attempts: failed, everOnline, since };
+  }
+  return { online: null, attempts: failed, everOnline, since };
+}
+
+/** The pill is for a lost connection, never for a page that is still connecting. */
+export function shouldShowOffline(sessionId, online) {
+  return sessionId !== null && online === false;
+}
+
+/**
  * Whether a snapshot answer belongs to a session the page already left.
  *
  * Switching from A to B while A's request is in flight would otherwise paint A's
