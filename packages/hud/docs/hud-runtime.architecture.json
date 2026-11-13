@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "HUD 专注视图 · 运行时结构",
+    "subtitle": "只读的一条链路：会话事件 → 快照 → 一个视图 → 一块画布",
+    "quality_profile": "showcase",
+    "visual_preset": "signal-flow",
+    "views": [
+      { "id": "main-path", "label": "主链路", "focus": ["dsh", "collector", "route", "poller", "model"], "note": "事件在宿主侧折成快照，浏览器只读一次 GET，再折成视图。" },
+      { "id": "drawing", "label": "绘制", "focus": ["model", "canvas", "overlay"], "note": "画布每帧只动 alpha、heat 和脉冲；DOM 只负责遮罩与胶囊。" },
+      { "id": "contract", "label": "契约边界", "focus": ["contract", "collector"], "note": "快照字段与别名表都由契约决定，客户端不猜。" }
+    ]
+  },
+  "components": [
+    { "id": "dsh", "type": "external", "label": "DSH 会话", "sublabel": "session/event · agent/status", "pos": [40, 300], "size": [130, 64] },
+    { "id": "collector", "type": "backend", "label": "采集器", "sublabel": "src/source.js", "pos": [250, 292], "size": [150, 80], "tag": "纯 fold" },
+    { "id": "route", "type": "backend", "label": "只读路由", "sublabel": "/dsh-hud/api/state", "pos": [470, 292], "size": [150, 80], "tag": "GET · 无写入" },
+    { "id": "poller", "type": "frontend", "label": "轮询", "sublabel": "src/client-entry.js", "pos": [690, 292], "size": [150, 80], "tag": "240 ms" },
+    { "id": "model", "type": "frontend", "label": "状态投影", "sublabel": "src/model.js", "pos": [910, 292], "size": [140, 80], "tag": "snapshot → view" },
+    { "id": "canvas", "type": "frontend", "label": "画布", "sublabel": "src/render.js", "pos": [1110, 180], "size": [140, 80], "tag": "canvas 2D" },
+    { "id": "overlay", "type": "frontend", "label": "专注层", "sublabel": "src/focus.js", "pos": [1110, 404], "size": [140, 80], "tag": "遮罩 · 胶囊" },
+    { "id": "contract", "type": "external", "label": "hud-v1 契约", "sublabel": "schema + 81 项别名表", "pos": [230, 110], "size": [190, 68], "tag": "字段锁定" }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "宿主：Node 插件（只读）", "wraps": ["collector", "route"], "pad": 36 },
+    { "kind": "region", "label": "浏览器：client.js", "wraps": ["poller", "model", "canvas", "overlay"] }
+  ],
+  "connections": [
+    { "id": "subscribe", "from": "dsh", "to": "collector", "label": "订阅事件", "variant": "emphasis" },
+    { "id": "publish", "from": "collector", "to": "route", "label": "snapshot + meta", "variant": "emphasis", "labelAt": [435, 388] },
+    { "id": "poll", "from": "route", "to": "poller", "label": "GET 快照", "variant": "emphasis" },
+    { "id": "fold", "from": "poller", "to": "model", "label": "snapshot" },
+    { "id": "draw", "from": "model", "to": "canvas", "label": "view 每帧", "variant": "emphasis" },
+    { "id": "compose", "from": "model", "to": "overlay", "label": "状态词 · 胶囊" },
+    { "id": "aliases", "from": "contract", "to": "collector", "label": "别名表", "variant": "dashed", "labelAt": [325, 196] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "宿主半边", "items": ["只读订阅 session/event、agent/status、subagent/*", "折成 hud-v1 快照，附带 meta.exec 与 meta.materials", "工具参数只在本机推导类别，从不转发原文"] },
+    { "dot": "emerald", "title": "浏览器半边", "items": ["一次只读 GET，页面失焦时降频", "snapshot → 纯函数 fold → view", "每帧只动 alpha、heat、脉冲，不重算状态"] },
+    { "dot": "violet", "title": "契约边界", "items": ["快照 8 个字段，additionalProperties: false", "别名表 81 项与契约逐条镜像", "协议版本 1，与包版本无关"] }
+  ]
+}

@@ -16,6 +16,8 @@
   a glow smears on white and a hairline disappears.
 - The capsule, the hint and the offline pill switch with the same class, so the
   whole layer changes together and a theme switch repaints on the next frame.
+- The README now shows the field in both themes and a runtime diagram (an
+  explorable HTML with its source specification under docs/).
 
 Tests: 117 (was 113).
 

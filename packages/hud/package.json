@@ -19,6 +19,7 @@
     "data",
     "scripts",
     "test",
+    "docs",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",

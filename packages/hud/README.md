@@ -2,9 +2,14 @@
 
 **Agent 在忙什么，抬眼就能看懂。**
 
+<p align="center">
+  <img src="docs/hud-field-dark.png" width="48%" alt="深色主题下的 HUD：中心显示执行中，外圈是终端、代码、文档、检索，内圈两个子 Agent">
+  <img src="docs/hud-field-light.png" width="48%" alt="浅色主题下的同一块场：白色磨砂遮罩、深色文字，颜色跟着宿主走">
+</p>
+
 为 DeepSeek Harness Web 提供实时状态浮层：中心显示任务状态，外圈显示正在使用的工具类别，中间一层显示子 Agent。适合等待长任务、观察多智能体协作，以及及时发现需要你回复的问题。
 
-[返回 DSH-LLSA](../../README.md) · [更新记录](CHANGELOG.md) · [配置选项](#配置选项) · [常见问题](#常见问题)
+[返回 DSH-LLSA](../../README.md) · [更新记录](CHANGELOG.md) · [它是怎么工作的](#它是怎么工作的) · [配置选项](#配置选项) · [常见问题](#常见问题)
 
 ## 一眼看懂协作现场
 
@@ -16,6 +21,8 @@
 | **返回胶囊** | 退出浮层后，点击消息区的胶囊重新查看 |
 
 节点由实际事件驱动。执行时有呼吸动效，等待确认时停止呼吸；状态同时使用文字和颜色表达。中心的“成功”表示运行结束状态，不代表结果已经通过业务正确性验证。
+
+**主题跟随宿主。** 浮层不假定你在深色模式下工作：它读取界面背景的实际亮度，浅色主题下换成白色磨砂遮罩、深色文字和更重的强调色，切主题时下一帧就重画。上面两张图是同一块场在两套主题下的样子。
 
 > **HUD 本身不调用模型，也不消耗模型 token。** 它读取状态并绘图，不修改任务、不派发 Agent，也不执行审批。正在观察的任务仍会产生原有模型费用。节省通信成本由 [LeanLink](../../README.md#认识-leanlink) 负责，HUD 当前不展示节省金额。
 
@@ -62,6 +69,21 @@ D:/projects/DSH-LLSA/packages/hud
 - **长期关闭：** 在插件设置里关闭 `focusMode`。
 - **需要回复时：** 查看“等你确认”提示，在 Harness 原生问答界面回复。已经主动关闭的浮层不会因为提问而强行重开。
 
+## 它是怎么工作的
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/hud-architecture-dark.png">
+  <img src="docs/hud-architecture-light.png" alt="HUD 运行时结构：会话事件进入采集器，折成 hud-v1 快照，经只读路由被浏览器轮询，投影成视图后交给画布与专注层">
+</picture>
+
+<p align="center"><sub>交互版：<a href="docs/hud-runtime.html">docs/hud-runtime.html</a>（可切换明暗，按「主链路 / 绘制 / 契约边界」逐段看）</sub></p>
+
+一条只读的链路，没有第二条：
+
+- **宿主半边**只订阅 `session/event`、`agent/status`、`subagent/*`，把它们折成一份 `hud-v1` 快照。工具参数只在本机用来推导类别（解释器语言、源码扩展名），**命令原文与路径从不转发给浏览器**。
+- **浏览器半边**发一次只读 `GET /dsh-hud/api/state`，把快照投影成视图；绘制每帧只改透明度、热度与脉冲，不重算状态。
+- **契约**是唯一接口：快照 8 个固定字段、`additionalProperties: false`，别名表 81 项与契约逐条镜像。派生信息（语言、材料覆盖）走契约之外的 `meta`，因此加它们不需要改协议。
+
 ## 状态与显示边界
 
 | 显示 | 含义 |
@@ -102,6 +124,7 @@ HUD 只展示当前会话，不把所有工单同时聚合到一个全局视图�
 | 一直显示“HUD 未连接” | 确认访问的是安装插件的 Harness 实例，刷新页面；检查宿主日志及 `/dsh-hud/api/ping` 是否可访问 |
 | 子 Agent 没有工具动画 | 核心事件模式只展示它的状态和短名，不合并所有子会话工具事件 |
 | 某个工具落入“其它” | 工具没有材料映射，或快照的别名版本不匹配；基础状态仍可显示 |
+| 浅色主题下颜色偏淡 | 浮层按界面背景亮度自动选色板；若宿主用背景图而非纯色，探测可能退回系统偏好 |
 | 想看准确 token 和费用 | 使用 DSH-LLSA 的 `/collab` 用量视图；HUD 不做账单统计 |
 
 `/dsh-hud/api/ping` 中的 `version` 是快照协议版本 **1**，不是 HUD 包版本。请保留本机认证，不要在反馈中分享认证链接或密钥。
@@ -123,18 +146,19 @@ node packages/hud/scripts/build-client.mjs --check
 node packages/hud/scripts/run-tests.mjs
 ```
 
-也可以使用 `npm run check --prefix packages/hud`。目前合并版本通过 **113 项测试**，覆盖契约夹具回放、问答等待恢复、会话切换、固定布局、路径脱敏、文件工具事件和取消后的执行状态清理。测试数量以后续命令输出为准；这些自动化检查不能替代所有浏览器环境的人工体验验证。
+也可以使用 `npm run check --prefix packages/hud`。当前通过 **117 项测试**，覆盖契约夹具回放、问答等待恢复、会话切换、固定席位布局、路径脱敏、文件工具事件、取消后的执行状态清理，以及浅色/深色调色板。测试数量以后续命令输出为准；这些自动化检查不能替代所有浏览器环境的人工体验验证。
 
 测试读取仓库的 [契约夹具](../../contracts/fixtures/)；只有单独 package 的副本可能跳过回放，因此完整仓库是推荐验证环境。
 
 | 文件 | 职责 |
 |---|---|
 | `src/index.js`、`src/source.js` | 宿主只读路由、事件采集和快照 |
-| `src/model.js`、`src/materials.js` | 状态投影、材料分类与固定位置 |
-| `src/render.js`、`src/focus.js` | 绘制、专注浮层、返回胶囊 |
+| `src/model.js`、`src/materials.js` | 状态投影、材料分类、固定席位与调色板 |
+| `src/render.js`、`src/focus.js` | 绘制、专注浮层、返回胶囊、主题探测 |
 | `src/client-entry.js` | 会话切换、轮询、界面入口 |
 | `src/labels.js` | 展示短名脱敏与长度限制 |
 | `client.js` | 已生成的浏览器产物，请通过构建脚本更新 |
+| `docs/` | README 用的图，以及架构图的可交互版本与它的源规格 |
 
 协议使用 [hud-v1 schema](../../contracts/hud-v1.schema.json)，工具保留原生 ID，别名表与材料分类分离。工具参数只在宿主侧用于推导类别，不转发原始命令和路径；HUD 不提供模型隐藏推理的记录。
 
