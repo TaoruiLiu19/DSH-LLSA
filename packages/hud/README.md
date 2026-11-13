@@ -78,7 +78,7 @@ D:/projects/DSH-LLSA/packages/hud
   <img src="docs/hud-architecture-light.png" alt="HUD 运行时结构：会话事件进入采集器，折成 hud-v1 快照，经只读路由被浏览器轮询，投影成视图后交给画布与专注层">
 </picture>
 
-<p align="center"><sub>交互版：<a href="docs/hud-runtime.html">docs/hud-runtime.html</a>（可切换明暗，按「主链路 / 绘制 / 契约边界」逐段看）</sub></p>
+<p align="center"><sub>交互版：<a href="docs/hud-runtime.html">docs/hud-runtime.html</a>（可切换明暗与动效，按路径高亮，也能导出图片）</sub></p>
 
 一条只读的链路，没有第二条：
 

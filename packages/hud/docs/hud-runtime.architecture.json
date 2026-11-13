@@ -4,13 +4,9 @@
   "meta": {
     "title": "HUD 专注视图 · 运行时结构",
     "subtitle": "只读的一条链路：会话事件 → 快照 → 一个视图 → 一块画布",
+    "output": "hud-runtime.html",
     "quality_profile": "showcase",
-    "visual_preset": "signal-flow",
-    "views": [
-      { "id": "main-path", "label": "主链路", "focus": ["dsh", "collector", "route", "poller", "model"], "note": "事件在宿主侧折成快照，浏览器只读一次 GET，再折成视图。" },
-      { "id": "drawing", "label": "绘制", "focus": ["model", "canvas", "overlay"], "note": "画布每帧只动 alpha、heat 和脉冲；DOM 只负责遮罩与胶囊。" },
-      { "id": "contract", "label": "契约边界", "focus": ["contract", "collector"], "note": "快照字段与别名表都由契约决定，客户端不猜。" }
-    ]
+    "visual_preset": "signal-flow"
   },
   "components": [
     { "id": "dsh", "type": "external", "label": "DSH 会话", "sublabel": "session/event · agent/status", "pos": [40, 300], "size": [130, 64] },
