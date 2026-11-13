@@ -11,7 +11,7 @@
 
 为 DeepSeek Harness Web 提供实时状态浮层：中心显示任务状态，外圈显示正在使用的工具类别，中间一层显示子 Agent。适合等待长任务、观察多智能体协作，以及及时发现需要你回复的问题。
 
-[返回 DSH-LLSA](../../README.md) · [更新记录](CHANGELOG.md) · [它是怎么工作的](#它是怎么工作的) · [配置选项](#配置选项) · [常见问题](#常见问题)
+[返回 DSH-LLSA](../../README.md) · [更新记录](CHANGELOG.md) · [npm](https://www.npmjs.com/package/@dsh-llsa/hud) · [它是怎么工作的](#它是怎么工作的) · [配置选项](#配置选项) · [常见问题](#常见问题)
 
 ## 一眼看懂协作现场
 
@@ -41,21 +41,27 @@ git clone https://github.com/TaoruiLiu19/DSH-LLSA.git
 cd DSH-LLSA
 ```
 
-HUD 所在目录为 `packages/hud`。仓库已包含生成好的 `client.js`，仅安装 HUD 无需先构建整个工作台，也无需把它发布到 npm。
+HUD 所在目录为 `packages/hud`。仓库已包含生成好的 `client.js`，仅安装 HUD 无需先构建整个工作台。
 
 ### 2. 在正在使用的 Harness 中安装 bundle
 
-打开 Harness Web 侧边栏的 **插件** 页面，通过安装组合包入口，提供 `packages/hud` 的**完整本地路径**，安装并启用。例如：
+HUD 已发布到 npm。打开 Harness Web 侧边栏的 **插件** 页面，通过安装组合包入口，直接填包名：
+
+```text
+@dsh-llsa/hud
+```
+
+开发时也可以改填 `packages/hud` 的**完整本地路径**，这样改 `client.js` 会热替换：
 
 ```text
 D:/projects/DSH-LLSA/packages/hud
 ```
 
-把示例换成自己的真实路径。支持 `plugin_manager` 工具的会话也可以请求它通过 `install_bundle` 安装这个目录；若当前预设没有该工具，使用插件页面。安装器若返回需要重启，重启当前 Harness，再刷新浏览器。
+把示例换成自己的真实路径。支持 `plugin_manager` 工具的会话也可以请求它通过 `install_bundle` 安装；若当前预设没有该工具，使用插件页面。安装器若返回需要重启，重启当前 Harness，再刷新浏览器。
 
-安装作用于当前 Harness profile。应在自己实际使用的实例中操作；不要只在仓库根目录执行 `npm install @dsh-llsa/hud`，该包未承诺发布到 npm。
+安装作用于当前 Harness profile。应在自己实际使用的实例中操作。`packages/hud` 里的源码与 npm 上的 `@dsh-llsa/hud` 是同一份内容，装哪个都行；从仓库根目录执行 `npm install @dsh-llsa/hud` 不会把插件装进 Harness，那只是把它放进某个 `node_modules`。
 
-**发行包说明：** DSH-LLSA 的根目录 `npm start` 不会自动启用 HUD；当前组合构建包也未打入 HUD。请从完整源码目录单独安装本 bundle。它显示在 Harness 的会话界面，不是 `/collab` 或 `/orchestrator/local` 页面里的内嵌组件。
+**发行包说明：** DSH-LLSA 的根目录 `npm start` 不会自动启用 HUD；当前组合构建包也未打入 HUD。请单独安装本 bundle（npm 包名或源码目录均可）。它显示在 Harness 的会话界面，不是 `/collab` 或 `/orchestrator/local` 页面里的内嵌组件。
 
 ### 3. 观察一次任务
 
