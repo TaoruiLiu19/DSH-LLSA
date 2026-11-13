@@ -1,10 +1,31 @@
 {
   "name": "@dsh-llsa/hud",
   "version": "0.4.1",
-  "private": true,
   "type": "module",
   "description": "Read-only HUD for DSH agent activity: a one-glance field of conclusions, materials and sub-agents, with a focus mode over the conversation.",
   "license": "MIT",
+  "author": "Taorui Liu <liu_taorui@foxmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TaoruiLiu19/DSH-LLSA.git",
+    "directory": "packages/hud"
+  },
+  "homepage": "https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/packages/hud#readme",
+  "bugs": {
+    "url": "https://github.com/TaoruiLiu19/DSH-LLSA/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "hud",
+    "overlay",
+    "canvas",
+    "agent-monitoring"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./src/index.js",
   "exports": {
     ".": "./src/index.js",
@@ -32,7 +53,8 @@
     "build": "node scripts/build-client.mjs",
     "test": "node scripts/run-tests.mjs",
     "test:spawned": "node --test test/*.test.js",
-    "check": "node scripts/build-client.mjs --check && node scripts/run-tests.mjs"
+    "check": "node scripts/build-client.mjs --check && node scripts/run-tests.mjs",
+    "prepublishOnly": "npm run check"
   },
   "engines": {
     "node": ">=24.11.0"
