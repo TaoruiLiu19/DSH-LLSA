@@ -5,15 +5,17 @@
  *
  *     native tool id -> (contracts/tool-aliases-v{version}.json) alias -> (this table) material
  *
- * The alias table is the orchestrator's published, immutable vocabulary; v1 maps
- * every native id to itself, and the plugin only asks "is this tool in the table
- * this snapshot names?". Two properties matter and are easy to lose:
+ * Three properties matter and are easy to lose:
  *
  * 1. An unknown tool, or a snapshot whose `aliasVersion` this build does not
  *    ship, becomes 「其它」. It never hides the node: state and colour keep
  *    working, only the label degrades.
- * 2. Aliases are the contract; materials are OURS. The alias table carries no
- *    taxonomy, so a new tool needs no contract change to become readable.
+ * 2. Aliases are the contract; materials are OURS.
+ * 3. Three alias groups draw nothing at all: orchestration (it lights an agent
+ *    seat instead), the human question, and the plan group (todo/goal/schedule —
+ *    bookkeeping is not a material, §2.2 of the v0.4 spec).
+ *
+ * 规格：`HUD-设计规格-v0.4-待实现.md`
  */
 
 /** The alias-table version this build understands (contracts/tool-aliases-v1.json). */
@@ -109,21 +111,22 @@ export const ALIASES = Object.freeze({
 });
 
 /**
- * Which alias belongs to which material. `null` means "drives an agent seat, not
- * a material": delegation is the inner ring, and a question stops the field.
+ * Which alias belongs to which material. `null`-producing groups live below.
+ *
+ * `code` is the language seat: `run_code` always lands there, and the producer
+ * re-routes `read`/`write`/`edit` of a source file to it through
+ * `meta.materials` (spec §2.3).
  */
 const ALIAS_GROUPS = Object.freeze({
-  python: ['run_code'],
+  code: ['run_code'],
   sheet: [],
-  data: [
+  search: [
     'glob', 'grep', 'session_search', 'session_trace', 'session_event_read',
     'session_event_search', 'session_event_trace', 'cordis_inspect_list',
-    'cordis_inspect_query', 'todo_write', 'create_goal', 'update_goal', 'get_goal',
-    'schedule_create', 'schedule_edit', 'schedule_list', 'schedule_view',
+    'cordis_inspect_query',
   ],
   doc: ['read', 'read_image', 'write', 'edit', 'apply_patch', 'str_replace_editor', 'present'],
   web: ['web_fetch', 'web_search'],
-  mail: [],
   shell: [
     'bash', 'pwsh', 'ralph', 'working_directory', 'load_workspace_dependencies',
     'terminal_open', 'terminal_read', 'terminal_send', 'terminal_close', 'terminal_list', 'terminal_signal',
@@ -151,14 +154,25 @@ const AGENT_ALIASES = Object.freeze([
 /** Asking the human draws no node at all: it stops the field. */
 const ASK_ALIASES = Object.freeze(['ask_user_question']);
 
-/** The eight default materials (§4.7), in first-ring order. */
+/**
+ * Bookkeeping is not a material (§2.2 of the v0.4 spec).
+ *
+ * A todo list, a goal and a schedule entry are things the agent writes down, not
+ * things it works on. They light nothing on the ring; the centre says 「计划中」
+ * for the duration instead, so the field is still truthful.
+ */
+const PLAN_ALIASES = Object.freeze([
+  'todo_write', 'create_goal', 'update_goal', 'get_goal',
+  'schedule_create', 'schedule_edit', 'schedule_list', 'schedule_view',
+]);
+
+/** The six materials that exist (§2.1). `sheet` is kept for a future tool path. */
 export const MATERIALS = Object.freeze({
-  python: { zh: 'Python', en: 'Python' },
+  code: { zh: '代码', en: 'Code' },
   sheet: { zh: '表格', en: 'Sheets' },
-  data: { zh: '数据', en: 'Data' },
+  search: { zh: '检索', en: 'Search' },
   doc: { zh: '文档', en: 'Documents' },
   web: { zh: '网页', en: 'Web' },
-  mail: { zh: '邮件', en: 'Mail' },
   shell: { zh: '终端', en: 'Shell' },
   other: { zh: '其它', en: 'Other' },
 });
@@ -166,22 +180,54 @@ export const MATERIALS = Object.freeze({
 /** Unknown bucket id: the only destination for anything unmapped. */
 export const OTHER_MATERIAL = 'other';
 
-/** Ring order, so seats never jump between renders. */
+/** Vocabulary order (labels exist for these), not the ring order — see SEAT_ORDER. */
 export const MATERIAL_ORDER = Object.freeze(Object.keys(MATERIALS));
 
-/** alias -> material id, or `null` for the agent/ask seats. */
+/**
+ * Ring order: one entry per 45° slot, starting at 12 o'clock (§1.1).
+ *
+ * `null` is an empty slot. The ring is deliberately not full: three and nine
+ * o'clock stay open, which keeps the composition symmetric and leaves room for a
+ * future material without moving any existing seat.
+ */
+export const SEAT_ORDER = Object.freeze([
+  'shell',   // 12:00
+  'code',    //  1:30
+  null,      //  3:00
+  'search',  //  4:30
+  'other',   //  6:00
+  'web',     //  7:30
+  null,      //  9:00
+  'doc',     // 10:30
+]);
+
+/** How many slots the ladder has; the step is 360/8 degrees. */
+export const SEAT_COUNT = SEAT_ORDER.length;
+
+/**
+ * Pre-set links (§3). Structure only — the arc is drawn from a live event window,
+ * never because two nodes happen to be visible.
+ */
+export const LINKS = Object.freeze([
+  Object.freeze({ a: 'shell', b: 'code', zh: '执行', en: 'runs' }),
+]);
+
+/** alias -> material id, or `null` for the agent / ask / plan seats. */
 export const MATERIAL_BY_ALIAS = (() => {
   const table = {};
   for (const [material, aliases] of Object.entries(ALIAS_GROUPS)) {
-    for (const alias of aliases) table[alias] = material === 'other' ? OTHER_MATERIAL : material;
+    for (const alias of aliases) table[alias] = material;
   }
   for (const alias of AGENT_ALIASES) table[alias] = null;
   for (const alias of ASK_ALIASES) table[alias] = null;
+  for (const alias of PLAN_ALIASES) table[alias] = null;
   return Object.freeze(table);
 })();
 
 /**
  * State -> colour. This is the single mapping of §4.1; nothing else invents one.
+ * `done` keeps its green here for the *run-level* conclusion; material nodes stop
+ * using it (§6.2: a finished material goes quiet, it does not turn green).
  */
 export const STATE_COLORS = Object.freeze({
   running: '#4c9aff',
@@ -191,29 +237,74 @@ export const STATE_COLORS = Object.freeze({
   idle: '#96aac3',
 });
 
-/** Small text that must accompany every colour (§4.1: colour is never the only signal). */
-export const STATE_LABELS = Object.freeze({
+/**
+ * Words for the RUN (§5.3). The centre and the capsule speak this vocabulary;
+ * individual materials use `materialDoneLabel` instead, so 「完成」 can only ever
+ * mean "this material is done" and 「成功」 only "the run succeeded".
+ */
+export const RUN_LABELS = Object.freeze({
   running: { zh: '执行中', en: 'Working' },
   'waiting-human': { zh: '等你确认', en: 'Needs you' },
-  done: { zh: '完成', en: 'Done' },
-  failed: { zh: '未完成', en: 'Failed' },
+  done: { zh: '成功', en: 'Success' },
+  failed: { zh: '失败', en: 'Failed' },
   idle: { zh: '待命', en: 'Idle' },
 });
 
-/** Per-intent verbs. */
+/** The one settled word a material node can show (§4.2). */
+export const MATERIAL_DONE = Object.freeze({ zh: '完成', en: 'Done' });
+
+/**
+ * What the code seat calls itself while a declared execution is running (§2.4).
+ *
+ * A closed vocabulary, never a filename: `cleanLabel` would silently delete a
+ * path, and an empty label is worse than a generic one.
+ */
+export const CODE_LANGUAGES = Object.freeze({
+  python: { zh: 'Python', en: 'Python' },
+  node: { zh: 'Node', en: 'Node' },
+  deno: { zh: 'Deno', en: 'Deno' },
+  bun: { zh: 'Bun', en: 'Bun' },
+});
+
+/** The label of the code seat: the language when declared, else 「代码」. */
+export function codeLanguageLabel(language, locale) {
+  const entry = CODE_LANGUAGES[language];
+  return entry === undefined ? materialLabel('code', locale) : entry[languageOf(locale)];
+}
+
+/**
+ * Per-intent verbs. `read`/`write`/`execute`/`scan`/`fetch`/`handoff` are the
+ * six things a call can do; the material then decides the exact word.
+ */
 const VERBS = Object.freeze({
   read: { zh: '读取中', en: 'Reading' },
   write: { zh: '整理中', en: 'Writing' },
   execute: { zh: '执行中', en: 'Running' },
-  verify: { zh: '校验中', en: 'Checking' },
+  scan: { zh: '扫描中', en: 'Scanning' },
+  fetch: { zh: '获取中', en: 'Fetching' },
   handoff: { zh: '回传中', en: 'Handing back' },
 });
 
+/**
+ * A material may own the word for an intent (§4.2): the code seat writes code
+ * (编写中) while the document seat still writes files (整理中).
+ */
+const MATERIAL_VERBS = Object.freeze({
+  code: Object.freeze({
+    write: { zh: '编写中', en: 'Writing' },
+    read: { zh: '阅读中', en: 'Reading' },
+  }),
+});
+
+/** 「其它」 is the bin: it never claims to know what happened. */
+const OTHER_VERB = Object.freeze({ zh: '处理中', en: 'Working' });
+
 const VERB_GROUPS = Object.freeze({
-  read: ['read', 'read_image', 'schedule_view', 'session_event_read', 'get_goal', 'collab_read_evidence', 'orchestrator_read'],
+  read: ['read', 'read_image', 'session_event_read', 'get_goal', 'collab_read_evidence', 'orchestrator_read', 'schedule_view'],
   write: ['write', 'edit', 'apply_patch', 'str_replace_editor', 'present', 'todo_write', 'create_goal', 'update_goal', 'schedule_create', 'schedule_edit', 'send_message', 'collab_send', 'collab_publish', 'orchestrator_reply'],
-  execute: ['bash', 'pwsh', 'ralph', 'run_code', 'working_directory', 'load_workspace_dependencies', 'terminal_open', 'terminal_read', 'terminal_send', 'terminal_close', 'terminal_list', 'terminal_signal', 'job_list', 'job_output', 'job_kill'],
-  verify: ['glob', 'grep', 'session_search', 'session_trace', 'session_event_search', 'session_event_trace', 'cordis_inspect_list', 'cordis_inspect_query', 'web_fetch', 'web_search', 'schedule_list', 'skill'],
+  execute: ['bash', 'pwsh', 'ralph', 'run_code', 'working_directory', 'load_workspace_dependencies', 'terminal_open', 'terminal_read', 'terminal_send', 'terminal_close', 'terminal_list', 'terminal_signal', 'job_list', 'job_output', 'job_kill', 'skill'],
+  scan: ['glob', 'grep', 'session_search', 'session_trace', 'session_event_search', 'session_event_trace', 'cordis_inspect_list', 'cordis_inspect_query'],
+  fetch: ['web_fetch', 'web_search'],
   handoff: ['ask_user_question', 'subagent', 'workflow', 'list_agents', 'interrupt_agent'],
 });
 
@@ -229,16 +320,21 @@ function languageOf(locale) {
   return typeof locale === 'string' && /^en\b/i.test(locale) ? 'en' : 'zh';
 }
 
-/** The eight materials with their localised labels, in ring order. */
+/** The seven materials with their localised labels. */
 export function materialLabel(materialId, locale) {
   const entry = MATERIALS[materialId] ?? MATERIALS[OTHER_MATERIAL];
   return entry[languageOf(locale)];
 }
 
-/** Human text for a state (§4.1 文案列). */
+/** Human text for a RUN state (§5.3). */
 export function stateLabel(state, locale) {
-  const entry = STATE_LABELS[state] ?? STATE_LABELS.idle;
+  const entry = RUN_LABELS[state] ?? RUN_LABELS.idle;
   return entry[languageOf(locale)];
+}
+
+/** Human text for a material that finished (§4.2). */
+export function materialDoneLabel(locale) {
+  return MATERIAL_DONE[languageOf(locale)];
 }
 
 /** Colour for a state; `idle` never draws a node, but the palette stays total. */
@@ -246,10 +342,24 @@ export function colorOf(state) {
   return STATE_COLORS[state] ?? STATE_COLORS.idle;
 }
 
-/** Localised verb for a material currently being used. */
-export function verbFor(alias, locale) {
-  const verb = VERBS[VERB_BY_ALIAS[alias] ?? 'read'] ?? VERBS.read;
-  return verb[languageOf(locale)];
+/**
+ * Localised verb for one material being touched by one call.
+ *
+ * Two axes, because one is not enough: `glob`, `web_fetch` and `skill` used to
+ * share the `verify` intent and all read 「校验中」. The material disambiguates.
+ */
+export function verbFor(material, alias, locale) {
+  const language = languageOf(locale);
+  if (material === OTHER_MATERIAL) return OTHER_VERB[language];
+  const intent = VERB_BY_ALIAS[alias] ?? 'read';
+  const override = MATERIAL_VERBS[material] === undefined ? undefined : MATERIAL_VERBS[material][intent];
+  if (override !== undefined) return override[language];
+  return (VERBS[intent] ?? VERBS.read)[language];
+}
+
+/** The slot index of a material on the ring, or −1 when it has no seat. */
+export function seatIndexOf(materialId) {
+  return SEAT_ORDER.indexOf(materialId);
 }
 
 /** The alias table this build ships; `data/tool-aliases-v1.json` is generated from it. */
@@ -264,7 +374,7 @@ export function aliasTable() {
  * @param options.aliasVersion - the snapshot's carried table version. A mismatch
  *   degrades every node to 「其它」 while leaving states untouched (§2.2).
  * @returns `{tool, alias, material, known, aliasOk}`; `material` is `null` for
- *   agent/ask aliases, and `known` reports table membership (tests only).
+ *   the agent/ask/plan aliases, and `known` reports table membership (tests only).
  */
 export function materialForTool(toolId, options = {}) {
   const aliasVersion = options.aliasVersion ?? ALIAS_VERSION;
@@ -285,11 +395,6 @@ export function intentOfAlias(alias) {
   return VERB_BY_ALIAS[alias] ?? 'read';
 }
 
-/** The verb intent itself, e.g. `handoff` for a delegation. */
-export function verbIntentOf(alias) {
-  return VERB_BY_ALIAS[alias] ?? 'read';
-}
-
 /** True when the alias belongs to the orchestration group (lights an agent seat). */
 export function isAgentAlias(alias) {
   return alias !== null && AGENT_ALIASES.includes(alias);
@@ -298,4 +403,14 @@ export function isAgentAlias(alias) {
 /** True when the alias is the human question (stops the field). */
 export function isAskAlias(alias) {
   return alias !== null && ASK_ALIASES.includes(alias);
+}
+
+/** True when the alias is bookkeeping: no node, the centre says 「计划中」. */
+export function isPlanAlias(alias) {
+  return alias !== null && PLAN_ALIASES.includes(alias);
+}
+
+/** True when the alias drives the terminal seat (used for the exec latch). */
+export function isShellAlias(alias) {
+  return alias !== null && ALIAS_GROUPS.shell.includes(alias);
 }

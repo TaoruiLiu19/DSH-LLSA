@@ -43,6 +43,31 @@ function userMessage(text) {
   return { type: 'user/message', seq: 1, time: Date.parse('2026-11-12T03:20:00Z'), data: { role: 'user', content: [{ type: 'text', text }] } };
 }
 
+test('file argument hints retain start and end sequence numbers without exposing paths', () => {
+  const collector = createCollector();
+  collector.observeEvent('s', {type: 'tool/call', time: Date.now(), data: {
+    name: 'read', callId: 'file', arguments: JSON.stringify({path: '/private/project/main.ts'})
+  }});
+  collector.observeEvent('s', {type: 'tool/result', time: Date.now(), data: {message: {toolCallId: 'file'}}});
+  const snapshot = collector.snapshotFor('s');
+  const tools = snapshot.events.filter(event => event.kind.startsWith('tool.'));
+  assert.equal(tools.length, 2);
+  for (const event of tools) assert.equal(collector.materialsOf('s')[event.seq], 'code');
+  assert.doesNotMatch(JSON.stringify({snapshot, materials: collector.materialsOf('s')}), /private|main.ts/);
+});
+
+test('an interrupted execution cannot remain declared in the next turn', () => {
+  const collector = createCollector();
+  const at = Date.now();
+  collector.observeEvent('s', {type: 'turn/start', time: at, data: {turn: 1}});
+  collector.observeEvent('s', {type: 'tool/call', time: at, data: {name: 'bash', callId: 'shell', arguments: JSON.stringify({command: 'python task.py'})}});
+  assert.equal(collector.execOf('s'), 'python');
+  collector.observeEvent('s', {type: 'turn/end', time: at, data: {turn: 1, reason: {kind: 'aborted'}}});
+  assert.equal(collector.execOf('s'), null);
+  collector.observeEvent('s', {type: 'turn/start', time: at + 1, data: {turn: 2}});
+  assert.equal(collector.execOf('s'), null);
+});
+
 test('a plain turn becomes a schema-valid snapshot', () => {
   const collector = createCollector();
   collector.observeEvent('s1', userMessage('核对报价单'));
@@ -333,12 +358,20 @@ test('§5.5: the client never turns time into a state', () => {
   }
 });
 
-test('§5.6: no tool output is parsed to learn a pending state', () => {
+test('§5.6: tool output is never parsed; only the call input yields two enums', () => {
+  // The wall stands where it matters: no result body is ever read.
   for (const [name, text] of Object.entries(sources)) {
-    assert.ok(!/JSON\.parse/.test(text), `${name} parses JSON`);
     assert.ok(!/toolResult\.(content|output|text)/.test(text), `${name} reads tool output`);
   }
-  // The only body read is the user's own message text, for the centre line.
+  // §7 allows exactly one exception: `argumentsOf` reads the *call's* input to
+  // derive two closed enums (a language and a material). It never forwards the
+  // text, and it is the only JSON.parse in the package.
+  for (const [name, text] of Object.entries(sources)) {
+    const parses = (text.match(/JSON\.parse/g) ?? []).length;
+    assert.equal(parses, name === 'source.js' ? 1 : 0, `${name}: JSON.parse appears ${parses} time(s)`);
+  }
+  assert.match(sources['source.js'], /function argumentsOf\(data\)/);
+  // The only body read is still the user's own message text.
   const callSites = sources['source.js'].split('\n').filter(line => /textOfMessage\(data\)/.test(line));
   assert.equal(callSites.length, 1, 'textOfMessage runs on the user message only');
   assert.match(sources['source.js'], /case 'user\/message'/);

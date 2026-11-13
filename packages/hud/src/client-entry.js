@@ -23,13 +23,11 @@ const STRINGS = Object.freeze({
   zh: {
     hint: '点击空白处或按 Esc 返回；右下角胶囊可以再进来',
     open: '点击返回',
-    capsule: '返回',
     offline: 'HUD 未连接',
   },
   en: {
     hint: 'Click the empty area or press Esc to leave; the capsule at the bottom right brings it back',
     open: 'Click to return',
-    capsule: 'Back',
     offline: 'HUD offline',
   },
 });
@@ -283,7 +281,7 @@ export function applyClient(ctx, React) {
           view,
           stage,
           onOpen: () => store.open(),
-          labels: { open: strings.open, capsule: strings.capsule },
+          labels: { open: strings.open },
         }));
       }
       // A session is known but the snapshot route never answered: say so instead

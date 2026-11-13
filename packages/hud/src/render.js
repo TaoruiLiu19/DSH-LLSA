@@ -6,8 +6,8 @@
  * itself is artwork: literal colours from §4.1 are allowed here, and nothing
  * here reads the host's DOM or another plugin's styles.
  */
-import { colorOf, materialLabel, stateLabel } from './materials.js';
-import { centerText, stepLifecycle } from './model.js';
+import { colorOf, materialDoneLabel, materialLabel, seatIndexOf, stateLabel } from './materials.js';
+import { TIMING, centerText, stepLifecycle } from './model.js';
 
 /** Distance from the stage edge the capsule keeps (§4.4). */
 export const CAPSULE_INSET = Object.freeze({ right: 18, bottom: 16 });
@@ -99,6 +99,22 @@ export function seatAngles(count) {
   return Array.from({ length: total }, (_, index) => -Math.PI / 2 + index * step);
 }
 
+/** The eight-slot ladder of §1.1: one angle per slot, 45° apart from 12 o'clock. */
+export const SEAT_STEP = Math.PI / 4;
+export const SEAT_START = -Math.PI / 2;
+
+/**
+ * The fixed angle of one material's seat, or `null` when it has no slot.
+ *
+ * §1.1: a material the table does not know still needs a home, and inventing a
+ * new angle would move every other node. It falls back to the 其它 slot.
+ */
+export function seatAngleFor(materialId) {
+  const index = seatIndexOf(materialId);
+  if (index < 0) return null;
+  return SEAT_START + index * SEAT_STEP;
+}
+
 /** A point on a ring. */
 export function seatPoint(geometry, angle, radius) {
   return { x: geometry.cx + Math.cos(angle) * radius, y: geometry.cy + Math.sin(angle) * radius };
@@ -155,10 +171,25 @@ export function drawField(context, view, geometry, now, options = {}) {
   const agents = view.agents.size > 1
     ? [...view.agents.values()].filter(node => node.role !== 'root' && node.alpha > 0.01)
     : [];
+  // §1.1: seats are fixed by material, never by how many nodes are visible.
+  // An unseated material borrows the 其它 slot instead of inventing an angle.
   const materialAngles = new Map();
-  const materialSeats = seatAngles(materials.length);
-  materials.forEach((node, index) => materialAngles.set(node.id, materialSeats[index]));
+  const otherAngle = seatAngleFor('other');
+  for (const node of materials) {
+    const angle = seatAngleFor(node.id);
+    materialAngles.set(node.id, angle === null ? otherAngle : angle);
+  }
   const agentSeats = seatAngles(agents.length).map((angle, index) => [agents[index].id, angle]);
+
+  // §5 halo: a whisper of presence behind the centre, so 「思考中」/「计划中」 is
+  // not a word floating in a void. Peak alpha ≈0.06 — read as a vignette, never
+  // as a shape; it is drawn first, so every node sits on top of it.
+  const heart = Number.isFinite(view.heart) ? view.heart : 0;
+  if (heart > 0.01) {
+    const heat = materials.reduce((most, node) => Math.max(most, node.heat), 0);
+    const halo = Math.min(0.07, (0.04 * heart + 0.02 * heat) * (0.75 + 0.25 * breathing(now, 1.1, 0)));
+    glow(context, cx, cy, 0.28 * size, colorOf('running'), halo);
+  }
 
   // Material <-> agent tether: only for pairs that were active together.
   if (agents.length > 0) {
@@ -180,10 +211,37 @@ export function drawField(context, view, geometry, now, options = {}) {
     }
   }
 
+  // §3: arcs are drawn before the nodes, so each node's stroke hides the seam.
+  // They live in an event window (`linkTtlMs`), never in the nodes' visibility.
+  for (const link of view.links) {
+    const age = now - link.at;
+    if (age < 0 || age >= TIMING.linkTtlMs) continue;
+    const from = materialAngles.get(link.a);
+    const to = materialAngles.get(link.b);
+    if (from === undefined || to === undefined) continue;
+    let lo = Math.min(from, to);
+    let hi = Math.max(from, to);
+    if (hi - lo > Math.PI) {
+      // the pair straddles 12 o'clock: take the short way round
+      lo += Math.PI * 2;
+      [lo, hi] = [hi, lo];
+    }
+    const trim = Math.asin(Math.min(1, (22 * k) / Math.max(1, geometry.material)));
+    const rise = age < TIMING.linkRiseMs ? age / TIMING.linkRiseMs : 1;
+    const fall = age < 620 ? 1 : Math.max(0, 1 - (age - 620) / Math.max(1, TIMING.linkTtlMs - 620));
+    const alpha = 0.16 * Math.min(rise, fall);
+    if (alpha <= 0.004) continue;
+    context.beginPath();
+    context.arc(cx, cy, geometry.material, lo + trim, hi - trim);
+    context.strokeStyle = rgba(colorOf('running'), alpha);
+    context.lineWidth = Math.max(1, k);
+    context.stroke();
+  }
+
   // Pulses: a dot travels from the centre (or an agent seat) to its material.
   for (const pulse of view.pulses) {
     const age = now - pulse.at;
-    const life = 720;
+    const life = TIMING.pulseFlightMs;
     if (age < 0 || age > life) continue;
     const progress = age / life;
     const eased = 1 - Math.pow(1 - progress, 2.2);
@@ -260,20 +318,34 @@ export function drawField(context, view, geometry, now, options = {}) {
     context.restore();
   }
 
-  // Materials: outer ring.
-  materials.forEach((node, index) => {
-    const angle = materialSeats[index];
+  // Materials: outer ring, one fixed seat each.
+  for (const node of materials) {
+    const angle = materialAngles.get(node.id);
+    if (angle === undefined) continue;
     const point = seatPoint(geometry, angle, geometry.material);
-    const tone = colorOf(node.state);
     const pinned = node.state === 'waiting-human' || node.state === 'failed';
-    const speed = pinned ? 1 : 1.6;
-    // §4.1: a waiting node never breathes — it is pinned, so colour blindness is
-    // not the only cue that the field is blocked on the human.
-    const breath = pinned ? 0 : breathing(now, speed, node.phase);
-    const strength = Math.min(1, (node.state === 'idle' ? 0.12 : 0.3 + breath * 0.28) + node.heat * 0.5);
+    // 产品回调（2026-11-13）：完成态重新变绿——那一刻的绿色反馈是有价值的。
+    // 它仍然停止呼吸，所以"在跑"和"做完了"除了颜色还有动效可以区分。
+    const settled = node.state === 'done';
+    const tone = colorOf(node.state);
+    const breath = node.state === 'running' && !pinned ? breathing(now, 1.6, node.phase) : 0;
+    const base = node.state === 'idle' ? 0.12 : 0.3 + breath * 0.28;
+    const strength = Math.min(1, base + node.heat * 0.5);
     const radius = 22 * k;
     context.save();
     context.globalAlpha = node.alpha;
+
+    // §6.2: one settle ripple on `running -> done`, alongside the colour change.
+    const rippleAge = now - node.doneAt;
+    if (settled && node.doneAt > 0 && rippleAge >= 0 && rippleAge < TIMING.rippleMs) {
+      const t = rippleAge / TIMING.rippleMs;
+      context.beginPath();
+      context.arc(point.x, point.y, radius * (1 + 0.5 * t), 0, Math.PI * 2);
+      context.strokeStyle = rgba(tone, 0.5 * (1 - t));
+      context.lineWidth = k;
+      context.stroke();
+    }
+
     glow(context, point.x, point.y, (radius + 20 * k) * 1.5, tone, 0.18 * strength);
     context.beginPath();
     context.arc(point.x, point.y, radius, 0, Math.PI * 2);
@@ -296,17 +368,19 @@ export function drawField(context, view, geometry, now, options = {}) {
       point,
       offset: 42 * k,
       label: node.label || materialLabel(node.id, view.locale),
-      // The verb belongs to the activity; once the call ends the node says how it
-      // ended (完成 / 未完成 / 等你确认) instead of freezing on 「读取中」.
+      // §4: the second line is a state word — the verb while it runs, the one
+      // settled word afterwards (materials never fail; see the spec's §4.1 note).
       sub: node.state === 'idle'
         ? ''
-        : (node.state === 'running' ? (node.verb || stateLabel('running', view.locale)) : stateLabel(node.state, view.locale)),
+        : (node.state === 'running'
+          ? (node.verb || stateLabel('running', view.locale))
+          : materialDoneLabel(view.locale)),
       tone,
       k,
       labelSize: 14,
     });
     context.restore();
-  });
+  }
 
   // Centre: the conclusion, always on (§4.3).
   const center = centerText(view);
@@ -324,15 +398,15 @@ export function drawField(context, view, geometry, now, options = {}) {
       } catch {
         // older engines ignore letterSpacing; the word still reads
       }
-      context.font = `600 ${26 * k}px -apple-system,"Segoe UI",Arial,sans-serif`;
+      context.font = `600 ${30 * k}px -apple-system,"Segoe UI",Arial,sans-serif`;
       context.fillStyle = rgba(tone, 0.96);
-      context.fillText(center.main, cx, cy - 6 * k);
+      context.fillText(center.main, cx, cy - 8 * k);
       try {
         context.letterSpacing = '0px';
       } catch {
         // same
       }
-      context.font = `400 ${11 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
+      context.font = `400 ${12 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
       context.fillStyle = view.state === 'failed' ? 'rgba(255,140,150,.85)' : 'rgba(150,210,185,.8)';
       context.fillText(center.sub, cx, cy + 20 * k);
       context.beginPath();
@@ -341,13 +415,15 @@ export function drawField(context, view, geometry, now, options = {}) {
       context.lineWidth = k;
       context.stroke();
     } else {
-      context.font = `600 ${16 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
-      context.fillStyle = 'rgba(232,242,255,.95)';
-      context.fillText(center.main, cx, cy - 6 * k);
+      // §5: one state word, one size, always the same baseline. The centre is a
+      // reading, not a sentence — so it can change word without changing shape.
+      context.font = `600 ${26 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
+      context.fillStyle = view.state === 'waiting-human' ? rgba(colorOf('waiting-human'), 0.96) : 'rgba(232,242,255,.95)';
+      context.fillText(center.main, cx, cy - 8 * k);
       if (center.sub !== '') {
-        context.font = `400 ${11 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
+        context.font = `400 ${12 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
         context.fillStyle = 'rgba(150,175,205,.78)';
-        context.fillText(center.sub, cx, cy + 14 * k);
+        context.fillText(center.sub, cx, cy + 20 * k);
       }
     }
     context.restore();

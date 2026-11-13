@@ -300,7 +300,9 @@ export function createCapsule(React) {
         className: 'dsh-hud-dot',
         style: { background: colorOf(state.state), boxShadow: `0 0 8px ${colorOf(state.state)}` },
       }),
-      React.createElement('span', null, labels.capsule),
+      // §5.3: the capsule speaks the run's vocabulary, so leaving the field is
+      // lossless — the conclusion stays readable at the bottom-right corner.
+      React.createElement('span', null, state.label),
     );
   };
 }

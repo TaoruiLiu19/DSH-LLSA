@@ -82,14 +82,13 @@ test('every state draws without throwing', () => {
       view.failedMaterial = 'doc';
     }),
     stalled: () => viewOf(view => { for (const node of view.agents.values()) node.stalled = true; }),
-    'eight materials': () => viewOf(view => {
-      const ids = ['python', 'sheet', 'data', 'doc', 'web', 'mail', 'shell', 'other'];
-      const { ensureMaterialForTest } = { ensureMaterialForTest: null };
-      void ensureMaterialForTest;
+    'all materials': () => viewOf(view => {
+      const ids = ['code', 'sheet', 'search', 'doc', 'web', 'shell', 'other'];
       for (const [index, id] of ids.entries()) {
         view.materials.set(id, {
           id, label: id, alias: 'read', state: index % 2 === 0 ? 'running' : 'done', verb: '读取中',
-          lastAt: index * 100, hits: 1, alpha: 1, heat: 0.5, lastPulseAt: -Infinity, phase: index,
+          lastAt: index * 100, doneAt: 0, executing: false, hits: 1, alpha: 1, heat: 0.5,
+          lastPulseAt: -Infinity, phase: index,
         });
       }
     }),
@@ -160,6 +159,26 @@ test('the canvas component runs one animation frame end to end', () => {
     globalThis.requestAnimationFrame = originalRaf;
     globalThis.cancelAnimationFrame = originalCancel;
   }
+});
+
+test('the centre keeps a halo only while the run is alive', () => {
+  const geometry = ringGeometry(560);
+  const alive = viewOf();
+  alive.heart = 1;
+  const context = recorder();
+  drawField(context, alive, geometry, 1000, { centerAlpha: 1 });
+  const haloRadius = 0.28 * geometry.size;
+  const halos = context.calls.filter(call => call.name === 'createRadialGradient' && Math.abs(call.args[5] - haloRadius) < 0.5);
+  assert.equal(halos.length, 1, '§5: one whisper behind the centre');
+  assert.equal(halos[0].args[0], geometry.cx, 'centred horizontally');
+  assert.equal(halos[0].args[1], geometry.cy, 'centred vertically');
+
+  const settled = viewOf();
+  settled.heart = 0;
+  const quiet = recorder();
+  drawField(quiet, settled, geometry, 1000, { centerAlpha: 1 });
+  const none = quiet.calls.filter(call => call.name === 'createRadialGradient' && Math.abs(call.args[5] - haloRadius) < 0.5);
+  assert.equal(none.length, 0, 'a conclusion hands the middle to the 52k ring');
 });
 
 test('a scrolled chat flow cannot push the field off screen', () => {

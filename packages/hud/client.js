@@ -12,15 +12,17 @@ window.__ModuleLoader__.load({
  *
  *     native tool id -> (contracts/tool-aliases-v{version}.json) alias -> (this table) material
  *
- * The alias table is the orchestrator's published, immutable vocabulary; v1 maps
- * every native id to itself, and the plugin only asks "is this tool in the table
- * this snapshot names?". Two properties matter and are easy to lose:
+ * Three properties matter and are easy to lose:
  *
  * 1. An unknown tool, or a snapshot whose `aliasVersion` this build does not
  *    ship, becomes 「其它」. It never hides the node: state and colour keep
  *    working, only the label degrades.
- * 2. Aliases are the contract; materials are OURS. The alias table carries no
- *    taxonomy, so a new tool needs no contract change to become readable.
+ * 2. Aliases are the contract; materials are OURS.
+ * 3. Three alias groups draw nothing at all: orchestration (it lights an agent
+ *    seat instead), the human question, and the plan group (todo/goal/schedule —
+ *    bookkeeping is not a material, §2.2 of the v0.4 spec).
+ *
+ * 规格：`HUD-设计规格-v0.4-待实现.md`
  */
 
 /** The alias-table version this build understands (contracts/tool-aliases-v1.json). */
@@ -116,21 +118,22 @@ const ALIASES = Object.freeze({
 });
 
 /**
- * Which alias belongs to which material. `null` means "drives an agent seat, not
- * a material": delegation is the inner ring, and a question stops the field.
+ * Which alias belongs to which material. `null`-producing groups live below.
+ *
+ * `code` is the language seat: `run_code` always lands there, and the producer
+ * re-routes `read`/`write`/`edit` of a source file to it through
+ * `meta.materials` (spec §2.3).
  */
 const ALIAS_GROUPS = Object.freeze({
-  python: ['run_code'],
+  code: ['run_code'],
   sheet: [],
-  data: [
+  search: [
     'glob', 'grep', 'session_search', 'session_trace', 'session_event_read',
     'session_event_search', 'session_event_trace', 'cordis_inspect_list',
-    'cordis_inspect_query', 'todo_write', 'create_goal', 'update_goal', 'get_goal',
-    'schedule_create', 'schedule_edit', 'schedule_list', 'schedule_view',
+    'cordis_inspect_query',
   ],
   doc: ['read', 'read_image', 'write', 'edit', 'apply_patch', 'str_replace_editor', 'present'],
   web: ['web_fetch', 'web_search'],
-  mail: [],
   shell: [
     'bash', 'pwsh', 'ralph', 'working_directory', 'load_workspace_dependencies',
     'terminal_open', 'terminal_read', 'terminal_send', 'terminal_close', 'terminal_list', 'terminal_signal',
@@ -158,14 +161,25 @@ const AGENT_ALIASES = Object.freeze([
 /** Asking the human draws no node at all: it stops the field. */
 const ASK_ALIASES = Object.freeze(['ask_user_question']);
 
-/** The eight default materials (§4.7), in first-ring order. */
+/**
+ * Bookkeeping is not a material (§2.2 of the v0.4 spec).
+ *
+ * A todo list, a goal and a schedule entry are things the agent writes down, not
+ * things it works on. They light nothing on the ring; the centre says 「计划中」
+ * for the duration instead, so the field is still truthful.
+ */
+const PLAN_ALIASES = Object.freeze([
+  'todo_write', 'create_goal', 'update_goal', 'get_goal',
+  'schedule_create', 'schedule_edit', 'schedule_list', 'schedule_view',
+]);
+
+/** The six materials that exist (§2.1). `sheet` is kept for a future tool path. */
 const MATERIALS = Object.freeze({
-  python: { zh: 'Python', en: 'Python' },
+  code: { zh: '代码', en: 'Code' },
   sheet: { zh: '表格', en: 'Sheets' },
-  data: { zh: '数据', en: 'Data' },
+  search: { zh: '检索', en: 'Search' },
   doc: { zh: '文档', en: 'Documents' },
   web: { zh: '网页', en: 'Web' },
-  mail: { zh: '邮件', en: 'Mail' },
   shell: { zh: '终端', en: 'Shell' },
   other: { zh: '其它', en: 'Other' },
 });
@@ -173,22 +187,54 @@ const MATERIALS = Object.freeze({
 /** Unknown bucket id: the only destination for anything unmapped. */
 const OTHER_MATERIAL = 'other';
 
-/** Ring order, so seats never jump between renders. */
+/** Vocabulary order (labels exist for these), not the ring order — see SEAT_ORDER. */
 const MATERIAL_ORDER = Object.freeze(Object.keys(MATERIALS));
 
-/** alias -> material id, or `null` for the agent/ask seats. */
+/**
+ * Ring order: one entry per 45° slot, starting at 12 o'clock (§1.1).
+ *
+ * `null` is an empty slot. The ring is deliberately not full: three and nine
+ * o'clock stay open, which keeps the composition symmetric and leaves room for a
+ * future material without moving any existing seat.
+ */
+const SEAT_ORDER = Object.freeze([
+  'shell',   // 12:00
+  'code',    //  1:30
+  null,      //  3:00
+  'search',  //  4:30
+  'other',   //  6:00
+  'web',     //  7:30
+  null,      //  9:00
+  'doc',     // 10:30
+]);
+
+/** How many slots the ladder has; the step is 360/8 degrees. */
+const SEAT_COUNT = SEAT_ORDER.length;
+
+/**
+ * Pre-set links (§3). Structure only — the arc is drawn from a live event window,
+ * never because two nodes happen to be visible.
+ */
+const LINKS = Object.freeze([
+  Object.freeze({ a: 'shell', b: 'code', zh: '执行', en: 'runs' }),
+]);
+
+/** alias -> material id, or `null` for the agent / ask / plan seats. */
 const MATERIAL_BY_ALIAS = (() => {
   const table = {};
   for (const [material, aliases] of Object.entries(ALIAS_GROUPS)) {
-    for (const alias of aliases) table[alias] = material === 'other' ? OTHER_MATERIAL : material;
+    for (const alias of aliases) table[alias] = material;
   }
   for (const alias of AGENT_ALIASES) table[alias] = null;
   for (const alias of ASK_ALIASES) table[alias] = null;
+  for (const alias of PLAN_ALIASES) table[alias] = null;
   return Object.freeze(table);
 })();
 
 /**
  * State -> colour. This is the single mapping of §4.1; nothing else invents one.
+ * `done` keeps its green here for the *run-level* conclusion; material nodes stop
+ * using it (§6.2: a finished material goes quiet, it does not turn green).
  */
 const STATE_COLORS = Object.freeze({
   running: '#4c9aff',
@@ -198,29 +244,74 @@ const STATE_COLORS = Object.freeze({
   idle: '#96aac3',
 });
 
-/** Small text that must accompany every colour (§4.1: colour is never the only signal). */
-const STATE_LABELS = Object.freeze({
+/**
+ * Words for the RUN (§5.3). The centre and the capsule speak this vocabulary;
+ * individual materials use `materialDoneLabel` instead, so 「完成」 can only ever
+ * mean "this material is done" and 「成功」 only "the run succeeded".
+ */
+const RUN_LABELS = Object.freeze({
   running: { zh: '执行中', en: 'Working' },
   'waiting-human': { zh: '等你确认', en: 'Needs you' },
-  done: { zh: '完成', en: 'Done' },
-  failed: { zh: '未完成', en: 'Failed' },
+  done: { zh: '成功', en: 'Success' },
+  failed: { zh: '失败', en: 'Failed' },
   idle: { zh: '待命', en: 'Idle' },
 });
 
-/** Per-intent verbs. */
+/** The one settled word a material node can show (§4.2). */
+const MATERIAL_DONE = Object.freeze({ zh: '完成', en: 'Done' });
+
+/**
+ * What the code seat calls itself while a declared execution is running (§2.4).
+ *
+ * A closed vocabulary, never a filename: `cleanLabel` would silently delete a
+ * path, and an empty label is worse than a generic one.
+ */
+const CODE_LANGUAGES = Object.freeze({
+  python: { zh: 'Python', en: 'Python' },
+  node: { zh: 'Node', en: 'Node' },
+  deno: { zh: 'Deno', en: 'Deno' },
+  bun: { zh: 'Bun', en: 'Bun' },
+});
+
+/** The label of the code seat: the language when declared, else 「代码」. */
+function codeLanguageLabel(language, locale) {
+  const entry = CODE_LANGUAGES[language];
+  return entry === undefined ? materialLabel('code', locale) : entry[languageOf(locale)];
+}
+
+/**
+ * Per-intent verbs. `read`/`write`/`execute`/`scan`/`fetch`/`handoff` are the
+ * six things a call can do; the material then decides the exact word.
+ */
 const VERBS = Object.freeze({
   read: { zh: '读取中', en: 'Reading' },
   write: { zh: '整理中', en: 'Writing' },
   execute: { zh: '执行中', en: 'Running' },
-  verify: { zh: '校验中', en: 'Checking' },
+  scan: { zh: '扫描中', en: 'Scanning' },
+  fetch: { zh: '获取中', en: 'Fetching' },
   handoff: { zh: '回传中', en: 'Handing back' },
 });
 
+/**
+ * A material may own the word for an intent (§4.2): the code seat writes code
+ * (编写中) while the document seat still writes files (整理中).
+ */
+const MATERIAL_VERBS = Object.freeze({
+  code: Object.freeze({
+    write: { zh: '编写中', en: 'Writing' },
+    read: { zh: '阅读中', en: 'Reading' },
+  }),
+});
+
+/** 「其它」 is the bin: it never claims to know what happened. */
+const OTHER_VERB = Object.freeze({ zh: '处理中', en: 'Working' });
+
 const VERB_GROUPS = Object.freeze({
-  read: ['read', 'read_image', 'schedule_view', 'session_event_read', 'get_goal', 'collab_read_evidence', 'orchestrator_read'],
+  read: ['read', 'read_image', 'session_event_read', 'get_goal', 'collab_read_evidence', 'orchestrator_read', 'schedule_view'],
   write: ['write', 'edit', 'apply_patch', 'str_replace_editor', 'present', 'todo_write', 'create_goal', 'update_goal', 'schedule_create', 'schedule_edit', 'send_message', 'collab_send', 'collab_publish', 'orchestrator_reply'],
-  execute: ['bash', 'pwsh', 'ralph', 'run_code', 'working_directory', 'load_workspace_dependencies', 'terminal_open', 'terminal_read', 'terminal_send', 'terminal_close', 'terminal_list', 'terminal_signal', 'job_list', 'job_output', 'job_kill'],
-  verify: ['glob', 'grep', 'session_search', 'session_trace', 'session_event_search', 'session_event_trace', 'cordis_inspect_list', 'cordis_inspect_query', 'web_fetch', 'web_search', 'schedule_list', 'skill'],
+  execute: ['bash', 'pwsh', 'ralph', 'run_code', 'working_directory', 'load_workspace_dependencies', 'terminal_open', 'terminal_read', 'terminal_send', 'terminal_close', 'terminal_list', 'terminal_signal', 'job_list', 'job_output', 'job_kill', 'skill'],
+  scan: ['glob', 'grep', 'session_search', 'session_trace', 'session_event_search', 'session_event_trace', 'cordis_inspect_list', 'cordis_inspect_query'],
+  fetch: ['web_fetch', 'web_search'],
   handoff: ['ask_user_question', 'subagent', 'workflow', 'list_agents', 'interrupt_agent'],
 });
 
@@ -236,16 +327,21 @@ function languageOf(locale) {
   return typeof locale === 'string' && /^en\b/i.test(locale) ? 'en' : 'zh';
 }
 
-/** The eight materials with their localised labels, in ring order. */
+/** The seven materials with their localised labels. */
 function materialLabel(materialId, locale) {
   const entry = MATERIALS[materialId] ?? MATERIALS[OTHER_MATERIAL];
   return entry[languageOf(locale)];
 }
 
-/** Human text for a state (§4.1 文案列). */
+/** Human text for a RUN state (§5.3). */
 function stateLabel(state, locale) {
-  const entry = STATE_LABELS[state] ?? STATE_LABELS.idle;
+  const entry = RUN_LABELS[state] ?? RUN_LABELS.idle;
   return entry[languageOf(locale)];
+}
+
+/** Human text for a material that finished (§4.2). */
+function materialDoneLabel(locale) {
+  return MATERIAL_DONE[languageOf(locale)];
 }
 
 /** Colour for a state; `idle` never draws a node, but the palette stays total. */
@@ -253,10 +349,24 @@ function colorOf(state) {
   return STATE_COLORS[state] ?? STATE_COLORS.idle;
 }
 
-/** Localised verb for a material currently being used. */
-function verbFor(alias, locale) {
-  const verb = VERBS[VERB_BY_ALIAS[alias] ?? 'read'] ?? VERBS.read;
-  return verb[languageOf(locale)];
+/**
+ * Localised verb for one material being touched by one call.
+ *
+ * Two axes, because one is not enough: `glob`, `web_fetch` and `skill` used to
+ * share the `verify` intent and all read 「校验中」. The material disambiguates.
+ */
+function verbFor(material, alias, locale) {
+  const language = languageOf(locale);
+  if (material === OTHER_MATERIAL) return OTHER_VERB[language];
+  const intent = VERB_BY_ALIAS[alias] ?? 'read';
+  const override = MATERIAL_VERBS[material] === undefined ? undefined : MATERIAL_VERBS[material][intent];
+  if (override !== undefined) return override[language];
+  return (VERBS[intent] ?? VERBS.read)[language];
+}
+
+/** The slot index of a material on the ring, or −1 when it has no seat. */
+function seatIndexOf(materialId) {
+  return SEAT_ORDER.indexOf(materialId);
 }
 
 /** The alias table this build ships; `data/tool-aliases-v1.json` is generated from it. */
@@ -271,7 +381,7 @@ function aliasTable() {
  * @param options.aliasVersion - the snapshot's carried table version. A mismatch
  *   degrades every node to 「其它」 while leaving states untouched (§2.2).
  * @returns `{tool, alias, material, known, aliasOk}`; `material` is `null` for
- *   agent/ask aliases, and `known` reports table membership (tests only).
+ *   the agent/ask/plan aliases, and `known` reports table membership (tests only).
  */
 function materialForTool(toolId, options = {}) {
   const aliasVersion = options.aliasVersion ?? ALIAS_VERSION;
@@ -292,11 +402,6 @@ function intentOfAlias(alias) {
   return VERB_BY_ALIAS[alias] ?? 'read';
 }
 
-/** The verb intent itself, e.g. `handoff` for a delegation. */
-function verbIntentOf(alias) {
-  return VERB_BY_ALIAS[alias] ?? 'read';
-}
-
 /** True when the alias belongs to the orchestration group (lights an agent seat). */
 function isAgentAlias(alias) {
   return alias !== null && AGENT_ALIASES.includes(alias);
@@ -305,6 +410,16 @@ function isAgentAlias(alias) {
 /** True when the alias is the human question (stops the field). */
 function isAskAlias(alias) {
   return alias !== null && ASK_ALIASES.includes(alias);
+}
+
+/** True when the alias is bookkeeping: no node, the centre says 「计划中」. */
+function isPlanAlias(alias) {
+  return alias !== null && PLAN_ALIASES.includes(alias);
+}
+
+/** True when the alias drives the terminal seat (used for the exec latch). */
+function isShellAlias(alias) {
+  return alias !== null && ALIAS_GROUPS.shell.includes(alias);
 }
 
     // ---- src/model.js ----
@@ -346,10 +461,22 @@ const TIMING = Object.freeze({
   pulseGapMs: 300,
   /** pulse: how long a travelling dot lives. */
   pulseTtlMs: 1600,
+  /** pulse: how far a dot actually travels before it is done (§3: 720ms of flight). */
+  pulseFlightMs: 720,
+  /** link: one declared co-activation keeps its arc for this long (§3.3). */
+  linkTtlMs: 1200,
+  /** link: the fast rise of that arc. */
+  linkRiseMs: 120,
+  /** code seat: an execution must last this long before it is shown (§6.4). */
+  minExecMs: 400,
+  /** plan: how long 「计划中」 outlives the last bookkeeping call (§5). */
+  planHoldMs: 2400,
+  /** material: one settle ripple on `running -> done` (§6.2). */
+  rippleMs: 400,
 });
 
 /** Hard caps: a long session must not grow the view without bound. */
-const CAPS = Object.freeze({ pulses: 32, agents: 12, taskTextChars: 26 });
+const CAPS = Object.freeze({ pulses: 32, links: 4, agents: 12 });
 
 /** The states a node can hold (§4.1). `idle` means "not drawn". */
 const STATES = new Set(['idle', 'running', 'waiting-human', 'done', 'failed']);
@@ -383,6 +510,34 @@ function normalizeState(state) {
   return STATES.has(state) ? state : 'idle';
 }
 
+/** The producer's per-event material override (§7.2), or the alias default. */
+function overrideMaterial(options, seq, fallback) {
+  const table = options.materials;
+  if (table === null || table === undefined) return fallback;
+  const value = table[String(seq)];
+  return typeof value === 'string' ? value : fallback;
+}
+
+/**
+ * Close a classified code execution (§6.4).
+ *
+ * The code seat settles together with the terminal, and the arc dies with the
+ * call — it is an event window, never a standing relationship (§3.2).
+ */
+function finishExec(view, at) {
+  if (view.codeExec.active && view.codeExec.promoted) {
+    const code = view.materials.get('code');
+    if (code !== undefined) {
+      code.state = 'done';
+      code.lastAt = at;
+      code.doneAt = at;
+      code.executing = false;
+    }
+  }
+  view.codeExec = { at: 0, active: false, promoted: false, lang: null };
+  view.links = [];
+}
+
 /** A blank view for one session. */
 function createView(options = {}) {
   const now = finite(options.now, 0);
@@ -409,6 +564,14 @@ function createView(options = {}) {
     materials: new Map(),
     agents: new Map(),
     pulses: [],
+    /** §3: arcs for declared co-activations, alive for `linkTtlMs`. */
+    links: [],
+    /** §5 halo: the centre's presence, 0..1, follows the run and not the nodes. */
+    heart: 0,
+    /** §5: bookkeeping tools draw no node; the centre says 「计划中」 for a while. */
+    plan: { at: -Infinity, active: false },
+    /** §6.4: a shell call declared to run code promotes the code seat after `minExecMs`. */
+    codeExec: { at: 0, active: false, promoted: false, lang: null },
   };
 }
 
@@ -431,10 +594,16 @@ function ensureMaterial(view, id, alias) {
     node = {
       id,
       label: materialLabel(id, view.locale),
+      /** §2.4: the declared language of the code seat, when one is known. */
+      language: null,
       alias: alias ?? null,
       state: 'idle',
       verb: '',
       lastAt: 0,
+      /** when the last `tool.end` landed; the settle ripple counts from here (§6.2) */
+      doneAt: 0,
+      /** true while this seat is carrying a declared code execution (§3) */
+      executing: false,
       hits: 0,
       alpha: 0,
       heat: 0,
@@ -443,7 +612,10 @@ function ensureMaterial(view, id, alias) {
     };
     view.materials.set(id, node);
   }
-  node.label = materialLabel(id, view.locale);
+  // A language label survives later touches; a locale switch still re-renders it.
+  node.label = id === 'code' && node.language !== null
+    ? codeLanguageLabel(node.language, view.locale)
+    : materialLabel(id, view.locale);
   if (alias !== null && alias !== undefined) node.alias = alias;
   return node;
 }
@@ -517,9 +689,12 @@ function applyEvent(view, event, options) {
     case 'tool.start': {
       const resolved = materialForTool(event.tool, { aliasVersion: view.aliasVersion });
       if (resolved.material === null) {
-        // A delegation lights a seat in the inner ring; an ask lights nothing —
-        // it stops the field instead, and its pose comes from the state event.
-        if (isAgentAlias(resolved.alias) && agentId !== '') {
+        if (isPlanAlias(resolved.alias)) {
+          // Bookkeeping is not a material (§2.2): no node, the centre says 计划中.
+          view.plan = { at, active: true };
+        } else if (isAgentAlias(resolved.alias) && agentId !== '') {
+          // A delegation lights a seat in the inner ring; an ask lights nothing —
+          // it stops the field instead, and its pose comes from the state event.
           const seat = ensureAgent(view, agentId);
           seat.lastAt = at;
           seat.heat = Math.min(1, seat.heat + 0.5);
@@ -527,29 +702,46 @@ function applyEvent(view, event, options) {
         }
         break;
       }
-      const node = ensureMaterial(view, resolved.material, resolved.alias);
+      // §2.3: the producer may re-route a file call to the code seat by extension.
+      const materialId = overrideMaterial(options, event.seq, resolved.material);
+      const node = ensureMaterial(view, materialId, resolved.alias);
       node.state = 'running';
       node.alias = resolved.alias;
-      node.verb = verbFor(resolved.alias, view.locale);
+      node.verb = verbFor(materialId, resolved.alias, view.locale);
       node.lastAt = at;
       node.hits += 1;
       node.heat = Math.min(1, node.heat + 0.6);
+      node.doneAt = 0;
       if (animate && at - node.lastPulseAt >= TIMING.pulseGapMs) {
         node.lastPulseAt = at;
         view.pulses.push({ to: node.id, agentId: agentId === '' ? null : agentId, at, intent: resolved.alias });
+      }
+      // §6.4: a terminal call that the producer classified as "executing code"
+      // arms the code seat. It only lights after `minExecMs` (see stepLifecycle),
+      // so a 200ms probe never flashes.
+      if (resolved.material === 'shell' && typeof options.exec === 'string' && options.exec !== '') {
+        view.codeExec = { at, active: true, promoted: false, lang: options.exec };
       }
       break;
     }
     case 'tool.end': {
       const resolved = materialForTool(event.tool, { aliasVersion: view.aliasVersion });
-      if (resolved.material === null) break;
-      const node = view.materials.get(resolved.material);
-      if (node === undefined) break;
-      // A synthetic/interrupted close still ends the call: the run's own state
-      // (cancel/restart) carries the meaning, not a red ring.
-      node.state = 'done';
-      node.lastAt = at;
-      if (event.reason === 'interrupted') node.interrupted = true;
+      if (resolved.material === null) {
+        if (isPlanAlias(resolved.alias)) view.plan = { at: view.plan.at, active: false };
+        break;
+      }
+      const materialId = overrideMaterial(options, event.seq, resolved.material);
+      const node = view.materials.get(materialId);
+      if (node !== undefined) {
+        // A synthetic/interrupted close still ends the call: the run's own state
+        // (cancel/restart) carries the meaning, not a red ring.
+        node.state = 'done';
+        node.lastAt = at;
+        node.doneAt = at;
+        node.executing = false;
+        if (event.reason === 'interrupted') node.interrupted = true;
+      }
+      if (resolved.material === 'shell') finishExec(view, at);
       break;
     }
     case 'attention.raised':
@@ -679,7 +871,12 @@ function foldSnapshot(view, snapshot, now = view.frameAt, meta = {}) {
   const snapshotNow = typeof snapshot.now === 'string' ? Date.parse(snapshot.now) : NaN;
   const skew = Number.isFinite(snapshotNow) ? now - snapshotNow : 0;
 
-  for (const event of fresh) applyEvent(view, event, { animate: !gap, now, skew });
+  // §7.2: the producer may re-route one call's material by file extension; the
+  // table is keyed by event seq and carries only the entries that differ.
+  const overrides = meta.materials !== null && typeof meta.materials === 'object' ? meta.materials : null;
+  const exec = typeof meta.exec === 'string' && meta.exec !== '' ? meta.exec : null;
+
+  for (const event of fresh) applyEvent(view, event, { animate: !gap, now, skew, materials: overrides, exec });
 
   if (fresh.length > 0) view.cursor = Math.max(view.cursor, fresh[fresh.length - 1].seq);
   else if (view.seq > view.cursor) view.cursor = view.seq;
@@ -710,6 +907,12 @@ function stepLifecycle(view, now) {
   const dt = Math.min(Math.max(now - view.frameAt, 0), 48);
   view.frameAt = now;
 
+  // §5 halo: the centre stays alive while the run does — that is what fills the
+  // field when nothing is lit (思考中 / 计划中). A conclusion hands the middle
+  // over to the 52k ring, so the presence fades out instead of lingering.
+  const heartTarget = view.state === 'running' ? 1 : 0;
+  view.heart += (heartTarget - view.heart) * Math.min(1, dt / 320);
+
   for (const node of view.materials.values()) {
     const pinned = node.state === 'waiting-human' || node.state === 'failed';
     const holding = now - node.lastAt < TIMING.materialHoldMs;
@@ -736,6 +939,43 @@ function stepLifecycle(view, now) {
     if (view.pulses.length > CAPS.pulses) view.pulses = view.pulses.slice(-CAPS.pulses);
   }
 
+  // §6.4: the code seat is promoted only once the execution has lasted long
+  // enough that showing it is not a flash. A command shorter than `minExecMs`
+  // therefore leaves the field untouched.
+  const exec = view.codeExec;
+  if (exec.active && exec.promoted !== true && now - exec.at >= TIMING.minExecMs) {
+    exec.promoted = true;
+    const code = ensureMaterial(view, 'code', 'run_code');
+    if (typeof exec.lang === 'string' && exec.lang !== '') {
+      // §2.4: the seat names the language while it is executing that language.
+      code.language = exec.lang;
+      code.label = codeLanguageLabel(exec.lang, view.locale);
+    }
+    code.state = 'running';
+    code.alias = 'run_code';
+    code.verb = verbFor('code', 'run_code', view.locale);
+    // +1ms so the centre names the *subject* (「执行中 / Python」), not the
+    // transport, when both seats carry the same timestamp.
+    code.lastAt = now + 1;
+    code.doneAt = 0;
+    code.executing = true;
+    code.hits += 1;
+    code.heat = Math.min(1, code.heat + 0.5);
+    if (now - code.lastPulseAt >= TIMING.pulseGapMs) {
+      code.lastPulseAt = now;
+      view.pulses.push({ to: 'code', agentId: null, at: now, intent: 'run_code' });
+    }
+    // §3: the arc lives in an event window, not in the nodes' visibility. The
+    // pair itself comes from the table, so a second link needs no new code here.
+    const link = LINKS[0];
+    view.links.push({ a: link.a, b: link.b, at: now });
+  }
+
+  if (view.links.length > 0) {
+    view.links = view.links.filter(link => now - link.at < TIMING.linkTtlMs);
+    if (view.links.length > CAPS.links) view.links = view.links.slice(-CAPS.links);
+  }
+
   if (view.agents.size > CAPS.agents) {
     const retired = [...view.agents.values()]
       .filter(node => node.alpha === 0 && node.state !== 'running' && node.state !== 'waiting-human' && node.state !== 'failed')
@@ -746,74 +986,58 @@ function stepLifecycle(view, now) {
   return view;
 }
 
-/** First sentence / first line of the user's command, shortened for the centre. */
-function shortenTask(text) {
-  if (typeof text !== 'string') return '';
-  const line = text.replace(/\s+/g, ' ').trim();
-  if (line === '') return '';
-  const cut = line.search(/[。！？!?；;\n]/);
-  const sentence = cut > 0 ? line.slice(0, cut) : line;
-  if (sentence.length <= CAPS.taskTextChars) return sentence;
-  return `${sentence.slice(0, CAPS.taskTextChars - 1)}…`;
-}
-
-/** The busiest material currently being used, for the running sub-line. */
+/**
+ * The busiest material currently being used, for the centre's object line.
+ *
+ * A declared code execution outranks its transport: when the terminal is running
+ * the code seat, the centre should name the subject (「执行中 / Python」) rather
+ * than the shell.
+ */
 function busiestMaterial(view) {
   let best = null;
   for (const node of view.materials.values()) {
     if (node.state !== 'running' && node.state !== 'waiting-human' && node.state !== 'failed') continue;
+    if (node.executing === true) return node;
     if (best === null || node.lastAt > best.lastAt) best = node;
   }
   return best;
 }
 
-/** The label of the one agent that owns the field, if there is exactly one. */
-/** A label is display text; a bare role name is not a task name. */
-function usableLabel(node) {
-  const label = typeof node.label === 'string' ? node.label.trim() : '';
-  if (label === '') return '';
-  const role = typeof node.role === 'string' ? node.role.trim() : '';
-  if (role !== '' && label === role) return '';
-  if (label === 'root' || label === 'worker' || label === '智能体') return '';
-  return label;
-}
-
-function primaryLabel(view) {
-  const nodes = [...view.agents.values()];
-  if (nodes.length === 1) return usableLabel(nodes[0]);
-  if (nodes.length === 0) return '';
-  const root = nodes.find(node => node.role === 'root' || node.parentId === null);
-  return root === undefined ? '' : usableLabel(root);
+/** True while a bookkeeping call is recent enough for the centre to say 计划中. */
+function isPlanning(view) {
+  if (view.plan === undefined) return false;
+  if (view.plan.active === true) return true;
+  return view.frameAt - view.plan.at < TIMING.planHoldMs;
 }
 
 /**
- * The centre block of §4.3 — the only place that decides what the centre says.
+ * The centre block of §5 — the only place that decides what the centre says.
+ *
+ * One state word and one object. The task name is deliberately absent (§5.4):
+ * a command almost never fits, so the centre stopped repeating it.
  * Pure: the renderer draws exactly this.
  */
 function centerText(view) {
   const locale = view.locale;
   switch (view.state) {
     case 'running': {
-      const main = shortenTask(view.taskText) || primaryLabel(view) || pick(locale, '执行中', 'Working');
       const busiest = busiestMaterial(view);
-      const workingAgents = [...view.agents.values()].filter(node => node.state === 'running').length;
-      let sub;
-      if (busiest !== null) {
-        sub = pick(locale, `正在${busiest.verb || '处理'} · ${busiest.label}`, `${busiest.verb || 'Working'} · ${busiest.label}`);
-      } else if (workingAgents > 0) {
-        sub = view.agents.size > 1
-          ? pick(locale, `${workingAgents} 个子 Agent 在跑`, `${workingAgents} sub-agents working`)
-          : pick(locale, '准备中', 'Getting ready');
-      } else {
-        sub = pick(locale, '准备中', 'Getting ready');
-      }
       // The producer stamps `stalled` per agent; the field only reports it.
       if (view.stalled) {
-        sub = busiest === null
-          ? pick(locale, '停顿中 · 等待响应', 'Stalled · waiting for a response')
-          : pick(locale, `停顿中 · ${busiest.label}`, `Stalled · ${busiest.label}`);
+        return {
+          main: pick(locale, '停顿中', 'Stalled'),
+          sub: busiest === null ? pick(locale, '等待响应', 'Waiting for a response') : busiest.label,
+          tone: 'running',
+        };
       }
-      return { main, sub, tone: 'running' };
+      if (busiest !== null) {
+        return { main: stateLabel('running', locale), sub: busiest.label, tone: 'running' };
+      }
+      if (isPlanning(view)) {
+        return { main: pick(locale, '计划中', 'Planning'), sub: '', tone: 'running' };
+      }
+      // Nothing is being touched: the model is generating, not preparing.
+      return { main: pick(locale, '思考中', 'Thinking'), sub: '', tone: 'running' };
     }
     case 'waiting-human':
       return {
@@ -824,20 +1048,20 @@ function centerText(view) {
     case 'done': {
       const count = [...view.materials.values()].filter(node => node.state === 'done').length;
       return {
-        main: 'SUCCESS',
-        sub: pick(locale, `成功 · ${count} 个材料`, `Success · ${count} material${count === 1 ? '' : 's'}`),
+        main: stateLabel('done', locale),
+        sub: pick(locale, `用了 ${count} 个材料`, `${count} material${count === 1 ? '' : 's'} used`),
         tone: 'done',
       };
     }
     case 'failed': {
-      const node = view.failedMaterial === null ? null : view.materials.get(view.failedMaterial);
-      const label = node === undefined || node === null ? pick(locale, '执行', 'the run') : node.label;
+      // §5 material-level failure is not observable, so the line never claims to
+      // know which step broke; it only reports what survived.
       const kept = [...view.materials.values()].some(other => other.state === 'done');
       return {
-        main: 'FAIL',
+        main: stateLabel('failed', locale),
         sub: kept
-          ? pick(locale, `在「${label}」这一步失败 · 前面的结果已保留`, `Failed at “${label}” · earlier results are kept`)
-          : pick(locale, `在「${label}」这一步失败 · 没有产生结果`, `Failed at “${label}” · nothing was produced`),
+          ? pick(locale, '前面的结果已保留', 'Earlier results are kept')
+          : pick(locale, '没有产生结果', 'Nothing was produced'),
         tone: 'failed',
       };
     }
@@ -1063,6 +1287,22 @@ function seatAngles(count) {
   return Array.from({ length: total }, (_, index) => -Math.PI / 2 + index * step);
 }
 
+/** The eight-slot ladder of §1.1: one angle per slot, 45° apart from 12 o'clock. */
+const SEAT_STEP = Math.PI / 4;
+const SEAT_START = -Math.PI / 2;
+
+/**
+ * The fixed angle of one material's seat, or `null` when it has no slot.
+ *
+ * §1.1: a material the table does not know still needs a home, and inventing a
+ * new angle would move every other node. It falls back to the 其它 slot.
+ */
+function seatAngleFor(materialId) {
+  const index = seatIndexOf(materialId);
+  if (index < 0) return null;
+  return SEAT_START + index * SEAT_STEP;
+}
+
 /** A point on a ring. */
 function seatPoint(geometry, angle, radius) {
   return { x: geometry.cx + Math.cos(angle) * radius, y: geometry.cy + Math.sin(angle) * radius };
@@ -1119,10 +1359,25 @@ function drawField(context, view, geometry, now, options = {}) {
   const agents = view.agents.size > 1
     ? [...view.agents.values()].filter(node => node.role !== 'root' && node.alpha > 0.01)
     : [];
+  // §1.1: seats are fixed by material, never by how many nodes are visible.
+  // An unseated material borrows the 其它 slot instead of inventing an angle.
   const materialAngles = new Map();
-  const materialSeats = seatAngles(materials.length);
-  materials.forEach((node, index) => materialAngles.set(node.id, materialSeats[index]));
+  const otherAngle = seatAngleFor('other');
+  for (const node of materials) {
+    const angle = seatAngleFor(node.id);
+    materialAngles.set(node.id, angle === null ? otherAngle : angle);
+  }
   const agentSeats = seatAngles(agents.length).map((angle, index) => [agents[index].id, angle]);
+
+  // §5 halo: a whisper of presence behind the centre, so 「思考中」/「计划中」 is
+  // not a word floating in a void. Peak alpha ≈0.06 — read as a vignette, never
+  // as a shape; it is drawn first, so every node sits on top of it.
+  const heart = Number.isFinite(view.heart) ? view.heart : 0;
+  if (heart > 0.01) {
+    const heat = materials.reduce((most, node) => Math.max(most, node.heat), 0);
+    const halo = Math.min(0.07, (0.04 * heart + 0.02 * heat) * (0.75 + 0.25 * breathing(now, 1.1, 0)));
+    glow(context, cx, cy, 0.28 * size, colorOf('running'), halo);
+  }
 
   // Material <-> agent tether: only for pairs that were active together.
   if (agents.length > 0) {
@@ -1144,10 +1399,37 @@ function drawField(context, view, geometry, now, options = {}) {
     }
   }
 
+  // §3: arcs are drawn before the nodes, so each node's stroke hides the seam.
+  // They live in an event window (`linkTtlMs`), never in the nodes' visibility.
+  for (const link of view.links) {
+    const age = now - link.at;
+    if (age < 0 || age >= TIMING.linkTtlMs) continue;
+    const from = materialAngles.get(link.a);
+    const to = materialAngles.get(link.b);
+    if (from === undefined || to === undefined) continue;
+    let lo = Math.min(from, to);
+    let hi = Math.max(from, to);
+    if (hi - lo > Math.PI) {
+      // the pair straddles 12 o'clock: take the short way round
+      lo += Math.PI * 2;
+      [lo, hi] = [hi, lo];
+    }
+    const trim = Math.asin(Math.min(1, (22 * k) / Math.max(1, geometry.material)));
+    const rise = age < TIMING.linkRiseMs ? age / TIMING.linkRiseMs : 1;
+    const fall = age < 620 ? 1 : Math.max(0, 1 - (age - 620) / Math.max(1, TIMING.linkTtlMs - 620));
+    const alpha = 0.16 * Math.min(rise, fall);
+    if (alpha <= 0.004) continue;
+    context.beginPath();
+    context.arc(cx, cy, geometry.material, lo + trim, hi - trim);
+    context.strokeStyle = rgba(colorOf('running'), alpha);
+    context.lineWidth = Math.max(1, k);
+    context.stroke();
+  }
+
   // Pulses: a dot travels from the centre (or an agent seat) to its material.
   for (const pulse of view.pulses) {
     const age = now - pulse.at;
-    const life = 720;
+    const life = TIMING.pulseFlightMs;
     if (age < 0 || age > life) continue;
     const progress = age / life;
     const eased = 1 - Math.pow(1 - progress, 2.2);
@@ -1224,20 +1506,34 @@ function drawField(context, view, geometry, now, options = {}) {
     context.restore();
   }
 
-  // Materials: outer ring.
-  materials.forEach((node, index) => {
-    const angle = materialSeats[index];
+  // Materials: outer ring, one fixed seat each.
+  for (const node of materials) {
+    const angle = materialAngles.get(node.id);
+    if (angle === undefined) continue;
     const point = seatPoint(geometry, angle, geometry.material);
-    const tone = colorOf(node.state);
     const pinned = node.state === 'waiting-human' || node.state === 'failed';
-    const speed = pinned ? 1 : 1.6;
-    // §4.1: a waiting node never breathes — it is pinned, so colour blindness is
-    // not the only cue that the field is blocked on the human.
-    const breath = pinned ? 0 : breathing(now, speed, node.phase);
-    const strength = Math.min(1, (node.state === 'idle' ? 0.12 : 0.3 + breath * 0.28) + node.heat * 0.5);
+    // 产品回调（2026-11-13）：完成态重新变绿——那一刻的绿色反馈是有价值的。
+    // 它仍然停止呼吸，所以"在跑"和"做完了"除了颜色还有动效可以区分。
+    const settled = node.state === 'done';
+    const tone = colorOf(node.state);
+    const breath = node.state === 'running' && !pinned ? breathing(now, 1.6, node.phase) : 0;
+    const base = node.state === 'idle' ? 0.12 : 0.3 + breath * 0.28;
+    const strength = Math.min(1, base + node.heat * 0.5);
     const radius = 22 * k;
     context.save();
     context.globalAlpha = node.alpha;
+
+    // §6.2: one settle ripple on `running -> done`, alongside the colour change.
+    const rippleAge = now - node.doneAt;
+    if (settled && node.doneAt > 0 && rippleAge >= 0 && rippleAge < TIMING.rippleMs) {
+      const t = rippleAge / TIMING.rippleMs;
+      context.beginPath();
+      context.arc(point.x, point.y, radius * (1 + 0.5 * t), 0, Math.PI * 2);
+      context.strokeStyle = rgba(tone, 0.5 * (1 - t));
+      context.lineWidth = k;
+      context.stroke();
+    }
+
     glow(context, point.x, point.y, (radius + 20 * k) * 1.5, tone, 0.18 * strength);
     context.beginPath();
     context.arc(point.x, point.y, radius, 0, Math.PI * 2);
@@ -1260,17 +1556,19 @@ function drawField(context, view, geometry, now, options = {}) {
       point,
       offset: 42 * k,
       label: node.label || materialLabel(node.id, view.locale),
-      // The verb belongs to the activity; once the call ends the node says how it
-      // ended (完成 / 未完成 / 等你确认) instead of freezing on 「读取中」.
+      // §4: the second line is a state word — the verb while it runs, the one
+      // settled word afterwards (materials never fail; see the spec's §4.1 note).
       sub: node.state === 'idle'
         ? ''
-        : (node.state === 'running' ? (node.verb || stateLabel('running', view.locale)) : stateLabel(node.state, view.locale)),
+        : (node.state === 'running'
+          ? (node.verb || stateLabel('running', view.locale))
+          : materialDoneLabel(view.locale)),
       tone,
       k,
       labelSize: 14,
     });
     context.restore();
-  });
+  }
 
   // Centre: the conclusion, always on (§4.3).
   const center = centerText(view);
@@ -1288,15 +1586,15 @@ function drawField(context, view, geometry, now, options = {}) {
       } catch {
         // older engines ignore letterSpacing; the word still reads
       }
-      context.font = `600 ${26 * k}px -apple-system,"Segoe UI",Arial,sans-serif`;
+      context.font = `600 ${30 * k}px -apple-system,"Segoe UI",Arial,sans-serif`;
       context.fillStyle = rgba(tone, 0.96);
-      context.fillText(center.main, cx, cy - 6 * k);
+      context.fillText(center.main, cx, cy - 8 * k);
       try {
         context.letterSpacing = '0px';
       } catch {
         // same
       }
-      context.font = `400 ${11 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
+      context.font = `400 ${12 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
       context.fillStyle = view.state === 'failed' ? 'rgba(255,140,150,.85)' : 'rgba(150,210,185,.8)';
       context.fillText(center.sub, cx, cy + 20 * k);
       context.beginPath();
@@ -1305,13 +1603,15 @@ function drawField(context, view, geometry, now, options = {}) {
       context.lineWidth = k;
       context.stroke();
     } else {
-      context.font = `600 ${16 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
-      context.fillStyle = 'rgba(232,242,255,.95)';
-      context.fillText(center.main, cx, cy - 6 * k);
+      // §5: one state word, one size, always the same baseline. The centre is a
+      // reading, not a sentence — so it can change word without changing shape.
+      context.font = `600 ${26 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
+      context.fillStyle = view.state === 'waiting-human' ? rgba(colorOf('waiting-human'), 0.96) : 'rgba(232,242,255,.95)';
+      context.fillText(center.main, cx, cy - 8 * k);
       if (center.sub !== '') {
-        context.font = `400 ${11 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
+        context.font = `400 ${12 * k}px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif`;
         context.fillStyle = 'rgba(150,175,205,.78)';
-        context.fillText(center.sub, cx, cy + 14 * k);
+        context.fillText(center.sub, cx, cy + 20 * k);
       }
     }
     context.restore();
@@ -1695,7 +1995,9 @@ function createCapsule(React) {
         className: 'dsh-hud-dot',
         style: { background: colorOf(state.state), boxShadow: `0 0 8px ${colorOf(state.state)}` },
       }),
-      React.createElement('span', null, labels.capsule),
+      // §5.3: the capsule speaks the run's vocabulary, so leaving the field is
+      // lossless — the conclusion stays readable at the bottom-right corner.
+      React.createElement('span', null, state.label),
     );
   };
 }
@@ -1723,13 +2025,11 @@ const STRINGS = Object.freeze({
   zh: {
     hint: '点击空白处或按 Esc 返回；右下角胶囊可以再进来',
     open: '点击返回',
-    capsule: '返回',
     offline: 'HUD 未连接',
   },
   en: {
     hint: 'Click the empty area or press Esc to leave; the capsule at the bottom right brings it back',
     open: 'Click to return',
-    capsule: 'Back',
     offline: 'HUD offline',
   },
 });
@@ -1983,7 +2283,7 @@ function applyClient(ctx, React) {
           view,
           stage,
           onOpen: () => store.open(),
-          labels: { open: strings.open, capsule: strings.capsule },
+          labels: { open: strings.open },
         }));
       }
       // A session is known but the snapshot route never answered: say so instead
