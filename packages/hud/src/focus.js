@@ -44,6 +44,14 @@ export const STYLES = `
 .dsh-hud-capsule:focus-visible{outline:2px solid rgba(76,154,255,.7);outline-offset:2px}
 .dsh-hud-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .dsh-hud-offline{position:fixed;z-index:3;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:rgba(24,20,18,.55);border:1px solid rgba(255,95,109,.35);color:#e7b0b5;font-size:11px;line-height:1;pointer-events:none;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+/* Light host surface: the same layer, inverted. The scrim goes pale instead of
+   black, the ink goes dark, and the frosted pill becomes white glass. */
+.dsh-hud-scrim.dsh-hud-light{background:rgba(248,249,252,.62);-webkit-backdrop-filter:blur(10px) saturate(1.05);backdrop-filter:blur(10px) saturate(1.05)}
+.dsh-hud-hint.dsh-hud-light{color:rgba(88,102,120,.8);text-shadow:none}
+.dsh-hud-capsule.dsh-hud-light{background:rgba(255,255,255,.8);border-color:rgba(15,23,42,.14);color:#1f2a3a;box-shadow:0 8px 24px rgba(15,23,42,.14)}
+.dsh-hud-capsule.dsh-hud-light:hover{background:#fff;border-color:rgba(47,111,208,.55);color:#0f172a}
+.dsh-hud-capsule.dsh-hud-light:focus-visible{outline-color:rgba(47,111,208,.6)}
+.dsh-hud-offline.dsh-hud-light{background:rgba(255,246,247,.85);border-color:rgba(198,47,63,.32);color:#8a2432}
 `;
 
 function px(value) {
@@ -154,21 +162,76 @@ export function scrimPieces(stage, hole, pad = 10) {
 }
 
 /**
+ * Relative luminance of a computed CSS colour, or `null` when it is unknown or
+ * effectively transparent (the caller then keeps walking up the tree).
+ */
+export function luminanceOf(css) {
+  const match = /^rgba?\(([^)]+)\)$/i.exec(typeof css === 'string' ? css.trim() : '');
+  if (match === null) return null;
+  const parts = match[1].split(/[,/\s]+/).filter(Boolean).map(value => Number.parseFloat(value));
+  if (parts.length < 3 || parts.slice(0, 3).some(value => !Number.isFinite(value))) return null;
+  const alpha = parts.length > 3 && Number.isFinite(parts[3]) ? parts[3] : 1;
+  if (alpha <= 0.05) return null;
+  const linear = value => {
+    const channel = value / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear(parts[0]) + 0.7152 * linear(parts[1]) + 0.0722 * linear(parts[2]);
+}
+
+/** Which palette suits a surface. Dark is the safe default. */
+export function themeNameFor(luminance) {
+  return Number.isFinite(luminance) && luminance > 0.5 ? 'light' : 'dark';
+}
+
+/**
+ * Pick a palette from the host's own painted surface.
+ *
+ * Not a theme API: the shell may follow the OS, a profile setting or a
+ * per-session override, and only the rendered pixels know the answer. The slot
+ * hosts are `display: contents`, so the walk goes up until something paints.
+ */
+export function measureTheme(doc = typeof document === 'undefined' ? undefined : document) {
+  if (doc === undefined || doc === null) return 'dark';
+  const view = doc.defaultView;
+  let node = slotHost(doc, COLUMN_ANCHORS[0]) ?? doc.body ?? null;
+  for (let hop = 0; hop < 12 && node !== null && node !== undefined; hop += 1) {
+    const style = view?.getComputedStyle(node);
+    const luminance = luminanceOf(style === undefined ? '' : style.backgroundColor);
+    if (luminance !== null) return themeNameFor(luminance);
+    node = node.parentElement;
+  }
+  try {
+    const media = view?.matchMedia?.('(prefers-color-scheme: dark)');
+    if (media !== undefined && media !== null) return media.matches === true ? 'dark' : 'light';
+  } catch {
+    // no media support: keep the dark default
+  }
+  return 'dark';
+}
+
+/**
  * Track the stage. Recovers from boot swaps and panel animation without polling
  * the document on every streamed token: a rAF-debounced mutation watcher plus a
- * slow safety net.
+ * slow safety net. The theme rides along on the same watcher, so a light/dark
+ * switch in the shell repaints the field on the next frame.
  */
 export function createStageHook(React) {
   return function useStage() {
-    const [stage, setStage] = React.useState(() => measureStage());
+    const [state, setState] = React.useState(() => ({ stage: measureStage(), theme: measureTheme() }));
     React.useEffect(() => {
       let disposed = false;
       let scheduled = 0;
       let retry = 0;
       const measure = () => {
         if (disposed) return;
-        const next = measureStage();
-        setStage(prev => (prev.x === next.x && prev.y === next.y && prev.w === next.w && prev.h === next.h && prev.full === next.full ? prev : next));
+        const nextStage = measureStage();
+        const nextTheme = measureTheme();
+        setState(prev => (prev.stage.x === nextStage.x && prev.stage.y === nextStage.y
+          && prev.stage.w === nextStage.w && prev.stage.h === nextStage.h
+          && prev.stage.full === nextStage.full && prev.theme === nextTheme
+          ? prev
+          : { stage: nextStage, theme: nextTheme }));
       };
       const schedule = () => {
         if (scheduled !== 0) return;
@@ -194,7 +257,7 @@ export function createStageHook(React) {
         globalThis.removeEventListener('resize', schedule);
       };
     }, []);
-    return stage;
+    return state;
   };
 }
 
@@ -207,14 +270,15 @@ export function createStageHook(React) {
 export function createFocusLayer(React, options = {}) {
   const FieldCanvas = options.FieldCanvas;
   return function FocusLayer(props) {
-    const { view, stage, onDismiss, hint, soft, hole } = props;
+    const { view, stage, onDismiss, hint, soft, hole, theme } = props;
+    const themeClass = theme === 'light' ? ' dsh-hud-light' : '';
     const box = hudBox(stage);
     const hintBottom = Math.max(12, (globalThis.innerHeight ?? 0) - (stage.y + stage.h) + 12);
     const pieces = soft === true ? [] : scrimPieces(stage, hole);
     const clickThrough = soft === true || pieces.length > 1;
     const scrims = soft === true ? null : pieces.map((piece, index) => React.createElement('div', {
       key: `scrim-${index}`,
-      className: 'dsh-hud-scrim',
+      className: `dsh-hud-scrim${themeClass}`,
       onClick: clickThrough ? undefined : onDismiss,
       'aria-hidden': true,
       style: {
@@ -242,7 +306,7 @@ export function createFocusLayer(React, options = {}) {
         ? null
         : React.createElement(
           'div',
-          { className: 'dsh-hud-hint', style: { left: px(stage.x), width: px(stage.w), bottom: px(hintBottom) } },
+          { className: `dsh-hud-hint${themeClass}`, style: { left: px(stage.x), width: px(stage.w), bottom: px(hintBottom) } },
           hint,
         ),
     );
@@ -258,10 +322,11 @@ export function createFocusLayer(React, options = {}) {
  */
 export function createOfflinePill(React) {
   return function OfflinePill(props) {
-    const { stage, text } = props;
+    const { stage, text, theme } = props;
+    const themeClass = theme === 'light' ? ' dsh-hud-light' : '';
     const left = Math.max(stage.x + 8, stage.x + stage.w - 132 - CAPSULE_INSET.right);
     const top = Math.max(stage.y + 8, stage.y + stage.h - 26 - CAPSULE_INSET.bottom);
-    return React.createElement('div', { className: 'dsh-hud-offline', style: { left: px(left), top: px(top) } }, text);
+    return React.createElement('div', { className: `dsh-hud-offline${themeClass}`, style: { left: px(left), top: px(top) } }, text);
   };
 }
 
@@ -275,8 +340,10 @@ export function createOfflinePill(React) {
  */
 export function createCapsule(React) {
   return function Capsule(props) {
-    const { view, stage, onOpen, labels } = props;
+    const { view, stage, onOpen, labels, theme } = props;
+    const themeClass = theme === 'light' ? ' dsh-hud-light' : '';
     const state = capsuleOf(view);
+    const dot = colorOf(state.state, theme);
     const stageRight = stage.x + stage.w;
     const stageBottom = stage.y + stage.h;
     const insetRight = Math.max(0, (globalThis.innerWidth ?? stageRight) - stageRight) + CAPSULE_INSET.right;
@@ -285,7 +352,7 @@ export function createCapsule(React) {
       'button',
       {
         type: 'button',
-        className: 'dsh-hud-capsule',
+        className: `dsh-hud-capsule${themeClass}`,
         onPointerDown: event => event.stopPropagation(),
         onClick: event => {
           event.preventDefault();
@@ -298,7 +365,7 @@ export function createCapsule(React) {
       },
       React.createElement('i', {
         className: 'dsh-hud-dot',
-        style: { background: colorOf(state.state), boxShadow: `0 0 8px ${colorOf(state.state)}` },
+        style: { background: dot, boxShadow: `0 0 8px ${dot}` },
       }),
       // §5.3: the capsule speaks the run's vocabulary, so leaving the field is
       // lossless — the conclusion stays readable at the bottom-right corner.
