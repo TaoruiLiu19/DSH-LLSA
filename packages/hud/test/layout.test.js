@@ -40,6 +40,7 @@ test('an unmeasured or degenerate column falls back to the window', () => {
   assert.equal(stageFor(viewport, null).full, true);
   assert.equal(stageFor(viewport, undefined).full, true);
   assert.equal(stageFor(viewport, { left: 600, right: 620, top: 100, bottom: 700 }).full, true, 'too narrow to read');
+  assert.equal(stageFor(viewport, { left: 300, right: 1100, top: 100, bottom: 260 }).full, false, 'a short but framed column is still measured');
   assert.equal(stageFor({ width: 0, height: 0 }, column).w, 0);
 });
 

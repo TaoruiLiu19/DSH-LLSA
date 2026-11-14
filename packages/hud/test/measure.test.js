@@ -50,6 +50,52 @@ function shell() {
   return doc;
 }
 
+/** Build a document from `{ slotName: hostElement }`. */
+function docWith(slots) {
+  return {
+    defaultView: { innerWidth: 1400, innerHeight: 900 },
+    querySelector(selector) {
+      const match = /data-slot="([^"]+)"/.exec(selector);
+      if (match === null) return null;
+      return slots[match[1]] ?? null;
+    },
+  };
+}
+
+/** `root > column > [flowWrap > flowHost, composerWrap > composerHost]` with given rects. */
+function columnDoc(flow, composer) {
+  const column = element(box(260, 60, 1060, 840), { display: 'flex' });
+  const flowWrap = element(flow, { parent: column });
+  const flowHost = element(null, { parent: flowWrap, display: 'contents' });
+  const composerWrap = element(composer, { parent: column });
+  const composerHost = element(null, { parent: composerWrap, display: 'contents' });
+  const sessionHost = element(null, { parent: column, display: 'contents' });
+  return docWith({
+    'conversation.session': sessionHost,
+    'conversation.chat.flow': flowHost,
+    'conversation.composer.bar': composerHost,
+  });
+}
+
+test('a tall approval panel shortens the message area without widening the blur', () => {
+  // Reported from a real run: a long command awaiting approval squeezed the
+  // conversation, the measured height fell under the old 240 px floor, and the
+  // scrim was promoted to the whole window.
+  const stage = measureStage(columnDoc(box(260, 120, 1060, 300), box(260, 300, 1060, 840)));
+  assert.equal(stage.full, false, 'a compressed column is still the message area');
+  assert.equal(stage.h, 180);
+  assert.equal(stage.w, 800);
+});
+
+test('a composer pushed above the message area does not collapse the measurement', () => {
+  // The same panel can drive the composer past the message area; that must not
+  // read as "nothing measurable".
+  const stage = measureStage(columnDoc(box(260, 120, 1060, 780), box(260, 90, 1060, 200)));
+  assert.equal(stage.full, false);
+  assert.equal(stage.y, 120);
+  assert.equal(stage.y + stage.h, 840, 'the column bottom is the floor');
+});
+
 test('both panels open: the stage is the message column, not the window', () => {
   const stage = measureStage(shell());
   assert.equal(stage.full, false, 'the scrim must not cover the side panels');

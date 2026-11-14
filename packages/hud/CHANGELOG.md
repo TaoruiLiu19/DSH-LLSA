@@ -10,6 +10,12 @@
   question is open (capped to a few passes per second; the loop stops by itself
   once the set is empty), and a finished turn clears attention, because a
   finished turn is not blocked on anybody.
+- **A long approval prompt no longer turns the blur full-screen.** The stage was
+  promoted to the whole window whenever the measured column was shorter than
+  240 px — which is exactly what a tall approval panel produces when it compresses
+  the message area. The promotion now keys on the column being flush with an edge
+  (side panels collapsed), and a composer pushed past the message area keeps the
+  column's own bottom as the floor instead of collapsing the measurement.
 
 ## 0.4.2
 

@@ -114,7 +114,12 @@ export function measureStage(doc = typeof document === 'undefined' ? undefined :
   let center = null;
   if (column !== null) {
     const top = flow !== null ? Math.max(flow.top, column.top) : column.top;
-    const bottom = Math.min(composer !== null ? composer.top : column.bottom, column.bottom);
+    const limit = Math.min(composer !== null ? composer.top : column.bottom, column.bottom);
+    // A tall approval panel can push the composer past the message area, or off
+    // the screen entirely. A collapsed limit must not collapse the *measurement*
+    // into the full-window fallback: when the composer no longer sits below the
+    // top, the column's own bottom (clamped to the viewport) is the floor.
+    const bottom = limit > top ? limit : Math.max(top, Math.min(column.bottom, viewport.height));
     if (bottom > top) center = { left: column.left, right: column.right, top, bottom };
   } else if (flow !== null) {
     const bottom = composer !== null ? Math.min(flow.bottom, composer.top) : flow.bottom;

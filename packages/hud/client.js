@@ -1293,7 +1293,11 @@ function stageFor(viewport, center) {
   const top = clamp(center.top, 0, height, 0);
   const bottom = clamp(center.bottom, 0, height, height);
   const column = { x: left, y: top, w: Math.max(0, right - left), h: Math.max(0, bottom - top), radius: STAGE_RADIUS, full: false };
-  const bothPanelsOpen = left > 1 && right < width - 1 && column.w > 240 && column.h > 240;
+  // Side panels are open when the column does not reach either edge. Height is
+  // deliberately *not* part of this: a tall approval panel compresses the
+  // message area without making it stop being the message area, and promoting a
+  // short column to the whole window is what turned the blur full-screen.
+  const bothPanelsOpen = left > 1 && right < width - 1 && column.w > 240 && column.h > 80;
   return bothPanelsOpen ? column : full;
 }
 
@@ -1873,7 +1877,12 @@ function measureStage(doc = typeof document === 'undefined' ? undefined : docume
   let center = null;
   if (column !== null) {
     const top = flow !== null ? Math.max(flow.top, column.top) : column.top;
-    const bottom = Math.min(composer !== null ? composer.top : column.bottom, column.bottom);
+    const limit = Math.min(composer !== null ? composer.top : column.bottom, column.bottom);
+    // A tall approval panel can push the composer past the message area, or off
+    // the screen entirely. A collapsed limit must not collapse the *measurement*
+    // into the full-window fallback: when the composer no longer sits below the
+    // top, the column's own bottom (clamped to the viewport) is the floor.
+    const bottom = limit > top ? limit : Math.max(top, Math.min(column.bottom, viewport.height));
     if (bottom > top) center = { left: column.left, right: column.right, top, bottom };
   } else if (flow !== null) {
     const bottom = composer !== null ? Math.min(flow.bottom, composer.top) : flow.bottom;
