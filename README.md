@@ -73,9 +73,31 @@ npm start
 
 → **[HUD 安装、使用与常见问题](packages/hud/README.md)**
 
-### 可选的 CSV 工作流
+### 工单内置 CSV 工作流
 
-Task Reuse 可在本机预览、保存并复用 CSV 筛选、去重和统计流程。演示启动命令与示例见 [Task Reuse 使用说明](task-reuse/README.md)。
+工单可在本机执行已明确规则的 CSV 筛选、去重和统计。协调者可以把多份输入交给同一个工作项，验收后将产物交给下游。执行器随 DSH-LLSA 源码构建和安装包提供。
+
+要在协作工单中启用本机 CSV 步骤，可在仓库根目录用 PowerShell 指定一个专门存放输入 CSV 的目录。需要 Python 3.10+。以下命令用附带的合成样例启动。
+
+```powershell
+$env:DSH_LLSA_CSV_WORKSPACE = (Resolve-Path '.\examples\csv-workflow').Path
+npm start
+```
+
+在 `/collab` 选中工单后，可随时切换「本机 CSV」，默认关闭。关闭后，新模型请求的工具列表会移除此能力，排队中的本机 CSV 工作项会取消，已经开始的步骤仍可完成并验收。要让新工单从第一次执行规划起就可以使用，可在启动前另设 `$env:DSH_LLSA_CSV_DEFAULT_ON = '1'`。工单一旦开始，开关状态独立保存。
+
+- **分派时**，工单协调者知道确切规则时，可在一个本机工作项内合并筛选、去重和分组计数。
+- **处理多批数据时**，可对 2–4 份带批次名的 CSV 一次提交同一套步骤。每份最多 16 MiB，整批最多 32 MiB。整批成功才提交验收，验收后下游直接收到带批次名的产物引用。出现错误时，回执会标出批次和步骤。停止本机任务时会结束正在执行的 CSV 工作项。
+- **子 Agent 执行时**，协调者在分派时绑定 CSV 引用，只给需要确定性处理的工作项开启转换权限。子 Agent 一次处理这份 CSV 后继续分析和提交。只读取和解读产物的子 Agent 不加载转换工具。
+- **回传时**，本机执行只返回行数、检查结果和产物引用。需要理解文本、判断业务规则或处理没有 CSV 的任务时，沿用普通流程。
+
+在任务页试用「用本机 CSV 工作项处理 `workflow.csv`，筛选已报名记录，按邮箱和报名时间保留最新一条，再按地区计数。验收后让子 Agent 根据产物给出一句结论」。
+
+也可以试「对 `workflow.csv` 和 `workflow-next.csv` 使用同一个批量工作项，分别统计已报名人数。按邮箱保留报名时间最新的一条，再按地区计数。给两份产物标上第一批和第二批，验收后对比地区变化」。第一批应为北区 1、南区 2，第二批应为东区 2、南区 1。
+
+无需 API 的回归测试覆盖批次执行、产物验收和子 Agent 授权。按以上方式处理 CSV 时，确定性步骤在本机执行，模型规划、分析和验收仍会使用 token。含 CSV 工具事件的快照使用别名表 v2，识别该工具类别可使用本仓库 `packages/hud`。
+
+已保存规则、表头映射和 MCP 等用法见 [独立 Task Reuse 使用说明](task-reuse/README.md)。
 
 ## 第一次协作
 
@@ -222,7 +244,7 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 - 原有完整任务快照保留兼容字段，新增 `hud`，以及与其一致的顶层 `v`、`seq`、`now`。浮窗应使用 `view=hud`，不要读取原始 `events` 或自行推导状态。
 - `agents` 提供稳定 ID、父子关系、工单、五态、状态起始时间、静默标记和最小活动事件。`label` 是最多 12 个 Unicode 字符的短名：任务标题优先，其次会话标题；移除路径、URL、邮箱、纯数字 ID、代码与换行，过滤后为空则使用角色或“智能体”。原生 Assignment 无独立标题字段，适配器取关联任务的 `execution.name` / `ticket.title`；托管子任务使用分配时的 objective。每次 assignment 的短名持久化固定，变更经带 `label` 的 `agent.register` 发布。父节点可能属于另一个工单快照，不能据此猜测其活动状态。
 - `seq` 在每个 run 内单调递增，重启不清零；客户端按 `(runId, seq)` 维护游标，跨 run 不可比较。轮询时间与 `stalled` 变化不会增加序号。`stalledAfterMs` 默认为 20000；只有 `running` 可以静默。`stalled` 由服务端计算，客户端只展示服务端值，不自行判断失败或静默。
-- 每次快照包含 `aliasVersion: 1`，`tool` 仍是原生工具 ID。按版本读取并缓存 [tool-aliases-v1.json](contracts/tool-aliases-v1.json) 的 `aliases` 映射。初版别名与原生 ID 同名，今后原生 ID 改名时可继续指向稳定别名；表中不提供材料分类。已发布文件不可修改；映射更新新增版本文件并递增 `aliasVersion`，与 HUD 的 `v` 独立。自定义名称或第三方工具可落“其它”；测试覆盖锁定宿主及本项目内置工具声明，新增内置 ID 漏配会失败。
+- 普通快照使用 `aliasVersion: 1`，含 CSV 工具事件的快照使用 `aliasVersion: 2`，`tool` 保留原生工具 ID。按版本读取 [v1](contracts/tool-aliases-v1.json) 或 [v2](contracts/tool-aliases-v2.json) 的 `aliases` 映射。新增映射版本独立于 HUD 的 `v`。自定义名称或第三方工具可落“其它”。测试覆盖锁定宿主和本项目内置工具。
 - `events` 是最近 256 条最小事件，`eventsFromSeq` 给出窗口起点。若客户端游标落后于窗口，直接采用最新状态并跳过丢失的动画，不回放猜测事件。事件的 `seq`、`agentId` 用于寻址；`state.changed` 额外提供 `from/to/reason`。
 - turn 正常结束的 `done` 只表示本轮结束，不代表工单验收通过。取消或输入作废为 `idle`；进程重启后未闭合 turn 清理为 `idle`。缺失的工具/turn 结束以 `synthetic: true` 和原因显式补齐，绝不冒充成功。工具 id 不含参数、路径、命令或输出。
 - 实际状态接入 `turn/start/end`、`tool/call/result`、审批对象与用户问题回复。等待确认不会因工具等待超时自动消失；收到用户回复后按是否有打开的 turn 恢复。历史上尚未接入的活动不补造。

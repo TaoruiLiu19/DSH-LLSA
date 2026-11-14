@@ -1,0 +1,5 @@
+[
+  {"op": "filter_eq", "column": "状态", "value": "已报名"},
+  {"op": "dedupe", "key": "邮箱", "keep": "latest_timestamp", "time_column": "报名时间"},
+  {"op": "group_count", "column": "地区"}
+]

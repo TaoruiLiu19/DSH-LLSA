@@ -20,7 +20,7 @@
  * `agent.recovered`.
  */
 import {
-  ALIAS_VERSION,
+  supportsAliasVersion,
   LINKS,
   codeLanguageLabel,
   colorOf,
@@ -441,7 +441,7 @@ export function foldSnapshot(view, snapshot, now = view.frameAt, meta = {}) {
   if (typeof meta.source === 'string') view.source = meta.source;
 
   view.aliasVersion = finite(snapshot.aliasVersion, view.aliasVersion);
-  view.aliasOk = view.aliasVersion === ALIAS_VERSION;
+  view.aliasOk = supportsAliasVersion(view.aliasVersion);
   // Read-only: the producer stamps stalled on each agent (§2.1). The field
   // reports it, and nothing here ever recomputes it from elapsed time.
   view.seq = Math.max(view.seq, finite(snapshot.seq, 0));

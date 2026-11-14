@@ -56,7 +56,10 @@ export function connectSuperagent(manager, bridge) {
       if (live && !live.ticket.ended && live.assignmentId) bindWorker(live.ticket, live.workerSessionId);
       if(ticket?.ended){
         manager.pause(runId,true,'superagent_ticket_ended');
-        for(const item of store.getWorkItems(runId).filter(x=>['ready','starting','running'].includes(x.state)))void manager.interrupt(runId,item.childId).catch(error=>{manager.lastError=error.message;});
+        for(const item of store.getWorkItems(runId).filter(x=>['ready','starting','running'].includes(x.state))) {
+          const stop = item.csvWorkflow ? manager.interruptCsvWorkItem(runId,item.id) : manager.interrupt(runId,item.childId);
+          void stop.catch(error=>{manager.lastError=error.message;});
+        }
       }
     }
   }
@@ -69,7 +72,7 @@ export function connectSuperagent(manager, bridge) {
     if(items.some(x=>x.state==='submitted'))return;
     const pending=items.filter(x=>['starting','running'].includes(x.state)
       || x.state==='ready'&&x.dependsOn.every(id=>items.find(prior=>prior.id===id)?.state==='succeeded'))
-      .map(x=>manager.settlements.get(x.childId)).filter(Boolean);
+      .map(x=>manager.settlements.get(x.childId ?? x.attemptId)).filter(Boolean);
     if(pending.length){
       if(signal?.aborted)throw new Error('Superagent request cancelled');
       let abort;const cancelled=new Promise((_,reject)=>{abort=()=>reject(new Error('Superagent request cancelled'));signal?.addEventListener('abort',abort,{once:true});});

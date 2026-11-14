@@ -9,7 +9,6 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ALIASES,
   ALIAS_VERSION,
   MATERIAL_BY_ALIAS,
   MATERIALS,
@@ -39,10 +38,11 @@ test('the shipped alias table is the contract’s', { skip: contractSkip }, () =
   assert.deepEqual(aliasTable(), contract, 'src/materials.js must mirror contracts/tool-aliases-v1.json');
   const generated = JSON.parse(readFileSync(new URL('../data/tool-aliases-v1.json', import.meta.url), 'utf8'));
   assert.deepEqual(generated, contract, 'data/tool-aliases-v1.json is the published copy');
+  assert.deepEqual(aliasTable(2), contractJson('tool-aliases-v2.json'));
 });
 
 test('every published alias has exactly one destination', () => {
-  const aliasNames = new Set(Object.values(ALIASES));
+  const aliasNames = new Set([...Object.values(aliasTable(1).aliases), ...Object.values(aliasTable(2).aliases)]);
   for (const alias of aliasNames) {
     assert.ok(Object.hasOwn(MATERIAL_BY_ALIAS, alias), `alias ${alias} is unmapped`);
   }
@@ -152,11 +152,21 @@ test('a null or non-string tool id still resolves', () => {
 });
 
 test('an alias version this build does not ship degrades every label', () => {
-  const resolved = materialForTool('read', { aliasVersion: 2 });
+  const resolved = materialForTool('read', { aliasVersion: 99 });
   assert.equal(resolved.material, 'other');
   assert.equal(resolved.alias, null);
   assert.equal(resolved.aliasOk, false);
   assert.equal(resolved.known, false);
+});
+
+test('alias version 2 shows native CSV work without changing existing classifications', () => {
+  const tool = 'collab_csv_workflow';
+  assert.equal(materialForTool(tool).known, false);
+  assert.deepEqual(materialForTool(tool, { aliasVersion: 2 }), {
+    tool, alias: tool, material: 'doc', known: true, aliasOk: true,
+  });
+  assert.equal(verbFor('doc', tool, 'zh'), '整理中');
+  assert.deepEqual(materialForTool('read', { aliasVersion: 2 }), materialForTool('read'));
 });
 
 test('verbs are material x intent, always present', () => {

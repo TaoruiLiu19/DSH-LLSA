@@ -1,5 +1,6 @@
 /** Bundles share the root Harness dependency tree; package dev installs are not runtime hosts. */
 import { rolldown } from 'rolldown';
+import { mkdir, copyFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -20,4 +21,9 @@ for (const [input, output] of [
   const bundle = await rolldown({ input: resolve(root, input), plugins: [inlineAssets], external: id => !id.startsWith('.') && !id.startsWith('/') && !/^[A-Za-z]:/.test(id) });
   await bundle.write({ file: resolve(root, 'dist', output), format: 'esm', sourcemap: false, minify: false });
   await bundle.close();
+}
+const csvDist = resolve(root, 'dist/csv-engine');
+await mkdir(csvDist, { recursive: true });
+for (const name of ['csv_core.py', 'csv_pipeline.py', 'run_workflow.py']) {
+  await copyFile(resolve(root, 'packages/dsh-collab/csv-engine', name), resolve(csvDist, name));
 }

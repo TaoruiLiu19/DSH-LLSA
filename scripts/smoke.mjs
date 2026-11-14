@@ -1,6 +1,7 @@
 /** Start an isolated, keyless Harness and verify plugin registration without submitting a task. */
 import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
+import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { mkdtemp } from 'node:fs/promises';
@@ -12,7 +13,7 @@ import { PANEL_HTML, PANEL_SCRIPT } from '../packages/dsh-collab/src/text-assets
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
-export async function smoke(cwd = root, entry = 'dist/start.js') {
+export async function smoke(cwd = root, entry = 'dist/start.js', { csvWorkspace } = {}) {
   const state = await mkdtemp(join(tmpdir(), 'dsh-llsa-smoke-'));
   const reservation = createServer();
   await new Promise((accept, reject) => {
@@ -28,6 +29,7 @@ export async function smoke(cwd = root, entry = 'dist/start.js') {
   }
   env.DSH_HOME = join(state, 'harness');
   env.DSH_LLSA_STATE = join(state, 'plugin');
+  if (csvWorkspace) env.DSH_LLSA_CSV_WORKSPACE = resolve(cwd, csvWorkspace);
   const child = spawn(process.execPath, [resolve(cwd, entry), String(port)], {
     cwd, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     detached: process.platform !== 'win32',
@@ -72,10 +74,31 @@ export async function smoke(cwd = root, entry = 'dist/start.js') {
     const status = await response.json();
     assert.ok(status.bridge, 'Native collaboration bridge did not register');
     assert.equal(status.mode, 'managed_tools', 'Managed delegation backend did not register');
+    assert.equal(status.capabilities.hostCsvWorkflow, Boolean(csvWorkspace), 'CSV opt-in status did not match the launch configuration');
+    if (csvWorkspace) {
+      const post = async (path, body) => {
+        const result = await fetch(origin + '/collab/api' + path, {
+          method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
+        });
+        assert.equal(result.status, 200, path);
+        return result.json();
+      };
+      const preview = await post('/local/calculations/preview', { rowsJSON: '[{"count":1}]', operation: 'count' });
+      const { runId } = await post('/local/calculations/commit', { previewId: preview.previewId, requestId: randomUUID() });
+      const run = '/runs/' + encodeURIComponent(runId);
+      const snapshot = async () => (await fetch(origin + '/collab/api' + run, { headers, signal: AbortSignal.timeout(5000) })).json();
+      assert.deepEqual((await snapshot()).csvWorkflow, { available: true, enabled: false });
+      for (const enabled of [true, false]) {
+        assert.deepEqual((await post(run + '/csv-workflow', { enabled })).result, { enabled });
+        assert.deepEqual((await snapshot()).csvWorkflow, { available: true, enabled });
+      }
+    }
     const native = await fetch(origin + '/orchestrator/api/state', { headers, signal: AbortSignal.timeout(5000) });
     assert.equal(native.status, 200);
     assert.ok((await native.json()).setup, 'Native task state missing');
     console.log('PASS: isolated Harness, both panels, collaboration bridge and native state; no model task submitted');
+    if (csvWorkspace) console.log('PASS: local CSV policy toggles on and off over the running web API');
   } catch (error) {
     // Keep ephemeral auth URLs out of CI output even when boot fails.
     const safe = output.replace(/([?&]token=)[^\s&]+/g, '$1[REDACTED]');

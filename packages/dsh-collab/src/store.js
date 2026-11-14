@@ -328,6 +328,18 @@ export class CollaborationStore {
     this.db.prepare(`INSERT INTO ${table}(id,run_id,data) VALUES (?,?,?) ON CONFLICT(run_id,id) DO UPDATE SET data=excluded.data`).run(id,input.runId,json(data)); return data;
   }
   saveWorkItem(input) { return this.#saveProjection('work_items',input,'workItemId'); }
+  submitHostCsvWorkItem(item, { receipt, result, artifactRef, outputRefs }) {
+    const { runId, id: stepId, attemptId } = item;
+    const scope = { runId, stepId, attemptId };
+    return this.#tx(() => {
+      const verified = this.#append({ ...scope, kind: 'csv_workflow_receipt',
+        inputRefs: [...new Set(outputRefs)], payload: { ...receipt, artifactRef, result } });
+      const final = this.#append({ ...scope, kind: 'final_result', parents: [verified.id],
+        payload: { provenance: 'host_csv_workflow', artifactRef, result } });
+      this.saveWorkItem({ ...item, state: 'submitted', resultEventId: final.id });
+      return final;
+    });
+  }
   getWorkItems(runId) { this.#run(runId); return this.db.prepare('SELECT data FROM work_items WHERE run_id=? ORDER BY rowid').all(runId).map(parse); }
   saveAgent(input) { return this.#saveProjection('agents',input,'agentId'); }
   getAgents(runId) { this.#run(runId); return this.db.prepare('SELECT data FROM agents WHERE run_id=? ORDER BY rowid').all(runId).map(parse); }

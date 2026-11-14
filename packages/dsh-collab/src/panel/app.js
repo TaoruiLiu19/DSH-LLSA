@@ -37,6 +37,11 @@ const eventLabels = {
   local_model_result: "模型公开回复",
   local_calculation_input: "本机计算原始输入",
   computation_receipt: "本机计算规则与结果",
+  csv_workflow_input: "CSV 输入快照",
+  csv_workflow_receipt: "本机 CSV 执行回执",
+  csv_workflow_failed: "本机 CSV 执行失败",
+  csv_workflow_policy: "本机 CSV 开关",
+  csv_workflow_cancelled: "排队中的本机 CSV 已取消",
   final_result: "最终结果",
   local_calculation_saved: "本机计算已保存",
   step_result: "步骤结果",
@@ -336,6 +341,7 @@ async function loadRuns() {
 }
 async function selectRun(id) {
   current = id;
+  $("csv-workflow-switch").hidden = true;
   LeanLinkFlow.render({run:{id},agents:[],events:[]});
   inspectionVersion++;
   clearArtifacts();
@@ -422,6 +428,12 @@ async function loadRun() {
     if (id !== current || version !== runLoadVersion) return;
     show("run-title", data.run?.title || "任务详情");
     show("run-data", data.run || {});
+    const csvSwitch = $("csv-workflow-switch");
+    const csvEnabled = data.csvWorkflow?.enabled === true;
+    csvSwitch.hidden = data.csvWorkflow?.available !== true;
+    csvSwitch.disabled = csvSwitch.hidden;
+    csvSwitch.setAttribute("aria-pressed", String(csvEnabled));
+    csvSwitch.textContent = csvEnabled ? "本机 CSV 已开启" : "本机 CSV 已关闭";
     renderUsage(data.usage);
     show("accounting", data.accounting ?? {status:"unknown"});
     const money = data.moneyBudget;
@@ -483,9 +495,10 @@ async function loadRun() {
     );
     table(
       $("work-items"),
-      ["子任务", "状态", "依赖"],
+      ["工作项", "执行方式", "状态", "依赖"],
       items.map((work) => [
         pick(work, "title", "objective", "workItemId", "work_item_id", "id"),
+        work.csvWorkflow?.sources ? "本机 CSV × " + work.csvWorkflow.sources.length : work.csvWorkflow ? "本机 CSV" : "子 Agent",
         stateLabel(pick(work, "state", "status")),
         pick(work, "dependsOn", "dependencies", "depends_on"),
       ]),
@@ -972,6 +985,20 @@ $("pause").addEventListener("click", () =>
 $("resume").addEventListener("click", () =>
   pause(false).catch((error) => notice(errorText(error))),
 );
+$("csv-workflow-switch").addEventListener("click", async () => {
+  const id = current, toggle = $("csv-workflow-switch");
+  if (!id || toggle.hidden || toggle.disabled) return;
+  const enabled = toggle.getAttribute("aria-pressed") !== "true";
+  toggle.disabled = true;
+  try {
+    await api("/runs/" + encodeURIComponent(id) + "/csv-workflow", { enabled });
+    if (current === id) notice(enabled ? "已开启此工单的本机 CSV。" : "已关闭。已开始的步骤会完成，排队的本机 CSV 步骤已取消。");
+  } catch (error) {
+    if (current === id) notice(errorText(error));
+  } finally {
+    if (current === id) await loadRun();
+  }
+});
 void refreshAll();
 setInterval(() => {
   if (!document.hidden) {

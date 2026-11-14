@@ -17,14 +17,17 @@ test('label boundary fixtures: Unicode length, sanitization, fallback and title 
 });
 
 test('alias file covers producer inventory in both directions, with native IDs unchanged',()=>{
-  const table=read('tool-aliases-v1.json'),ids=emittedToolIds();
-  assert.equal(table.version,1);
+  const table=read('tool-aliases-v2.json'),previous=read('tool-aliases-v1.json'),ids=emittedToolIds();
+  assert.equal(table.version,2);
+  for (const [id, alias] of Object.entries(previous.aliases)) assert.equal(table.aliases[id], alias);
   assert.deepEqual(Object.keys(table.aliases).sort(),ids);
   for(const id of ids) {
     assert.equal(typeof table.aliases[id],'string');
     const state=reduceHud(reduceHud(emptyHud(),{kind:'turn.start',turn:1,agentId:'a',at:'2026-11-12T00:00:00Z'}),
       {kind:'tool.start',tool:id,callId:'c',agentId:'a',at:'2026-11-12T00:00:01Z'});
-    assert.equal(hudSnapshot(state,'2026-11-12T00:00:01Z').agents[0].lastEvent.tool,id);
+    const snapshot = hudSnapshot(state,'2026-11-12T00:00:01Z');
+    assert.equal(snapshot.agents[0].lastEvent.tool,id);
+    assert.equal(snapshot.aliasVersion,id === 'collab_csv_workflow' ? 2 : 1);
   }
   assert.equal(hudSnapshot(emptyHud(),'2026-11-12T00:00:00Z').aliasVersion,1);
 });

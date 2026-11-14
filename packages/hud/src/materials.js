@@ -18,7 +18,7 @@
  * 规格：`HUD-设计规格-v0.4-待实现.md`
  */
 
-/** The alias-table version this build understands (contracts/tool-aliases-v1.json). */
+/** The alias table emitted by the standalone HUD collector. */
 export const ALIAS_VERSION = 1;
 
 /**
@@ -109,6 +109,14 @@ export const ALIASES = Object.freeze({
   working_directory: 'working_directory',
   write: 'write',
 });
+const aliasTables = new Map([
+  [ALIAS_VERSION, ALIASES],
+  [2, Object.freeze({ ...ALIASES, collab_csv_workflow: 'collab_csv_workflow' })],
+]);
+
+export function supportsAliasVersion(version) {
+  return aliasTables.has(version);
+}
 
 /**
  * Which alias belongs to which material. `null`-producing groups live below.
@@ -125,7 +133,7 @@ const ALIAS_GROUPS = Object.freeze({
     'session_event_search', 'session_event_trace', 'cordis_inspect_list',
     'cordis_inspect_query',
   ],
-  doc: ['read', 'read_image', 'write', 'edit', 'apply_patch', 'str_replace_editor', 'present'],
+  doc: ['read', 'read_image', 'write', 'edit', 'apply_patch', 'str_replace_editor', 'present', 'collab_csv_workflow'],
   web: ['web_fetch', 'web_search'],
   shell: [
     'bash', 'pwsh', 'ralph', 'working_directory', 'load_workspace_dependencies',
@@ -355,7 +363,7 @@ const OTHER_VERB = Object.freeze({ zh: '处理中', en: 'Working' });
 
 const VERB_GROUPS = Object.freeze({
   read: ['read', 'read_image', 'session_event_read', 'get_goal', 'collab_read_evidence', 'orchestrator_read', 'schedule_view'],
-  write: ['write', 'edit', 'apply_patch', 'str_replace_editor', 'present', 'todo_write', 'create_goal', 'update_goal', 'schedule_create', 'schedule_edit', 'send_message', 'collab_send', 'collab_publish', 'orchestrator_reply'],
+  write: ['write', 'edit', 'apply_patch', 'str_replace_editor', 'present', 'todo_write', 'create_goal', 'update_goal', 'schedule_create', 'schedule_edit', 'send_message', 'collab_send', 'collab_publish', 'collab_csv_workflow', 'orchestrator_reply'],
   execute: ['bash', 'pwsh', 'ralph', 'run_code', 'working_directory', 'load_workspace_dependencies', 'terminal_open', 'terminal_read', 'terminal_send', 'terminal_close', 'terminal_list', 'terminal_signal', 'job_list', 'job_output', 'job_kill', 'skill'],
   scan: ['glob', 'grep', 'session_search', 'session_trace', 'session_event_search', 'session_event_trace', 'cordis_inspect_list', 'cordis_inspect_query'],
   fetch: ['web_fetch', 'web_search'],
@@ -417,9 +425,10 @@ export function seatIndexOf(materialId) {
   return SEAT_ORDER.indexOf(materialId);
 }
 
-/** The alias table this build ships; `data/tool-aliases-v1.json` is generated from it. */
-export function aliasTable() {
-  return { version: ALIAS_VERSION, aliases: { ...ALIASES } };
+/** Contract mapping for a known alias-table version. */
+export function aliasTable(version = ALIAS_VERSION) {
+  const aliases = aliasTables.get(version);
+  return aliases && { version, aliases: { ...aliases } };
 }
 
 /**
@@ -433,13 +442,13 @@ export function aliasTable() {
  */
 export function materialForTool(toolId, options = {}) {
   const aliasVersion = options.aliasVersion ?? ALIAS_VERSION;
-  const aliasOk = aliasVersion === ALIAS_VERSION;
+  const aliases = aliasTables.get(aliasVersion);
   const tool = typeof toolId === 'string' ? toolId : '';
-  if (!aliasOk) return { tool, alias: null, material: OTHER_MATERIAL, known: false, aliasOk: false };
-  if (tool === '' || !Object.hasOwn(ALIASES, tool)) {
+  if (!aliases) return { tool, alias: null, material: OTHER_MATERIAL, known: false, aliasOk: false };
+  if (tool === '' || !Object.hasOwn(aliases, tool)) {
     return { tool, alias: null, material: OTHER_MATERIAL, known: false, aliasOk: true };
   }
-  const alias = ALIASES[tool];
+  const alias = aliases[tool];
   const material = Object.hasOwn(MATERIAL_BY_ALIAS, alias) ? MATERIAL_BY_ALIAS[alias] : OTHER_MATERIAL;
   return { tool, alias, material, known: true, aliasOk: true };
 }

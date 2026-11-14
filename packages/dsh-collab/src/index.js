@@ -24,6 +24,8 @@ import { InputDelivery } from "./input-delivery.js";
 import { concludeSubmitted } from "./turn-completion.js";
 import { readTaskEvidence } from "./evidence-page.js";
 import { syncHostQuestions, installBlockingAttention } from './hud-host.js';
+import { createTaskReuseCsvExecutor } from './task-reuse-csv.js';
+import { csvWorkflowSchema, csvWorkflowToolDefinition, csvChildWorkflowSchema, csvChildWorkflowToolDefinition, createCsvWorkflowHandler } from './csv-workflow-tool.js';
 
 export const name = "dsh-collab";
 export const inject = [
@@ -48,6 +50,10 @@ export const Config = Schema.object({
   protocolFile: Schema.string().default(""),
   encodingEvidenceFile: Schema.string().default(""),
   moneyPolicyFile: Schema.string().default(""),
+  csvWorkspace: Schema.string().default(""),
+  csvEngine: Schema.string().default(""),
+  csvPython: Schema.string().default("python"),
+  csvDefaultEnabled: Schema.boolean().default(false),
   minEvidenceSamples: Schema.natural().min(5).default(5),
 });
 
@@ -93,6 +99,10 @@ export async function apply(ctx, rawConfig = {}) {
     throw error;
   }
   let manager;
+  const csvWorkspace = config.csvWorkspace ? resolve(config.csvWorkspace) : null;
+  const csvExecutor = csvWorkspace && config.csvEngine ? createTaskReuseCsvExecutor({
+    enginePath: resolve(config.csvEngine), python: config.csvPython ?? "python", scratchDir: resolve(config.stateDir, "csv-work"),
+  }) : undefined;
   try { manager = new CollaborationManager({
     store,
     registry,
@@ -105,6 +115,8 @@ export async function apply(ctx, rawConfig = {}) {
     minEvidenceSamples: config.minEvidenceSamples,
     explicitEvidenceRefs: config.explicitEvidenceRefs ?? false,
     moneyPolicy,
+    csvExecutor,
+    csvDefaultEnabled: config.csvDefaultEnabled,
   }); } catch (error) { store.close(); throw error; }
   const backend = createDshBackend(ctx, manager, config);
   manager.backend = backend;
@@ -148,6 +160,7 @@ export async function apply(ctx, rawConfig = {}) {
     }
     return manager.bindRoot(agent.id,{threadTitle});
   };
+  const runCsvWorkflow = csvExecutor && createCsvWorkflowHandler({ manager, csvWorkspace });
   const install = (agent) => {
     if (registrations.has(agent) || closed) return;
     const disposers = [];
@@ -241,6 +254,13 @@ export async function apply(ctx, rawConfig = {}) {
         })
         .strict(),
       (args) => manager.delegate(agent, args),
+    );
+    const childCsv = Boolean(manager.binding(agent.id)?.parentId);
+    if (csvExecutor) register(
+      "collab_csv_workflow",
+      childCsv ? csvChildWorkflowToolDefinition.description : csvWorkflowToolDefinition.description,
+      childCsv ? csvChildWorkflowSchema : csvWorkflowSchema,
+      (args, execution) => runCsvWorkflow(agent, args, execution),
     );
     register(
       "collab_delegate_task",

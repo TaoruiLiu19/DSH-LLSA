@@ -221,7 +221,7 @@ test('an event-window hole syncs state without animating', () => {
 test('an alias version this build does not ship degrades labels only', () => {
   const view = createView({ sessionId: 's', now: 0 });
   foldSnapshot(view, snapshot({
-    aliasVersion: 2,
+    aliasVersion: 99,
     seq: 2,
     agents: [agent('worker', 'running')],
     events: [
@@ -232,6 +232,22 @@ test('an alias version this build does not ship degrades labels only', () => {
   assert.equal(view.aliasOk, false);
   assert.equal(view.materials.get('other').label, '其它');
   assert.equal(view.state, 'running', 'the state still shows');
+});
+
+test('a v2 orchestrator snapshot displays a native CSV workflow in the document seat', () => {
+  const view = createView({ sessionId: 's', now: 0 });
+  foldSnapshot(view, snapshot({
+    aliasVersion: 2,
+    seq: 2,
+    agents: [agent('worker', 'running')],
+    events: [
+      { seq: 1, agentId: 'worker', kind: 'turn.start', at: '2026-11-12T03:20:00Z', tool: null },
+      { seq: 2, agentId: 'worker', kind: 'tool.start', at: '2026-11-12T03:20:01Z', tool: 'collab_csv_workflow' },
+    ],
+  }), 0, { sessionId: 's' });
+  assert.equal(view.aliasOk, true);
+  assert.equal(view.materials.get('doc').label, '文档');
+  assert.equal(view.materials.has('other'), false);
 });
 
 test('stalled is copied, never computed by the client', () => {

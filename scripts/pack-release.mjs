@@ -1,4 +1,4 @@
-/** Rebuild the packages and assemble an install kit containing compiled code only. */
+/** Rebuild the packages and assemble an install kit containing runtime files. */
 import { mkdir, readFile, writeFile, copyFile, readdir, cp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -126,6 +126,10 @@ for (const [directoryName, label] of packageLocations) {
       join(repositoryRoot, 'dist/collab.js'),
       join(packageContents, 'lib/index.js'),
     );
+    await mkdir(join(packageContents, 'lib/csv-engine'), { recursive: true });
+    for (const filename of ['csv_core.py', 'csv_pipeline.py', 'run_workflow.py']) {
+      await copyFile(join(repositoryRoot, 'dist/csv-engine', filename), join(packageContents, 'lib/csv-engine', filename));
+    }
     manifest.main = './lib/index.js';
     manifest.exports = { '.': './lib/index.js' };
     delete manifest.dsh;
@@ -184,6 +188,7 @@ for (const filename of ['LICENSE', 'NOTICE', 'README.md', 'CHANGELOG.md']) {
 await cp(join(repositoryRoot, 'assets'), join(kitDirectory, 'assets'), { recursive: true });
 await mkdir(join(kitDirectory, 'examples'), { recursive: true });
 await copyFile(join(repositoryRoot, 'examples/money-policy.example.json'), join(kitDirectory, 'examples/money-policy.example.json'));
+await cp(join(repositoryRoot, 'examples/csv-workflow'), join(kitDirectory, 'examples/csv-workflow'), { recursive: true });
 await cp(join(repositoryRoot, 'contracts'), join(kitDirectory, 'contracts'), { recursive: true });
 
 /** Derive the install graph from the reviewed lockfile, without resolving ranges. */

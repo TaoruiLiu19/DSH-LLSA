@@ -8,6 +8,8 @@ import { summarizeAccounting } from './accounting.js';
 import { MoneyBudget } from './money-budget.js';
 import { HudProjection } from './hud-projection.js';
 import { hudLabel } from './hud-label.js';
+import { runAgentCsvStep } from './csv-agent-step.js';
+import { runCsvBatch, validateCsvBatch } from './csv-workflow-batch.js';
 
 /** @typedef {import('./types.js').JsonValue} JsonValue */
 /**
@@ -25,6 +27,8 @@ import { hudLabel } from './hud-label.js';
  * @property {number} [minEvidenceSamples]
  * @property {boolean} [explicitEvidenceRefs]
  * @property {object|null} [moneyPolicy]
+ * @property {(job: {input: Buffer, steps: JsonValue[], signal?: AbortSignal}) => Promise<{output: Buffer, receipt: object}>} [csvExecutor]
+ * @property {boolean} [csvDefaultEnabled]
  */
 
 const uid = prefix => `${prefix}-${randomUUID()}`;
@@ -38,11 +42,15 @@ export const COMPACT_GUIDANCE = 'Use collab_publish for public steps and final r
 /** Host orchestration; backend owns actual DSH handles. No model reasoning is fabricated. */
 export class CollaborationManager {
   /** @param {ManagerOptions} options */
-  constructor({ store, registry = new ProtocolRegistry(), countTokens, counterName = 'heuristic', backend = null, maxActiveChildren = 2, maxRunTokens = 200000, maxOutputTokens = 4096, closeTimeoutMs = 10000, qualityEvidence = [], minEvidenceSamples = MIN_EVIDENCE_SAMPLES, explicitEvidenceRefs = false, moneyPolicy = null }) {
+  constructor({ store, registry = new ProtocolRegistry(), countTokens, counterName = 'heuristic', backend = null, maxActiveChildren = 2, maxRunTokens = 200000, maxOutputTokens = 4096, closeTimeoutMs = 10000, qualityEvidence = [], minEvidenceSamples = MIN_EVIDENCE_SAMPLES, explicitEvidenceRefs = false, moneyPolicy = null, csvExecutor, csvDefaultEnabled = false }) {
     if (typeof explicitEvidenceRefs !== 'boolean') fail('INVALID_ARGUMENT','explicitEvidenceRefs must be boolean');
     this.explicitEvidenceRefs = explicitEvidenceRefs;
     this.store = store; this.registry = registry; this.countTokens = countTokens; this.counterName = counterName;
     this.backend = backend; this.maxActiveChildren = maxActiveChildren; this.maxRunTokens = maxRunTokens; this.maxOutputTokens = maxOutputTokens;
+    this.csvExecutor = csvExecutor;
+    this.csvControllers = new Map();
+    this.csvDefaultEnabled = Boolean(csvExecutor && csvDefaultEnabled);
+    this.csvPolicy = new Map();
     this.qualityEvidence = normalizeQualityEvidence([...qualityEvidence]);
     if (!Number.isSafeInteger(minEvidenceSamples) || minEvidenceSamples < MIN_EVIDENCE_SAMPLES) fail('INVALID_ARGUMENT', 'Encoding evidence requires at least five samples');
     this.minEvidenceSamples = minEvidenceSamples;
@@ -60,6 +68,7 @@ export class CollaborationManager {
       for (const agent of store.getAgents(run.id)) this.bindings.set(agent.id, agent);
       for (const event of this.#events(run.id)) {
         if (event.kind === 'run_limits') this.runLimits.set(run.id, event.payload);
+        if (event.kind === 'csv_workflow_policy') this.csvPolicy.set(run.id, event.payload.enabled === true);
         if (event.kind === 'dispatch_hold') event.payload.paused ? this.held.add(run.id) : this.held.delete(run.id);
         if (event.kind === 'dispatch_hold') {
           if (!event.payload.paused) this.moneyHolds.delete(run.id);
@@ -86,7 +95,7 @@ export class CollaborationManager {
   status() {
     return { name: 'dsh-collab', version: '0.4.1', purpose: '紧凑通信与可追溯协作，不是保密加密', dshVersion: '0.2.2-rc.1 (integration target)', counter: this.counterName,
       mode: this.backend ? 'managed_tools' : 'local', bridge: this.bridge?.compatibility() ?? null,
-      capabilities: { persistentHistory: true, adaptiveEncoding: true, qualityGatedEncoding: true, deterministicChinese: true, managedDelegation: !!this.backend, hostComputation: true, directHostCompletion: true, computationVersions: ['1','2','3'], receiptBoundAcceptance: true, computationVerificationScope: 'bound_contract_fields_only', realModelSavingsVerified: false, automaticLanguageLearning: false },
+      capabilities: { persistentHistory: true, adaptiveEncoding: true, qualityGatedEncoding: true, deterministicChinese: true, managedDelegation: !!this.backend, hostComputation: true, directHostCompletion: true, hostCsvWorkflow: !!this.csvExecutor, computationVersions: ['1','2','3'], receiptBoundAcceptance: true, computationVerificationScope: 'bound_contract_fields_only', realModelSavingsVerified: false, automaticLanguageLearning: false },
       encodingPolicy: { minimumSamples: this.minEvidenceSamples, configuredEvidence: this.qualityEvidence.length, defaultFallback: 'json' },
       limitations: ['自由文本保留原文；中文字段由模板展开', '词典需要评测后发布，不会在线猜测新语义', this.bridge?.compatibility().capabilities?.domainEvents ? '已记录原生领域事件、报告与验收；不记录隐藏思维链' : '旧版桥接仅捕获已接入的报告通道'] };
   }
@@ -109,6 +118,7 @@ export class CollaborationManager {
     const events = [...this.#events(id)], usage = this.store.usageSummary(id);
     const hud=this.hud.snapshot(id);
     return { v:1,seq:hud.seq,now:hud.now,hud,run: { ...run, paused: this.held.has(id) }, agents: this.store.getAgents(id), workItems: this.store.getWorkItems(id), events, usage,
+      csvWorkflow: { available: !!this.csvExecutor, enabled: this.isCsvWorkflowEnabled(id) },
       accounting: summarizeAccounting(this.store.listRequests(id), usage.usage, events),
       moneyBudget: this.moneyBudget?.snapshot(id) ?? { enabled: false } };
   }
@@ -119,22 +129,51 @@ export class CollaborationManager {
     if (prior?.parentId) fail('FORBIDDEN', 'A child cannot be rebound as a root');
     if(prior && prior.runId!==details.runId) this.hud.accept(prior.runId,{kind:'agent.cancel',agentId:sessionId,reason:'assignment_rebound',at:new Date().toISOString()});
     const id = details.runId ?? `run-${sessionId}`;
-    if (!this.store.getRun(id)) this.store.createRun({ id, ticketId: details.ticketId ?? `local-${sessionId}`, assignmentId: details.assignmentId ?? 'local', title: details.title ?? 'DSH 协作会话', source: details.ticketId ? 'superagent' : 'dsh', rootSessionId: sessionId });
+    if (!this.store.getRun(id)) {
+      this.store.createRun({ id, ticketId: details.ticketId ?? `local-${sessionId}`, assignmentId: details.assignmentId ?? 'local', title: details.title ?? 'DSH 协作会话', source: details.ticketId ? 'superagent' : 'dsh', rootSessionId: sessionId });
+    }
+    if (this.csvDefaultEnabled && !this.csvPolicy.has(id) && !this.store.getAgents(id).some(agent => !agent.parentId)) {
+      this.setRunCsvWorkflowEnabled(id, true);
+    }
     const label=hudLabel({assignmentTitle:details.assignmentTitle ?? details.title,threadTitle:details.threadTitle,role:'coordinator'});
     const agent = this.store.saveAgent({ id: sessionId, runId: id, parentId: null, role: 'coordinator', hudLabel:label, state: 'active', managed: true });
     this.bindings.set(sessionId, agent); this.hud.register(agent); return agent;
   }
   binding(sessionId) { return this.bindings.get(sessionId); }
+  isCsvWorkflowEnabled(runId) { return !!this.csvExecutor && this.csvPolicy.get(runId) === true; }
+  setCsvWorkflowEnabled(sessionId, enabled) {
+    const binding = this.binding(sessionId);
+    if (!binding || binding.parentId) fail('FORBIDDEN', 'Only the owning coordinator can change its run policy.');
+    return this.setRunCsvWorkflowEnabled(binding.runId, enabled);
+  }
+  setRunCsvWorkflowEnabled(runId, enabled) {
+    if (!this.store.getRun(runId)) fail('NOT_FOUND', 'Run not found');
+    if (!this.csvExecutor || this.closing) fail('CSV_WORKFLOW_UNAVAILABLE', 'The local CSV executor is unavailable.');
+    if (typeof enabled !== 'boolean') fail('INVALID_ARGUMENT', 'CSV workflow state must be a boolean.');
+    if (enabled !== this.isCsvWorkflowEnabled(runId)) {
+      this.store.appendEvent({ runId, stepId: 'csv-policy', kind: 'csv_workflow_policy', payload: { enabled } });
+      this.csvPolicy.set(runId, enabled);
+      if (!enabled) for (const item of this.store.getWorkItems(runId)) {
+        if (item.state !== 'ready' || !item.csvWorkflow) continue;
+        this.store.appendEvent({ runId, stepId: item.id, attemptId: item.attemptId, kind: 'csv_workflow_cancelled',
+          payload: { reason: 'CSV_WORKFLOW_DISABLED' } });
+        this.store.saveWorkItem({ ...item, state: 'cancelled' });
+        this.pending.delete(item.attemptId);
+      }
+    }
+    return { enabled };
+  }
   /** Persist before issuing handles; old accepted results never satisfy new task inputs. */
   syncNativeInput(runId, snapshot) {
     const current = this.nativeInputs.register(runId, snapshot);
     for (const item of this.store.getWorkItems(runId)) {
       if (item.inputVersion === current.version || item.staleInput) continue;
       this.store.saveWorkItem({ ...item, state: 'rejected', staleInput: true });
-      this.hud.accept(runId,{kind:'agent.cancel',agentId:item.childId,reason:'input_invalidated',at:new Date().toISOString()});
+      if (item.childId) this.hud.accept(runId,{kind:'agent.cancel',agentId:item.childId,reason:'input_invalidated',at:new Date().toISOString()});
       this.store.appendEvent({ runId, stepId: item.id, attemptId: item.attemptId, kind: 'input_invalidated',
         payload: { previousVersion: item.inputVersion ?? null, currentVersion: current.version, resultEventId: item.resultEventId ?? null } });
-      this.pending.delete(item.childId);
+      this.pending.delete(item.childId ?? item.attemptId);
+      this.csvControllers.get(item.attemptId)?.abort();
       const handle = this.handles.get(item.childId);
       if (handle) Promise.resolve().then(() => handle.dispose()).catch(error => { this.lastError = error.message; });
     }
@@ -167,6 +206,16 @@ export class CollaborationManager {
     const binding = this.bindings.get(sessionId);
     if (toolName === 'collab_delegate_task') return !!binding && !binding.parentId && !!this.nativeInputs.current(binding.runId);
     const item = binding?.workItemId ? this.store.getWorkItems(binding.runId).find(work => work.id === binding.workItemId) : null;
+    if (toolName === 'collab_csv_workflow') {
+      if (!binding || !this.isCsvWorkflowEnabled(binding.runId)) return false;
+      if (!binding.parentId) return true;
+      if (!item?.csvStepAllowed || item.computation || item.attemptId !== binding.attemptId || !['starting','running'].includes(item.state)
+        || this.finalEvents.has(sessionId) || !this.isCurrentInput(item)) return false;
+      return item.inputRefs.some(ref => {
+        try { return this.store.getArtifact(ref).mediaType.startsWith('text/csv'); }
+        catch { return false; }
+      });
+    }
     if (binding?.parentId && item?.computation) {
       if (item.attemptId !== binding.attemptId || !ACTIVE.has(item.state) || this.finalEvents.has(sessionId)) return false;
       return (item.completionMode === 'model-copy' ? ['collab_compute','collab_publish'] : ['collab_complete_computation']).includes(toolName);
@@ -185,6 +234,21 @@ export class CollaborationManager {
   #event(binding, stepId, kind, payload, parents = []) {
     this.#current(binding);
     return this.store.appendEvent({ runId: binding.runId, stepId, attemptId: binding.attemptId ?? 'root', kind, payload: { ...copy(payload), actorId: binding.id }, parents });
+  }
+  /** @param {string} sessionId @param {{inputRef: string, steps: JsonValue[]}} args @param {{signal?: AbortSignal}} [options] */
+  async runCsvStep(sessionId, { inputRef, steps }, { signal } = {}) {
+    const binding = this.binding(sessionId);
+    if (!binding?.parentId) fail('FORBIDDEN', 'Only an active child can run an in-place CSV step.');
+    if (!this.isCsvWorkflowEnabled(binding.runId)) fail('CSV_WORKFLOW_DISABLED', 'Local CSV processing is off for this run.');
+    if (!this.isToolAvailable(sessionId, 'collab_csv_workflow')) fail('FORBIDDEN', 'CSV processing is unavailable in this task phase.');
+    const item = this.#current(binding);
+    const assertCurrent = () => {
+      if (this.closed || this.binding(sessionId)?.attemptId !== binding.attemptId ||
+        this.binding(binding.parentId)?.runId !== binding.runId || this.finalEvents.has(sessionId) ||
+        !['starting','running'].includes(this.#current(binding).state)) fail('STALE_ATTEMPT', 'The child can no longer publish a CSV result.');
+    };
+    return runAgentCsvStep({ binding, item, inputRef, steps, csvExecutor: this.csvExecutor,
+      readArtifact: (runId, ref) => this.readArtifact(runId, ref), assertCurrent, store: this.store, signal });
   }
   select(payload, modelProfile = 'unverified', taskType = 'generic') {
     if (!TASK_TYPES.includes(taskType)) fail('INVALID_ARGUMENT', 'Unknown encoding task type');
@@ -369,12 +433,19 @@ export class CollaborationManager {
     }
     return results;
   }
-  async delegate(parent, { objective, wholeTask = false, role = 'researcher', dependsOn = [], acceptance = [], inputRefs = [], workItemId, retryOf, computation, completionMode, taskType, maxOutputTokens = this.maxOutputTokens }) {
+  async delegateCsvBatch(parent, { objective, sources, steps, dependsOn, retryOf }, options) {
+    const batch = validateCsvBatch(sources, steps);
+    return this.delegate(parent, { objective, dependsOn, retryOf, inputRefs: batch.sources.map(source => source.inputRef),
+      csvWorkflow: batch }, options);
+  }
+  /** @param {{signal?: AbortSignal}} [options] */
+  async delegate(parent, { objective, wholeTask = false, role = 'researcher', dependsOn = [], acceptance = [], inputRefs = [], workItemId = undefined, retryOf, computation = undefined, completionMode = undefined, csvWorkflow, csvStepAllowed = false, taskType = undefined, maxOutputTokens = this.maxOutputTokens }, options = {}) {
+    const { signal } = options;
+    signal?.throwIfAborted();
     if (this.closing) fail('CLOSING', 'Plugin is draining');
     const b = this.bindings.get(parent.id) ?? this.bindRoot(parent.id);
     maxOutputTokens=Math.min(maxOutputTokens,this.runLimits.get(b.runId)?.maxOutputTokens??this.maxOutputTokens);
     if (b.parentId) fail('DEPTH_LIMIT', 'MVP delegation is owned by the root coordinator');
-    if (!this.backend) fail('UNAVAILABLE', 'DSH backend is not connected');
     if (!['researcher', 'reviewer', 'implementer', 'tester'].includes(role)) fail('INVALID_ROLE', 'Unsupported role');
     if (typeof wholeTask !== 'boolean') fail('INVALID_ARGUMENT', 'wholeTask must be boolean');
     if (wholeTask) {
@@ -384,6 +455,10 @@ export class CollaborationManager {
     }
     if (typeof objective !== 'string' || !objective.trim()) fail('INVALID_ARGUMENT', 'Objective required');
     const old = retryOf ? this.#item(b.runId, retryOf) : null;
+    const csv = csvWorkflow;
+    if ((csv || csvStepAllowed) && !this.isCsvWorkflowEnabled(b.runId)) fail('CSV_WORKFLOW_DISABLED', 'Local CSV processing is off for this run.');
+    if (csv && (!this.csvExecutor || computation || old?.computation)) fail('INVALID_CSV_WORKFLOW', 'CSV work requires a configured local executor and a single workflow.');
+    if (!csv && !this.backend) fail('UNAVAILABLE', 'DSH backend is not connected');
     taskType=taskType??old?.taskType??'generic';
     if(!TASK_TYPES.includes(taskType))fail('INVALID_ARGUMENT','Unknown encoding task type');
     const mode = completionMode ?? old?.completionMode ?? 'host';
@@ -403,8 +478,18 @@ export class CollaborationManager {
     const rawContract = computation ?? old?.computation;
     const contract = rawContract ? normalizeContract({ ...rawContract, inputRef: this.nativeInputs.resolve(b.runId, rawContract.inputRef, { currentOnly: true }) }) : null;
     if (contract && !inputRefs.includes(contract.inputRef)) fail('INVALID_CONTRACT', 'Computation inputRef must be an authorized task inputRef');
-    const attemptId = uid('try'); const childId = uid('collab');
-    const item = { id, runId: b.runId, objective, role, dependsOn, acceptance, inputRefs, inputVersion: nativeInput?.version ?? null, taskType,attemptId, childId, parentId: parent.id, state: 'ready', maxOutputTokens, epoch: (old?.epoch ?? 0) + 1, ...(contract ? { computation: contract, contractHash: canonicalHash(contract), completionMode: mode } : {}) };
+    if (csvStepAllowed && (csv || contract || !inputRefs.some(ref => this.store.getArtifact(ref).mediaType.startsWith('text/csv')))) {
+      fail('INVALID_CSV_WORKFLOW', 'A child CSV step requires an explicitly assigned CSV artifact.');
+    }
+    if (csv) {
+      const csvRefs = csv.sources ? validateCsvBatch(csv.sources, csv.steps).sources.map(source => source.inputRef) : [csv.inputRef];
+      if (!Array.isArray(csv.steps) || csv.steps.length < 1 || csv.steps.length > 8 ||
+        csvRefs.some(ref => !inputRefs.includes(ref) || !this.store.getArtifact(ref).mediaType.startsWith('text/csv'))) {
+        fail('INVALID_CSV_WORKFLOW', 'CSV work requires authorized CSV artifacts and 1–8 steps.');
+      }
+    }
+    const attemptId = uid('try'); const childId = csv ? null : uid('collab');
+    const item = { id, runId: b.runId, objective, role, dependsOn, acceptance, inputRefs, inputVersion: nativeInput?.version ?? null, taskType,attemptId, childId, parentId: parent.id, state: 'ready', maxOutputTokens, epoch: (old?.epoch ?? 0) + 1, ...(contract ? { computation: contract, contractHash: canonicalHash(contract), completionMode: mode } : {}), ...(csv ? { csvWorkflow: copy(csv) } : {}), ...(csvStepAllowed ? { csvStepAllowed: true } : {}) };
     if (this.moneyBudget) Object.assign(item, { moneyContract: { policyId:this.moneyBudget.policy.id,
       currency:this.moneyBudget.policy.currency, maxBranchCost:this.moneyBudget.policy.maxBranchCost,
       scope:'work_item_including_retries', sharedPeriodAndRunLimits:true } });
@@ -414,30 +499,111 @@ export class CollaborationManager {
       retryReason: old.staleInput ? 'input_changed' : old.state === 'unknown' ? 'recovery_unknown' :
         old.state === 'cancelled' ? 'cancelled' : old.state === 'rejected' ? 'acceptance_rejected' : 'execution_failed' } : {};
     this.store.appendEvent({ runId: b.runId, stepId: id, attemptId, kind: 'work_planned', payload: { ...item, ...retry } });
-    this.#saveAgent({ id: childId, runId: b.runId, parentId: parent.id, role, hudLabel:hudLabel({assignmentTitle:objective,role}), state: 'planned', workItemId: id, attemptId, epoch: item.epoch, managed: true });
-    this.pending.set(childId, { item, parent });
+    if (childId) this.#saveAgent({ id: childId, runId: b.runId, parentId: parent.id, role, hudLabel:hudLabel({assignmentTitle:objective,role}), state: 'planned', workItemId: id, attemptId, epoch: item.epoch, managed: true });
+    this.pending.set(childId ?? attemptId, { item, parent, signal: csv ? signal : undefined });
     await this.schedule(b.runId);
-    return { workItemId: id, runId: b.runId, childId, attemptId, state: this.#item(b.runId, id).state };
+    const scheduled = this.#item(b.runId, id);
+    const result = csv && scheduled.resultEventId ? this.store.getEvent(scheduled.resultEventId) : null;
+    return { workItemId: id, runId: b.runId, childId, attemptId, state: scheduled.state,
+      ...(result ? { eventId: result.id, result: result.payload.result ?? result.payload.error } : {}) };
+  }
+  async #executeCsv(item, signal) {
+    const { runId, attemptId, csvWorkflow } = item;
+    const event = (kind, payload, parents = []) => this.store.appendEvent({ runId, stepId: item.id, attemptId, kind, payload, parents });
+    const current = () => {
+      if (this.closed || this.bindings.get(item.parentId)?.runId !== runId) return false;
+      const stored = this.#item(runId, item.id);
+      return stored.attemptId === attemptId && this.isCurrentInput(stored);
+    };
+    try {
+      signal.throwIfAborted();
+      const receipt = { provenance: 'host_csv_workflow', contractHash: canonicalHash(csvWorkflow) };
+      if (csvWorkflow.sources) {
+        const completed = await runCsvBatch({ ...csvWorkflow, csvExecutor: this.csvExecutor, signal,
+          readArtifact: ref => this.readArtifact(runId, ref),
+          assertCurrent: () => { if (!current()) fail('STALE_INPUT', 'The work item changed during execution.'); } });
+        if (!current()) return;
+        signal.throwIfAborted();
+        const refs = new Map();
+        const outputs = completed.map(({ label, inputRef, output, receipt: detail }) => {
+          const outputArtifactRef = refs.get(inputRef) ?? this.store.putArtifact(output, { mediaType: 'text/csv' }).id;
+          refs.set(inputRef, outputArtifactRef);
+          return { label, inputRef, outputArtifactRef, ...detail };
+        });
+        const result = { outputs, modelCalls: 0 };
+        const manifest = this.store.putArtifact(result, { mediaType: 'application/json' });
+        this.store.submitHostCsvWorkItem(item, { receipt, result, artifactRef: manifest.id,
+          outputRefs: outputs.map(output => output.outputArtifactRef) });
+      } else {
+        const { data } = this.readArtifact(runId, csvWorkflow.inputRef);
+        const { output, receipt: detail } = await this.csvExecutor({ input: data, steps: copy(csvWorkflow.steps), signal });
+        if (!current()) return;
+        signal.throwIfAborted();
+        const artifact = this.store.putArtifact(output, { mediaType: 'text/csv' });
+        const result = { ...detail, outputArtifactRef: artifact.id, modelCalls: 0 };
+        this.store.submitHostCsvWorkItem(item, { receipt: { ...receipt, inputRef: csvWorkflow.inputRef },
+          result, artifactRef: artifact.id, outputRefs: [] });
+      }
+    } catch (error) {
+      if (!current()) return;
+      if (signal.aborted) {
+        const cancelled = event('csv_workflow_cancelled', { reason: 'CSV_WORKFLOW_INTERRUPTED' });
+        this.store.saveWorkItem({ ...item, state: 'cancelled', resultEventId: cancelled.id });
+        return;
+      }
+      const failure = event('csv_workflow_failed', { provenance: 'host_csv_workflow',
+        error: { code: error.code ?? 'CSV_EXECUTION_FAILED', message: String(error.message ?? error).slice(0, 500),
+          ...(error.ruleCode ? { ruleCode: error.ruleCode } : {}),
+          ...(error.sourceLabel ? { sourceLabel: error.sourceLabel } : {}),
+          ...(Number.isInteger(error.step) ? { step: error.step } : {}) } });
+      this.store.saveWorkItem({ ...item, state: 'failed', resultEventId: failure.id });
+    }
   }
   async schedule(runId) {
     if (this.closing || this.held.has(runId)) return;
-    for (const [childId, request] of this.pending) {
-      const { item, parent } = request; if (item.runId !== runId) continue;
+    for (const [pendingId, request] of this.pending) {
+      if (this.closing || this.held.has(runId)) return;
+      let { item, parent } = request; if (item.runId !== runId) continue;
+      const { childId } = item;
       const current = this.#item(runId, item.id);
-      if (current.attemptId !== item.attemptId || current.state !== 'ready') { this.pending.delete(childId); continue; }
+      if (current.attemptId !== item.attemptId || current.state !== 'ready') { this.pending.delete(pendingId); continue; }
       const tasks = this.store.getWorkItems(runId);
       if (tasks.filter(x => ACTIVE.has(x.state)).length >= this.maxActiveChildren) return;
-      if (!item.dependsOn.every(dep => tasks.find(t => t.id === dep)?.state === 'succeeded')) continue;
+      const dependencies = item.dependsOn.map(dep => tasks.find(t => t.id === dep));
+      if (!dependencies.every(dep => dep?.state === 'succeeded')) continue;
+      if (item.csvWorkflow) {
+        this.pending.delete(pendingId);
+        this.store.saveWorkItem({ ...item, state: 'running' });
+        const controller = new AbortController();
+        this.csvControllers.set(item.attemptId, controller);
+        const signal = request.signal ? AbortSignal.any([controller.signal, request.signal]) : controller.signal;
+        const completion = this.#executeCsv(item, signal).finally(() => {
+          this.csvControllers.delete(item.attemptId);
+          this.settlements.delete(pendingId);
+        });
+        this.settlements.set(pendingId, completion);
+        await completion;
+        continue;
+      }
       if (WRITERS.has(item.role) && tasks.some(t => ACTIVE.has(t.state) && WRITERS.has(t.role))) continue;
       if (this.store.usageSummary(runId).totalTokens >= (this.runLimits.get(runId)?.maxRunTokens??this.maxRunTokens)) { this.pause(runId, true, 'token_budget'); return; }
-      this.pending.delete(childId);
+      this.pending.delete(pendingId);
+      const csvResults = dependencies.filter(dep => dep.csvWorkflow)
+        .map(dep => this.store.getEvent(dep.resultEventId)?.payload);
+      const labelledCsv = csvResults.flatMap(result => result?.result?.outputs?.map(output => ({
+        label: output.label, ref: output.outputArtifactRef,
+      })) ?? []);
+      const csvOutputs = csvResults.flatMap(result => result?.result?.outputs
+        ? result.result.outputs.map(output => output.outputArtifactRef) : [result?.artifactRef]).filter(Boolean);
+      if (csvOutputs.length) item = { ...item, inputRefs: [...new Set([...item.inputRefs, ...csvOutputs])] };
       this.store.saveWorkItem({ ...item, state: 'starting' });
       this.#saveAgent({ ...this.bindings.get(childId), state: 'starting' });
       const completion = item.completionMode === 'model-copy'
         ? 'Call collab_compute with {}. Publish the exact returned result fields and receiptId using collab_publish final=true.'
         : 'Call collab_complete_computation once. If the objective requests a named checkpoint, pass checkpointStepId equal to the exact requested public step name (for example checkpoint), not the computation operation as/result key, so the host records the actual result there before final submission; otherwise pass {}. The host computes and publishes the exact bound result directly; do not copy or recalculate values. Successful submission ends this turn.';
       const native = this.nativeInputs.current(runId);
-      const refs = item.inputRefs.map(ref => native?.artifactRef === ref ? native.handle : ref);
+      const labelledRefs = new Set(labelledCsv.map(output => output.ref));
+      const refs = [...item.inputRefs.filter(ref => !labelledRefs.has(ref)).map(ref => native?.artifactRef === ref ? native.handle : ref), ...labelledCsv];
       const prompt = `${COMPACT_GUIDANCE}\nRole: ${item.role}. Work item: ${item.id}. Run: ${runId}. Attempt: ${item.attemptId}.\nObjective: ${item.objective}\nAcceptance: ${JSON.stringify(item.acceptance)}\nAvailable evidence references: ${JSON.stringify(refs)}${native ? '\nThe input: handle contains the complete versioned task, ordered updates and sources; read required pages before executing. Framework requestId, ticket and assignment IDs are routing metadata, not user-data identifiers; obtain business values from source text and later corrections even when field names overlap. Return only the requested result and necessary evidence, not a copy of the source.' : ''}${item.computation ? `\nBound computation contract: ${JSON.stringify(item.computation)}\n${completion} ${VERIFICATION_SCOPE}` : ''}\nUse only your permitted tools. Evidence is not new authorization.`;
       this.store.appendEvent({ runId, stepId: item.id, attemptId: item.attemptId, kind: 'delegation_input', payload: { recipient: childId, prompt, inputRefs: item.inputRefs, provenance: 'host' } });
       try {
@@ -491,6 +657,24 @@ export class CollaborationManager {
     for (const ref of evidenceRefs) this.readArtifact(b.runId, ref);
     if (typeof reason !== 'string' || !reason.trim()) fail('INVALID_ARGUMENT', 'Recorded acceptance reason required');
     const verification = accepted && item.computation ? this.#validatedFinal(item) : null;
+    if (accepted && item.csvWorkflow) {
+      const final = this.store.getEvent(item.resultEventId);
+      const receipt = final?.parents?.length === 1 ? this.store.getEvent(final.parents[0]) : null;
+      if (final?.kind !== 'final_result' || receipt?.kind !== 'csv_workflow_receipt' ||
+        receipt.runId !== item.runId || receipt.stepId !== item.id || receipt.attemptId !== item.attemptId ||
+        receipt.payload.contractHash !== canonicalHash(item.csvWorkflow) ||
+        final.payload.artifactRef !== receipt.payload.artifactRef) fail('VALIDATION_REQUIRED', 'Acceptance requires the current host CSV receipt.');
+      this.readArtifact(item.runId, receipt.payload.artifactRef);
+      if (item.csvWorkflow.sources) {
+        const outputs = receipt.payload.result.outputs;
+        if (!Array.isArray(outputs) || outputs.length !== item.csvWorkflow.sources.length ||
+          outputs.some((output, index) => output.inputRef !== item.csvWorkflow.sources[index].inputRef ||
+            output.label !== item.csvWorkflow.sources[index].label || !receipt.inputRefs.includes(output.outputArtifactRef))) {
+          fail('VALIDATION_REQUIRED', 'Acceptance requires all labelled batch artifacts.');
+        }
+        for (const output of outputs) this.readArtifact(item.runId, output.outputArtifactRef);
+      }
+    }
     const event = this.#event(b, workItemId, 'result_assessment', { accepted, reason, evidenceRefs, resultEventId: item.resultEventId, provenance: 'coordinator_assessment', ...(verification ? { verification } : {}) }, [item.resultEventId]);
     this.store.saveWorkItem({ ...item, state: accepted ? 'succeeded' : 'rejected', verificationEventId: event.id });
     this.schedule(b.runId).catch(e => { this.lastError = e.message; });
@@ -513,6 +697,22 @@ export class CollaborationManager {
     const item = this.#current(binding); this.store.saveWorkItem({ ...item, state: 'stopping' });
     this.store.appendEvent({ runId, stepId: item.id, attemptId: item.attemptId, kind: 'interrupt_requested', payload: { agentId } });
     await handle.dispose(); return { interrupted: true, agentId };
+  }
+  async interruptCsvWorkItem(runId, workItemId) {
+    const item = this.#item(runId, workItemId);
+    if (item.csvWorkflow && item.state === 'ready') {
+      this.pending.delete(item.attemptId);
+      const event = this.store.appendEvent({ runId, stepId: item.id, attemptId: item.attemptId, kind: 'csv_workflow_cancelled',
+        payload: { reason: 'CSV_WORKFLOW_INTERRUPTED' } });
+      this.store.saveWorkItem({ ...item, state: 'cancelled', resultEventId: event.id });
+      return { interrupted: true, workItemId };
+    }
+    const controller = this.csvControllers.get(item.attemptId);
+    if (!item.csvWorkflow || !controller || !ACTIVE.has(item.state)) fail('UNAVAILABLE', 'No active local CSV work item.');
+    this.store.saveWorkItem({ ...item, state: 'stopping' });
+    controller.abort();
+    await this.settlements.get(item.attemptId);
+    return { interrupted: true, workItemId };
   }
   canUseTool(sessionId, toolName) {
     const b = this.bindings.get(sessionId); if (!b) return;
@@ -562,6 +762,7 @@ export class CollaborationManager {
   async close() {
     if (this.closePromise) return this.closePromise;
     this.closing = true; this.pending.clear();
+    for (const controller of this.csvControllers.values()) controller.abort();
     this.closePromise = (async () => {
       let timer;
       const drain = (async () => {

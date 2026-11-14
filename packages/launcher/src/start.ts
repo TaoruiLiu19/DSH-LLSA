@@ -14,10 +14,10 @@ export function parsePort(value = '3095'): number {
   return port;
 }
 
-export function makePatch(state: string, collab: string, superagent: string, moneyPolicyFile = '') {
+export function makePatch(state: string, collab: string, superagent: string, moneyPolicyFile = '', csv?: { csvWorkspace: string, csvEngine: string, csvPython: string, csvDefaultEnabled: boolean }) {
   return [{ insert: [
     { id: 'llsa', name: collab, config: { stateDir: join(state, 'collab'), bridgeProjection: true,
-      explicitEvidenceRefs: true, encodingEvidenceFile: '', moneyPolicyFile, maxRunTokens: 300000, maxOutputTokens: 1536 } },
+      explicitEvidenceRefs: true, encodingEvidenceFile: '', moneyPolicyFile, maxRunTokens: 300000, maxOutputTokens: 1536, ...csv } },
     { id: 'llsa-worker', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'dsh-superagent-worker', plugins: [] } },
     { id: 'llsa-router', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'dsh-superagent-router', plugins: [] } },
     { id: 'llsa-superagent', name: superagent, config: { stateDir: join(state, 'superagent'), localOnly: true, requireCollaboration: true } },
@@ -48,7 +48,16 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   await mkdir(state, { recursive: true });
   const patch = join(state, 'launch.json');
   const moneyPolicyFile = process.env.DSH_LLSA_MONEY_POLICY ? resolve(process.env.DSH_LLSA_MONEY_POLICY) : '';
-  await writeFile(patch, JSON.stringify(makePatch(state, collab.replaceAll('\\', '/'), superagent.replaceAll('\\', '/'), moneyPolicyFile), null, 2));
+  const csv = process.env.DSH_LLSA_CSV_WORKSPACE ? {
+    csvWorkspace: resolve(process.env.DSH_LLSA_CSV_WORKSPACE),
+    csvEngine: local ? join(here, 'csv-engine', 'run_workflow.py') : join(dirname(collab), 'csv-engine', 'run_workflow.py'),
+    csvPython: process.env.DSH_LLSA_CSV_PYTHON ?? 'python',
+    csvDefaultEnabled: process.env.DSH_LLSA_CSV_DEFAULT_ON === '1',
+  } : undefined;
+  if (csv && (!existsSync(csv.csvEngine) || !existsSync(csv.csvWorkspace))) {
+    throw new Error('请检查 DSH_LLSA_CSV_WORKSPACE，并运行 npm run build 或重新解压完整安装包。');
+  }
+  await writeFile(patch, JSON.stringify(makePatch(state, collab.replaceAll('\\', '/'), superagent.replaceAll('\\', '/'), moneyPolicyFile, csv), null, 2));
   console.log(`DSH-LLSA · http://127.0.0.1:${port}/orchestrator/local\n先打开下方 Harness 认证链接，再进入任务页。Ctrl+C 停止。`);
   const child = spawn(process.execPath, [join(dirname(harnessPath), 'lib/bin.js'), 'web', '--patch', patch,
     '--host', '127.0.0.1', '--port', String(port), '--no-open'], { stdio: 'inherit', windowsHide: true });

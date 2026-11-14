@@ -14,6 +14,7 @@ import { parseExactJson } from './protocol.js';
  * @property {(runId: string, stepId: string, options: import('./types.js').StepQuery) => unknown} inspect
  * @property {(runId: string, ref: string, options: import('./types.js').ArtifactRange) => {data: Buffer, mediaType: string}|Promise<{data: Buffer, mediaType: string}>} readArtifact
  * @property {(runId: string, paused: boolean) => unknown} pause
+ * @property {(runId: string, enabled: boolean) => unknown} [setRunCsvWorkflowEnabled]
  * @property {(runId: string, agentId: string) => unknown} interrupt
  * @property {(command: {runId: string, action: string, idempotencyKey: string}) => unknown} operatorControl
  * @property {{status: () => unknown, getTask: (id: string) => unknown, startTask: (body: JsonObject) => unknown, previewCalculation: (body: JsonObject) => unknown, commitCalculation: (body: JsonObject) => unknown, interruptTask: (id: string) => unknown}} [localWorkspace]
@@ -192,6 +193,12 @@ export function registerHttp(ctx, service) {
         only(body, ['paused']);
         if (typeof body.paused !== 'boolean') throw httpError(400, 'BOOLEAN_REQUIRED');
         return send(res, 200, { result: await service.pause(runId, body.paused) });
+      }
+      if (tail === 'csv-workflow') {
+        only(body, ['enabled']);
+        if (typeof body.enabled !== 'boolean') throw httpError(400, 'BOOLEAN_REQUIRED');
+        if (!service.setRunCsvWorkflowEnabled) throw httpError(409, 'CAPABILITY_UNAVAILABLE');
+        return send(res, 200, { result: await service.setRunCsvWorkflowEnabled(runId, body.enabled) });
       }
       if (tail === 'interrupt') {
         only(body, ['agentId']);

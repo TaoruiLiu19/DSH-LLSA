@@ -23,12 +23,16 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: '**/package-lock.json'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
       - run: npm install --global npm@11.7.0
       # Root postinstall runs npm ci for all three independent packages.
       - run: npm ci --no-audit --no-fund
       - run: npm run check
       - run: npm run typecheck
       - run: npm test
+      - run: npm run check --prefix packages/hud
       - run: npm run pack:release
       - name: Verify byte-for-byte rebuild
         run: npm run verify:rebuild

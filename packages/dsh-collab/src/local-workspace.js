@@ -110,7 +110,7 @@ export class LocalWorkspace {
     // Waiting in the host avoids burning model calls on repeated status polling.
     if(!this.manager.binding(agent.id)?.parentId){
       const pending=this.manager.store.getWorkItems(job.runId).filter(item=>ACTIVE.has(item.state))
-        .map(item=>this.manager.settlements.get(item.childId)).filter(Boolean);
+        .map(item=>this.manager.settlements.get(item.childId ?? item.attemptId)).filter(Boolean);
       if(pending.length)await Promise.all(pending);
     }
     this._throwIfStopped(job);
@@ -142,8 +142,10 @@ export class LocalWorkspace {
       if(this.closed)return;
       this.manager.pause(job.runId,true,'local_task_stop');
       job.handle?.agent.cancel({kind:'user'});
-      const owned=this.manager.store.getWorkItems(job.runId).filter(item=>ACTIVE.has(item.state));
-      await Promise.allSettled(owned.map(item=>this.manager.interrupt(job.runId,item.childId)));
+      const owned=this.manager.store.getWorkItems(job.runId).filter(item=>ACTIVE.has(item.state)||item.csvWorkflow&&item.state==='ready');
+      await Promise.allSettled(owned.map(item=>item.csvWorkflow
+        ? this.manager.interruptCsvWorkItem(job.runId,item.id)
+        : this.manager.interrupt(job.runId,item.childId)));
     })();
     return job.abortPromise;
   }
@@ -159,7 +161,7 @@ export class LocalWorkspace {
       for(let turn=0;turn<32;turn++) {
         await job.handle.agent.whenIdle();this._throwIfStopped(job);
         const children=this.manager.store.getWorkItems(job.runId);
-        await Promise.all(children.map(item=>this.manager.settlements.get(item.childId)).filter(Boolean));this._throwIfStopped(job);
+        await Promise.all(children.map(item=>this.manager.settlements.get(item.childId ?? item.attemptId)).filter(Boolean));this._throwIfStopped(job);
         await job.handle.agent.whenIdle();this._throwIfStopped(job);
         const sequence=this.manager.store.highWater(job.runId);
         if(sequence===prior&&!this.manager.store.getWorkItems(job.runId).some(item=>ACTIVE.has(item.state))){settled=true;break;}

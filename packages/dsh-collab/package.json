@@ -31,6 +31,7 @@
   },
   "files": [
     "src",
+    "csv-engine",
     "cordis.patch.yml",
     "LICENSE",
     "NOTICE"
