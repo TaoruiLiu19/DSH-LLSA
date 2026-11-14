@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+Documentation only: 0.4.1 went out before the install section was updated, so the
+published package page still described installing from a source directory. The
+README now offers `@dsh-llsa/hud` as the primary path and keeps the source
+directory for development.
+
 ## 0.4.1
 
 - **The field follows the host's theme.** It was drawn for a dark window only: on a
