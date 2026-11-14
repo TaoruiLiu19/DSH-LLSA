@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.3
+## 0.4.4
 
 - **等你确认 no longer outlives the question.** Two things could leave the field
   amber for good: the answer is a record in the session log that the live event

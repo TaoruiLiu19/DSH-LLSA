@@ -43,7 +43,7 @@ test('the bundle registers both seats and exports the plugin shape', () => {
 
 test('the manifest wires the patch, the client half and the display resources', () => {
   assert.equal(packageJson.name, '@dsh-llsa/hud');
-  assert.equal(packageJson.version, '0.4.3');
+  assert.equal(packageJson.version, '0.4.4');
   assert.equal(packageJson.dsh.bundle.patch, './cordis.patch.yml');
   assert.equal(packageJson.dsh.client.platform, 'web');
   assert.equal(packageJson.exports['.'], './src/index.js');
