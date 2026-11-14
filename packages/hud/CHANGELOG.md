@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.3
+
+- **等你确认 no longer outlives the question.** Two things could leave the field
+  amber for good: the answer is a record in the session log that the live event
+  stream does not always deliver, and reconciliation only ran when an event had
+  marked the state dirty — so the single pass that follows the ask never saw the
+  answer, and nothing ever re-read the log. Reconciliation now also runs while a
+  question is open (capped to a few passes per second; the loop stops by itself
+  once the set is empty), and a finished turn clears attention, because a
+  finished turn is not blocked on anybody.
+
 ## 0.4.2
 
 Documentation only: 0.4.1 went out before the install section was updated, so the

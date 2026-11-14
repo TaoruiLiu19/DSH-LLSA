@@ -137,11 +137,11 @@ test('a question raises attention, and a user message resolves it', () => {
   assert.ok(answered.events.some(event => event.kind === 'attention.resolved'));
 });
 
-test('a pending result is not an answer: the question stays open', () => {
+test('a pending result is not an answer: the result alone keeps the question open', () => {
   // `askTimed` resolves with `{ pending: true }` when the wait times out and the
   // Client never claimed the card. The question is still answerable, so the tool
-  // return must not clear the yellow light — and the turn ending must not turn
-  // the field green either.
+  // return must not clear the yellow light. The turn boundary does, because a
+  // finished turn is not blocked on anybody — see the assertion at the end.
   const collector = createCollector();
   collector.observeEvent('s', { type: 'turn/start', seq: 1, time: Date.parse('2026-11-12T03:20:00Z'), data: { turn: 1 } });
   collector.observeEvent('s', { type: 'tool/call', seq: 2, time: Date.parse('2026-11-12T03:20:01Z'), data: { callId: 'ask1', name: 'ask_user_question' } });
@@ -154,7 +154,31 @@ test('a pending result is not an answer: the question stays open', () => {
   collector.observeEvent('s', { type: 'turn/end', seq: 4, time: Date.parse('2026-11-12T03:20:31Z'), data: { reason: { kind: 'completed' } } });
   const afterTurn = collector.snapshotFor('s');
   assertSnapshotShape(afterTurn);
-  assert.equal(afterTurn.agents[0].state, 'waiting-human', 'the open question outranks the completion');
+  assert.equal(afterTurn.agents[0].state, 'done', 'a finished turn is not blocked on the human');
+});
+
+test('an answer that only reaches the log is picked up without a reload', () => {
+  // Observed in the wild: the question turned the field amber, the person
+  // answered, the agent carried on — and no `user/message` ever reached the
+  // event stream, so the light stayed amber until the page was reloaded (a
+  // reload reconciles once). Reconciliation therefore also runs while a
+  // question is open, not only when an event happened to mark the state dirty.
+  const messages = [
+    { role: 'user', content: [{ type: 'text', text: '开始' }] },
+    { role: 'assistant', content: [{ type: 'tool-call', id: 'ask1', name: 'ask_user_question' }] },
+  ];
+  const session = { deriveMessages: () => messages.map(message => ({ ...message })) };
+  const collector = createCollector();
+  const t0 = Date.parse('2026-11-12T03:20:00Z');
+  collector.observeEvent('s', { type: 'turn/start', seq: 1, time: t0, data: { turn: 1 } }, session);
+  collector.observeEvent('s', { type: 'tool/call', seq: 2, time: t0 + 1000, data: { callId: 'ask1', name: 'ask_user_question' } }, session);
+  assert.equal(collector.snapshotFor('s', { now: t0 + 2000 }).agents[0].state, 'waiting-human');
+
+  // The answer lands in the log, but nothing is delivered to the collector.
+  messages.push({ role: 'user', content: [{ type: 'text', text: '用方案 A' }] });
+  const settled = collector.snapshotFor('s', { now: t0 + 4000 });
+  assert.equal(settled.agents[0].state, 'running', 'the log closes the question on its own');
+  assert.ok(settled.events.some(event => event.kind === 'attention.resolved'));
 });
 
 test('a missed resolution is repaired from the session log', () => {

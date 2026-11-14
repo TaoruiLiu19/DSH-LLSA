@@ -447,12 +447,12 @@ export function createCollector(options = {}) {
         closeTools(state, agent, at);
         agent.turn = null;
         activity(state, agent, 'turn.end', at, { reason: outcome });
-        if (outcome === 'cancelled') {
-          clearAttention(state, agent, at, 'cancelled');
-          change(state, agent, 'idle', 'cancelled', at);
-        } else {
-          change(state, agent, agent.attention.size > 0 ? 'waiting-human' : outcome === 'completed' ? 'done' : outcome === 'failed' ? 'failed' : 'idle', 'turn_ended', at);
-        }
+        // A finished turn is not blocked on the human, so 等你确认 must not
+        // outlive it. The answer arrives as a separate record (and, as seen in
+        // practice, not always as a live event), so the turn boundary is the one
+        // moment where "is anyone still waiting?" has a definite answer.
+        clearAttention(state, agent, at, 'turn_ended');
+        change(state, agent, outcome === 'cancelled' ? 'idle' : outcome === 'completed' ? 'done' : outcome === 'failed' ? 'failed' : 'idle', outcome === 'cancelled' ? 'cancelled' : 'turn_ended', at);
         break;
       }
       default:
@@ -555,15 +555,28 @@ export function createCollector(options = {}) {
     });
   }
 
+  /** True while any agent still carries an open question. */
+  function anyAttentionOpen(state) {
+    for (const agent of state.agents.values()) {
+      if (agent.attention.size > 0) return true;
+    }
+    return false;
+  }
+
   /** The contract snapshot for one session. */
   function snapshotFor(sessionId, options2 = {}) {
     const state = sessions.get(String(sessionId));
     const now = Number.isFinite(options2.now) ? options2.now : Date.now();
     const selfId = String(sessionId);
-    if (state !== undefined && state.dirty === true && now - (state.lastReconcile ?? 0) >= 300) {
-      // Recompute "waiting for the human" from the log before answering, so a
-      // missed resolution event cannot leave the field stuck on 等你确认. Capped
-      // to a few reads per second: the projection is a full pass over the log.
+    // Recompute "waiting for the human" from the log before answering, so a
+    // missed resolution event cannot leave the field stuck on 等你确认.
+    //
+    // The `dirty` flag alone is not enough: the answer is a record in the log
+    // that the live event stream does not always deliver (a page reload fixes
+    // it because the reload reconciles once). So while a question is open we
+    // keep re-reading, capped to a few passes per second — and the loop stops
+    // by itself as soon as the set is empty.
+    if (state !== undefined && now - (state.lastReconcile ?? 0) >= 300 && (state.dirty === true || anyAttentionOpen(state))) {
       const root = state.agents.get(selfId);
       reconcileAttention(state, root, now);
       state.dirty = false;
