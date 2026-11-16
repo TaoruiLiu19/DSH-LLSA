@@ -1,33 +1,63 @@
-# HUD for WorkBuddy
+# HUD for WorkBuddy（本地网页版）
 
-把 DSH 版 HUD 搬到 WorkBuddy 的宿主壳。**只读、零运行时依赖、不覆盖对话区**。
+把 DSH 版 HUD 搬到 WorkBuddy 的**本地网页形态**：hook → 本地服务 → 浏览器窗口。只读、零运行时依赖、不打包成插件。
 
 ## 它是什么
 
-"单核双壳"里的 WorkBuddy 壳：
+"单核双壳"里的 WorkBuddy 壳，只保留网页这一层：
 
 - `core/` —— 从 `../hud/src` 同步来的共享内核（model / materials / labels / render），1826 行，零 DOM 依赖。
 - `lib/` —— WorkBuddy 专属适配：hook JSON → hud-v1 事件、工具名归一化。
-- `hooks/hooks.json` —— 把 15 类 hook 事件转给本地服务。
-- `bin/` —— 本地服务与 hook 转发脚本。
-- `view/` —— 独立窗口的 canvas 视图（不依赖 React，不用 DSH 的 overlay 插槽）。
+- `bin/hud-service.mjs` —— 本地只读服务，接收事件、提供快照和网页。
+- `bin/hook-emit.mjs` —— hook 转发脚本，stdin JSON → 本地服务，失败静默退出 0。
+- `view/` —— canvas 视图页面（不依赖 React，不用 DSH 的 overlay 插槽）。
 
-DSH 原包 `packages/hud` 保持原样，继续在 DSH 里工作。
+DSH 原包 `packages/hud` 保持原样，继续在 DSH 里工作。本包不进任何插件市场。
 
 ## 本地使用
 
+### 1. 启动服务
+
 ```bash
-# 开发期用 --plugin-dir 直接加载，不需要发布
-codebuddy --plugin-dir ./packages/hud-workbuddy
-
-# 启动服务
 node packages/hud-workbuddy/bin/hud-service.mjs
-
-# 浏览器打开伴随窗口
-# http://127.0.0.1:4317/view?session=<session_id>
 ```
 
-插件启用后 hook 自动注册；改了文件运行 `/reload-plugins`。
+服务只监听 `127.0.0.1:4317`，可用环境变量 `HUD_PORT` 改端口。
+
+### 2. 打开网页
+
+```
+http://127.0.0.1:4317/view?session=<session_id>
+```
+
+浏览器打开即可，可拖到副屏。页面每 240ms 拉一次快照；顶部输入框可切换 session。
+
+### 3. 配置 hook（一次性）
+
+把下面内容合并进 `~/.workbuddy/settings.json` 的 `hooks` 字段（路径按本机实际位置改）：
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "PostToolUseFailure": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "PermissionDenied": [{ "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "Elicitation": [{ "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "ElicitationResult": [{ "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "StopFailure": [{ "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node \"E:/DSH-LLSA/DSH-LLSA/packages/hud-workbuddy/bin/hook-emit.mjs\"" }] }]
+  }
+}
+```
+
+改完下一次工具调用即生效，无需重启。hook 功能处于 Beta；`type: http` 的请求体契约未文档化，所以用 `command` 转发脚本，失败一律静默退出 0，不阻塞工具调用。
 
 ## 事件映射
 
@@ -51,7 +81,7 @@ node packages/hud-workbuddy/bin/hud-service.mjs
 | 你要改的东西 | 改哪里 |
 |---|---|
 | 材料分类、配色、文案、动效、fold 逻辑、生命周期 | `../hud/src`，然后 `npm run sync` |
-| hook 事件映射、工具名映射、端口、窗口布局 | 本包的 `lib/`、`bin/`、`view/` |
+| hook 事件映射、工具名映射、端口、网页布局 | 本包的 `lib/`、`bin/`、`view/` |
 | DSH 专属行为 | `../hud/src/index.js`、`focus.js`、`client-entry.js`（本包不碰） |
 
 `core/` 是**生成物，不要手改**。它带 `.manifest.json` 里的 sha256 指纹，`npm run check` 会拒绝被改过或没同步的副本。双包版本号要一起升。
@@ -64,17 +94,8 @@ npm run test    # 只跑测试
 
 ## 已知限制
 
-- WorkBuddy 没有前端 UI 插槽，HUD 只能是独立窗口，不能像 DSH 那样覆盖并模糊对话区。
-- Hook 功能处于 Beta；`type: http` 的请求体契约未文档化，所以这里用 `command` 转发脚本而不是裸 http hook。字段做了兼容解析，未来 SDK 稳定后可切到 http 以省掉每次的进程启动。
+- WorkBuddy 没有前端 UI 插槽，HUD 只能是独立网页，不能像 DSH 那样覆盖并模糊对话区。
 - 只跟随窗口里选中的那一个 session，没有多会话角标。
-- Windows 进程树回收会杀掉从 Bash 启动的窗口/服务进程，需要 WMI 或常驻浏览器。
+- Windows 进程树回收会杀掉从 Bash 启动的服务进程，需要 WMI 或让浏览器常驻。
 - 不解析工具返回值、不把静默当状态——这是从 DSH 内核继承的约束。
-
-## 本地分发（未上传）
-
-本包**没有发布到任何市场**。开发期用 `codebuddy --plugin-dir` 加载。将来要分发时，建一个带 `.codebuddy-plugin/marketplace.json` 的仓库指向本目录，用户执行：
-
-```
-/plugin marketplace add <owner>/<repo>
-/plugin install hud-workbuddy@<marketplace>
-```
+- 本包不发布到任何市场，也不需要插件装载器。

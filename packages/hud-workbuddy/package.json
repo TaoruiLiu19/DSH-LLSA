@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "WorkBuddy host shell for the shared DSH HUD core. No runtime dependencies.",
+  "description": "Local web HUD for WorkBuddy: hook events -> hud-v1 snapshots -> a browser canvas. No runtime dependencies, no plugin packaging.",
   "license": "MIT",
   "engines": {
     "node": ">=24.11.0"
