@@ -3,6 +3,7 @@
 </p>
 
 <h1 align="center">DSH-LLSA</h1>
+<p align="center"><strong>简体中文</strong> · <a href="https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/README.en.md">English</a></p>
 <p align="center"><strong>让多个 Agent 一起完成任务，让每一次协作更精简。</strong></p>
 <p align="center">DeepSeek Harness 上的本机多智能体工作台<br>由 <strong>LeanLink</strong> 连接任务分工、紧凑通信与可追溯记录。</p>
 
@@ -26,6 +27,18 @@
 适合从**资料齐全、范围明确、结果可核对**的任务开始：字段提取、规则核验、材料对比，或让多个子任务分别检查同一份输入。
 
 > **当前版本：0.4.2。** 快速开始面向本机单用户使用。工作台与记录保存在本机，推理使用你配置的模型 API；调用费用由使用者承担。
+
+## 组合包包含什么
+
+DSH-LLSA 把工单编排、Agent 协作和启动器装进同一个安装包，三个组件随 `npm ci` 一起安装。
+
+| 内置组件 | 使用时负责什么 |
+|---|---|
+| `@dsh-llsa/superagent` | 基于 DeepSeek 公开研究原型修改，负责接收本机工单、分派任务和验收交付 |
+| `@dsh-llsa/collab` | 管理子 Agent、紧凑回传、历史与用量记录，并提供可选的本机 CSV 执行器 |
+| `@dsh-llsa/launcher` | 按锁定版本启动 DeepSeek Harness，并加载上述组件 |
+
+使用 `/orchestrator/local` 提交工单，使用 `/collab` 查看协作记录。想在 Harness 对话界面实时看 Agent 状态时，可以[单独安装 HUD](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)。
 
 ## 快速开始
 
@@ -52,14 +65,16 @@ npm start
 <details>
 <summary><strong>使用构建包：跳过源码构建</strong></summary>
 
-在 [Actions](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml) 中打开一次成功运行，下载对应系统的构建产物 ZIP（需要登录 GitHub）。解压后找到 `dsh-llsa-0.4.2.tgz`，按同目录的 `SHA256SUMS` 核对，再解压并进入 `package/`：
+当前组合包构建产物通过 GitHub Actions 提供。登录 GitHub，在 [Actions](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml) 打开 `main` 分支的一次成功运行，然后在 **Artifacts** 中下载 `dsh-llsa-review-windows-latest` 或 `dsh-llsa-review-ubuntu-latest`。两套归档通过字节一致性检查。解压 ZIP，按同目录的 `SHA256SUMS` 核对 `dsh-llsa-0.4.2.tgz`，然后执行：
 
 ```sh
+tar -xzf dsh-llsa-0.4.2.tgz
+cd package
 npm ci
 npm start
 ```
 
-保留完整目录，特别是 `vendor/` 中的三个组件包。安装仍需要下载运行依赖，真实任务仍需模型 API。旧版 `0.4.0` 包不适用于本页。
+保留解压后目录里的 `vendor/`、`package.json` 和 `package-lock.json`。`vendor/` 已装入三个组件包，安装时还需要联网下载 Harness 等锁定依赖。真实任务使用自己配置的模型 API。
 
 </details>
 
@@ -69,9 +84,9 @@ npm start
 
 - 按 **Esc** 返回对话，点击状态胶囊重新查看；`Ctrl/Cmd+Shift+H` 临时隐藏。
 - **HUD 自身不调用模型**；LeanLink 优化协作通信，HUD 帮你看清运行状态。准确用量仍在 `/collab` 查看。
-- 当前 HUD 需在 Harness 插件页通过本地目录 `packages/hud` **单独安装并启用**。根目录 `npm start` 与组合构建包不会自动装入 HUD；浮层显示在 Harness 会话页。
+- 在 Harness 插件页单独安装并启用 `@dsh-llsa/hud`。开发时也可以使用源码目录 `packages/hud`。浮层显示在 Harness 会话页。
 
-→ **[HUD 安装、使用与常见问题](packages/hud/README.md)**
+→ **[HUD 安装、使用与常见问题](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)**
 
 ### 工单内置 CSV 工作流
 
@@ -97,7 +112,7 @@ npm start
 
 无需 API 的回归测试覆盖批次执行、产物验收和子 Agent 授权。按以上方式处理 CSV 时，确定性步骤在本机执行，模型规划、分析和验收仍会使用 token。含 CSV 工具事件的快照使用别名表 v2，识别该工具类别可使用本仓库 `packages/hud`。
 
-已保存规则、表头映射和 MCP 等用法见 [独立 Task Reuse 使用说明](task-reuse/README.md)。
+已保存规则、表头映射和 MCP 等用法见 [独立 Task Reuse 使用说明](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/task-reuse/README.md)。
 
 ## 第一次协作
 
@@ -225,10 +240,11 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 | DSH-LLSA 组合发行 / 启动器 | 0.4.2 |
 | `@dsh-llsa/collab` | 0.4.2 |
 | `@dsh-llsa/superagent` | 0.4.2 |
-| `@dsh-llsa/hud`（可选，单独安装） | 0.4.1 |
 | DeepSeek Harness | 0.2.2-rc.1 |
 
-包通过本地构建与随包文件安装，保持 `private: true`；这些名称不是已在 npm 发布的承诺。快速开始会启动指定版本的 Harness，尚不支持对任意已有实例一条 `dsh plugin add` 命令完成全部配置。
+三个内置组件通过组合包安装。启动器按锁文件使用指定版本的 Harness。HUD 的 npm 包单独发行，[安装与版本信息见 HUD 文档](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)。
+
+组合包使用基于 [DeepSeek Super-agent 研究原型](https://github.com/deepseek-ai/dsh-superagent-prototype/commit/8c32a9dc5d72c033816c6a8110b37f40cf94fba4) 的修改版。完整工单流程依赖这份修改版提供的输入版本、验收和停止恢复接口。上游发布新版后，先验证兼容性及旧状态的恢复，再随组合包更新。现有安装可继续按原锁文件运行。[上游署名与派生说明](NOTICE)
 
 默认本机入口不自动操作外部仓库或发布部署。源码保留上游外部集成能力；另行启用时可能使用本机 git、gh、lark 凭据并执行命令。`DSH_SUPERAGENT_BLOCKED_COMMANDS` 是建议性限制，不构成强制沙箱。服务仅供本机使用，不要直接暴露到公网。
 
