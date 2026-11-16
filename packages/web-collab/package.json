@@ -1,19 +1,55 @@
 {
   "name": "@dsh-llsa/web-collab",
   "version": "0.2.0",
-  "description": "Standalone DeepSeek Harness plugin for browser-assisted tasks",
+  "description": "Standalone DeepSeek Harness plugin for browser-assisted tasks: paste the material, get a second opinion, and keep verifying it yourself.",
   "license": "MIT",
+  "author": "Taorui Liu <liu_taorui@foxmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TaoruiLiu19/DSH-LLSA.git",
+    "directory": "packages/web-collab"
+  },
+  "homepage": "https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/packages/web-collab#readme",
+  "bugs": {
+    "url": "https://github.com/TaoruiLiu19/DSH-LLSA/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "web-collab",
+    "consultation",
+    "open-webui",
+    "review"
+  ],
   "type": "module",
   "main": "./src/index.js",
-  "files": ["src", "cordis.patch.yml", "README.md", "LICENSE"],
-  "scripts": { "test": "node --test test/*.test.js" },
-  "engines": { "node": ">=24.11.0", "dsh": "0.2.2-rc.1" },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "prepublishOnly": "npm test"
+  },
+  "engines": {
+    "node": ">=24.11.0",
+    "dsh": "0.2.2-rc.1"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
     "@deepseek-ai/dsh-llm": "0.2.2-rc.1"
   },
   "dsh": {
     "manifestVersion": 1,
-    "bundle": { "patch": "./cordis.patch.yml" }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

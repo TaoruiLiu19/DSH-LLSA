@@ -1,20 +1,60 @@
-# DSH-LLSA 网页协作
+# DSH web collaboration
 
-网页协作为任务提供初审建议或核对具体疑点。Harness Agent 保留核验原始资料与交付结果的职责。
+**A second opinion before you commit — without giving a web chat your files.**
 
-## 在组合包中启用
+[中文](README.zh.md) · [Changelog](https://github.com/TaoruiLiu19/DSH-LLSA/commits/main/packages/web-collab)
 
-网页协作默认关闭。安装依赖或从源码构建后，在启动 DSH-LLSA 的终端设置 `DSH_LLSA_WEB_COLLAB=1`。先打开终端的 Harness 认证链接，再进入同一地址的 `/web-collab`。选择任务并勾选 **网页协作** 才会使用咨询。清除该变量或改成 `0` 后重启，可关闭组合包内置的网页协作。
+[![npm](https://img.shields.io/npm/v/@dsh-llsa/web-collab.svg)](https://www.npmjs.com/package/@dsh-llsa/web-collab)
+[![downloads](https://img.shields.io/npm/dm/@dsh-llsa/web-collab.svg)](https://www.npmjs.com/package/@dsh-llsa/web-collab)
+[![license](https://img.shields.io/npm/l/@dsh-llsa/web-collab.svg)](LICENSE)
+[![node](https://img.shields.io/node/v/@dsh-llsa/web-collab.svg)](package.json)
+[![tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#development)
+[![dependencies](https://img.shields.io/badge/runtime%20dependencies-none-brightgreen.svg)](package.json)
 
-- 单 Agent 可接收粘贴的文本和 UTF-8 附件。填入初审建议后，Harness 发起一次生成请求来核对并交付。
-- 多智能体模式使用粘贴的任务资料。可留空初审建议，由子 Agent 自行判断是否需要核对疑点。每次子任务尝试最多咨询一次，问题上限 1024 UTF-8 字节。短回复随工具结果返回，完整 Markdown 留在本机协作记录供查阅。
-- 公开聊天网页使用手动复制和回填。子 Agent 咨询需保留 Markdown 第一行的咨询编号。配置 Open WebUI 可从其官方接口自动获取回复，启动前设置 `DSH_WEB_COLLAB_OPEN_WEBUI_URL`、`DSH_WEB_COLLAB_OPEN_WEBUI_MODEL` 和 `DSH_WEB_COLLAB_OPEN_WEBUI_KEY`。非本机实例使用 HTTPS。
+An opt-in plugin for DeepSeek Harness: it opens a small panel where you paste task material and a first-pass review, and the agent may consult a web chat to check a specific doubt. **The agent keeps the job of verifying the source material and the deliverable** — a reply is an opinion to check, not a result to trust.
 
-只提交可分享给所选服务的内容。网页回复作为待核验的意见。Open WebUI 所接模型的费用由其服务方另计，整单用量取决于咨询能否替代其他模型请求。
+It is off until you turn it on, it only runs behind a loopback web server, and nothing is sent anywhere unless you paste it.
 
-## 单独安装到 Harness
+## What actually happens
 
-需要 Node.js 24.11+、DeepSeek Harness `0.2.2-rc.1` 和供 `dsh plugin` 使用的 pnpm。从仓库根目录运行：
+| Shape | What it does |
+|---|---|
+| **Single agent** | Paste text or a UTF-8 attachment, add your first-pass advice, and the Harness makes one generation request to check it and deliver |
+| **Multi-agent** | Paste the task material; a sub-agent may decide on its own to check a doubt. At most **one consultation per attempt**, question capped at **1024 UTF-8 bytes**. The short reply rides back with the tool result; the full Markdown stays in the local collaboration record |
+| **Public chat page** | Manual copy and paste. A sub-agent's question keeps its consultation id on the first line of the Markdown. With Open WebUI configured, replies are fetched from its official API |
+
+## Turning it on
+
+The bundle ships it **disabled**. Start DSH-LLSA with the flag:
+
+```sh
+DSH_LLSA_WEB_COLLAB=1
+```
+
+Open the terminal's Harness auth link, then go to the same address at **`/web-collab`**. Pick a task, tick **网页协作**, and only then does a consultation happen. Clear the variable (or set it to `0`) and restart to turn the built-in copy off again.
+
+To fetch replies from Open WebUI automatically, set these **before** starting:
+
+```sh
+DSH_WEB_COLLAB_OPEN_WEBUI_URL=…
+DSH_WEB_COLLAB_OPEN_WEBUI_MODEL=…
+DSH_WEB_COLLAB_OPEN_WEBUI_KEY=…
+```
+
+A non-loopback instance must use HTTPS.
+
+## What leaves the machine
+
+- **Only what you paste or attach.** The panel does not read your repository, and the plugin does not sample your session.
+- **A loopback web server is required.** `apply()` refuses to mount on a non-loopback host.
+- **Requests are JSON, capped, and cached by nobody.** `Content-Type: application/json` is enforced, bodies are limited to 128 KiB, responses carry `no-store` and a strict CSP, and the panel is framed by `frame-ancestors 'none'`.
+- **Cost sits with the consulted provider.** An Open WebUI model bills its own service; whether the whole job gets cheaper depends on whether the advice replaces other model calls. This plugin does not claim a saving.
+
+## Install into Harness
+
+Requires **Node.js 24.11+**, DeepSeek Harness **`0.2.2-rc.1`**, and pnpm for `dsh plugin`.
+
+From the repository root:
 
 ```sh
 npm pack ./packages/web-collab
@@ -22,8 +62,33 @@ dsh plugin --profile web add ./dsh-llsa-web-collab-0.2.0.tgz
 dsh web --host 127.0.0.1 --port 3095 --no-open
 ```
 
-单独安装由 Harness 的 `web` 配置管理。使用组合包内置版本时，请先移除同一 Harness 配置中的独立安装，避免两份插件同时加载。
+Once published, the package name works too:
 
 ```sh
-npm --prefix ./packages/web-collab test
+dsh plugin --profile web add @dsh-llsa/web-collab
 ```
+
+A standalone install is managed by Harness's `web` profile. If you also use the copy bundled with DSH-LLSA, remove one of them first — two copies load twice.
+
+## Development
+
+```sh
+npm --prefix ./packages/web-collab install   # pulls the two peer dependencies
+npm --prefix ./packages/web-collab test      # 19 tests
+```
+
+Peer dependencies are `@deepseek-ai/cordis@4.1.0` and `@deepseek-ai/dsh-llm@0.2.2-rc.1`; both are provided by a Harness install, so the package ships with no runtime dependencies of its own.
+
+| Path | Responsibility |
+|---|---|
+| `src/index.js` | The service, the `/web-collab` routes, body limits and headers |
+| `src/panel.*` | The panel UI: tasks, advice, consultation list |
+| `src/single-agent.js` | Single-agent job lifecycle and its one generation request |
+| `src/child-consultations.js` | Per-attempt child consultations and their caps |
+| `src/browser-advisor.js` | Manual exchange and the Open WebUI client |
+| `src/native-handoff.js` | Handing evidence to native tickets |
+| `src/task-evidence.js` | Evidence validation and size limits |
+
+## License
+
+[MIT](LICENSE).
