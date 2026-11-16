@@ -1,0 +1,16 @@
+{
+  "name": "leanlink-codex",
+  "version": "0.1.0",
+  "description": "Compact Codex agent handoffs, immutable step history, and a read-only collaboration HUD.",
+  "repository": "https://github.com/TaoruiLiu19/DSH-LLSA",
+  "license": "MIT",
+  "keywords": ["codex", "leanlink", "multi-agent", "hud"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "LeanLink for Codex",
+    "shortDescription": "Compact agent handoffs and a local collaboration HUD.",
+    "category": "Developer Tools"
+  }
+}

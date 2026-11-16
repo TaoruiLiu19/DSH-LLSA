@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>LeanLink HUD · Codex</title>
+  <link rel="stylesheet" href="/hud.css">
+  <script type="module" src="/app.mjs"></script>
+</head>
+<body>
+  <div class="dashboard">
+    <header class="masthead">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><i></i></div>
+        <div><h1>LeanLink HUD</h1><p>Codex 智能体活动</p></div>
+      </div>
+      <p class="connection" id="connection" role="status" data-tone="unknown"><i aria-hidden="true"></i><span id="connection-text">正在连接</span></p>
+    </header>
+
+    <main>
+      <div class="toolbar">
+        <label for="session">会话</label>
+        <select id="session" disabled><option value="">暂无会话</option></select>
+        <button id="float" type="button" hidden>置顶画布</button>
+        <span id="float-error" class="muted" role="status" hidden>浏览器未能打开置顶窗口。</span>
+      </div>
+
+      <div class="overview">
+        <section class="panel field" aria-labelledby="field-heading">
+          <div class="panel-heading">
+            <h2 id="field-heading">协作态势</h2>
+            <span id="summary" class="muted"></span>
+          </div>
+          <div id="field-stage" class="field-stage">
+            <div id="floating-content" class="field-content">
+              <p id="float-session" class="float-session" hidden></p>
+              <div class="field-center">
+                <canvas id="field-canvas" aria-hidden="true" hidden></canvas>
+                <p id="field-empty" class="field-empty">正在读取会话…</p>
+              </div>
+            </div>
+            <p id="float-notice" class="field-empty" hidden>画布正在置顶窗口显示</p>
+          </div>
+        </section>
+
+        <section class="panel topology" aria-labelledby="tree-heading">
+          <div class="panel-heading"><h2 id="tree-heading">智能体关系</h2><span id="agent-count" class="count" hidden></span></div>
+          <div id="tree" class="tree-body"><p class="muted">尚无智能体记录</p></div>
+        </section>
+      </div>
+
+      <section class="panel timeline" aria-labelledby="history-heading">
+        <div class="panel-heading"><h2 id="history-heading">事件记录</h2><span id="history-window" class="muted"></span></div>
+        <div id="history"><p class="empty-row muted">尚无事件</p></div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

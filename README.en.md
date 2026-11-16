@@ -4,6 +4,8 @@
 
 DSH-LLSA is a local workspace for multi-agent tasks on DeepSeek Harness. The main agent delegates work, checks the results, and delivers the final answer. LeanLink exchanges compact structured results and keeps the underlying evidence available for review.
 
+This branch also includes a local Codex plugin with LeanLink tools and a collaboration HUD. [Codex adapter setup](https://github.com/TaoruiLiu19/DSH-LLSA/blob/feat/codex-leanlink-hud/packages/codex/README.en.md)
+
 The combined kit is for one user on a local machine. It includes the launcher, Super-agent, the collaboration workspace with a local CSV executor, and optional web collaboration. You supply the model API configuration in Harness. Start with tasks that have clear inputs and acceptance criteria, such as field extraction, document comparison, or applying a known rule to several CSV files.
 
 ## Install and start

@@ -6,7 +6,7 @@ if (!['ci', 'typecheck', 'test', 'build'].includes(command)) throw new Error('Un
 if (!process.env.npm_execpath) throw new Error('Run through npm: npm ci / npm run build');
 // Web Collab resolves its peers from the root install and has no separate build.
 const packages = ['dsh-collab', 'superagent', 'launcher'];
-if (command === 'test') packages.push('web-collab');
+if (command === 'test') packages.push('web-collab', 'codex');
 for (const name of packages) {
   // Collab is JavaScript, so validate its checked boundaries before root bundling.
   const operation = command === 'build' && name === 'dsh-collab' ? 'typecheck' : command;

@@ -7,6 +7,8 @@
 <p align="center"><strong>让多个 Agent 一起完成任务，让每一次协作更精简。</strong></p>
 <p align="center">DeepSeek Harness 上的本机多智能体工作台<br>由 <strong>LeanLink</strong> 连接任务分工、紧凑通信与可追溯记录。</p>
 
+使用 Codex 时，可单独安装本分支的 LeanLink 工具和协作 HUD。 [Codex 适配安装指南](https://github.com/TaoruiLiu19/DSH-LLSA/blob/feat/codex-leanlink-hud/packages/codex/README.md)
+
 <p align="center">
   <a href="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml"><img src="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml/badge.svg" alt="Build & Test"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-80cbc4" alt="MIT License"></a>
