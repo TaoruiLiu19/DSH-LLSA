@@ -7,14 +7,12 @@
 <p align="center"><strong>让多个 Agent 一起完成任务，让每一次协作更精简。</strong></p>
 <p align="center">DeepSeek Harness 上的本机多智能体工作台<br>由 <strong>LeanLink</strong> 连接任务分工、紧凑通信与可追溯记录。</p>
 
-使用 Codex 时，可单独安装本分支的 LeanLink 工具和协作 HUD。 [Codex 适配安装指南](https://github.com/TaoruiLiu19/DSH-LLSA/blob/feat/codex-leanlink-hud/packages/codex/README.md)
-
 <p align="center">
   <a href="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml"><img src="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml/badge.svg" alt="Build & Test"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-80cbc4" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/Node.js-24.11%2B-89b4fa" alt="Node.js 24.11+">
 </p>
-<p align="center"><a href="#快速开始">快速开始</a> · <a href="#第一次协作">第一次协作</a> · <a href="#认识-leanlink">认识 LeanLink</a> · <a href="#网页协作">网页协作</a> · <a href="#hud-专注视图">HUD 专注视图</a> · <a href="#使用帮助">使用帮助</a></p>
+<p align="center"><a href="#快速开始">快速开始</a> · <a href="#第一次协作">第一次协作</a> · <a href="#认识-leanlink">认识 LeanLink</a> · <a href="#网页协作">网页协作</a> · <a href="#hud-专注视图">Harness HUD</a> · <a href="#codex-分屏-hud">Codex HUD</a> · <a href="#使用帮助">使用帮助</a></p>
 
 ---
 
@@ -90,6 +88,10 @@ npm start
 - 在 Harness 插件页单独安装并启用 `@dsh-llsa/hud`。开发时也可以使用源码目录 `packages/hud`。浮层显示在 Harness 会话页。
 
 → **[HUD 安装、使用与常见问题](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)**
+
+### Codex 分屏 HUD
+
+从仓库源码安装独立的 **LeanLink for Codex** 插件，可保存分支结果和证据引用。启动本机 HUD 后，在 Windows 的 Codex 桌面端按 `Ctrl+T`，粘贴终端打印的地址，再按 `Ctrl+Shift+B` 循环切换至分屏。也可以在本机浏览器打开该地址。审核并信任插件 Hook 后，HUD 会显示宿主上报的父子 Agent、工作状态和待确认事件。 [Codex 安装及权限说明](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/codex/README.md)
 
 ### 工单内置 CSV 工作流
 
