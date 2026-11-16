@@ -1,0 +1,11 @@
+{
+  "generated": true,
+  "source": "../hud",
+  "files": {
+    "model.js": "sha256:96040b855dfa6fb4",
+    "materials.js": "sha256:fc3254c89271d1aa",
+    "labels.js": "sha256:ec9d4742bdd1b74a",
+    "render.js": "sha256:5ceaa868b2f85cc2",
+    "tool-aliases-v1.json": "sha256:4f6c7ad26e0790ae"
+  }
+}

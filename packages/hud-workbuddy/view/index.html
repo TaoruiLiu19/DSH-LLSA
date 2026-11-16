@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HUD · WorkBuddy</title>
+<style>
+  :root { color-scheme: dark; --bg:#14161a; --panel:#1c1f25; --line:#313640; --text:#e8eaed; --muted:#9aa0a8; --accent:#5dcaa5; }
+  :root[data-theme="light"] { color-scheme: light; --bg:#f7f8fa; --panel:#ffffff; --line:#dfe2e6; --text:#20242a; --muted:#626970; --accent:#0f6e56; }
+  * { box-sizing:border-box; }
+  html,body { height:100%; margin:0; }
+  body { background:var(--bg); color:var(--text); font:400 13px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif; display:flex; flex-direction:column; }
+  header,footer { flex:none; display:flex; align-items:center; gap:12px; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); }
+  footer { border-bottom:0; border-top:1px solid var(--line); color:var(--muted); }
+  .brand { font-weight:500; letter-spacing:.04em; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none; }
+  .dot.on { background:var(--accent); }
+  input,button { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:4px 10px; }
+  input { width:190px; }
+  button { cursor:pointer; }
+  .spacer { flex:1; }
+  #stage { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:12px; overflow:hidden; }
+  canvas { display:block; }
+  #task { color:var(--text); max-width:55vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #meta { margin-left:auto; font-variant-numeric:tabular-nums; }
+  .warn { color:#e0a13c; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <span class="brand">HUD</span>
+  <input id="session" spellcheck="false" aria-label="session id" placeholder="session id">
+  <span class="spacer"></span>
+  <span id="conn" style="color:var(--muted)">未连接</span>
+  <button id="theme" type="button">浅色</button>
+</header>
+<main id="stage"><canvas id="field" aria-label="agent activity field"></canvas></main>
+<footer>
+  <span id="task">等待事件</span>
+  <span id="pending" class="warn"></span>
+  <span id="meta">seq 0</span>
+</footer>
+<script type="module">
+import { createView, foldSnapshot, stepLifecycle, centerText } from '/core/model.js';
+import { drawField, ringGeometry } from '/core/render.js';
+
+const params = new URLSearchParams(location.search);
+const input = document.getElementById('session');
+const dot = document.getElementById('dot');
+const conn = document.getElementById('conn');
+const task = document.getElementById('task');
+const pending = document.getElementById('pending');
+const meta = document.getElementById('meta');
+const themeButton = document.getElementById('theme');
+const canvas = document.getElementById('field');
+
+input.value = params.get('session') || 'default';
+let theme = 'dark';
+let alpha = 1;
+let lastMain = '';
+let online = false;
+let view = createView({ sessionId: input.value, now: performance.now(), locale: 'zh' });
+
+themeButton.addEventListener('click', () => {
+  theme = theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = theme;
+  themeButton.textContent = theme === 'dark' ? '浅色' : '深色';
+});
+
+function updateChrome() {
+  dot.classList.toggle('on', online);
+  conn.textContent = online ? '已连接' : '未连接';
+  const text = view.taskText || centerText(view).main || '等待事件';
+  task.textContent = text;
+  task.title = text;
+  pending.textContent = view.pending ? '等你确认' : (view.stalled ? '可能卡住' : '');
+  meta.textContent = `seq ${view.seq} · ${view.state}`;
+}
+
+async function poll() {
+  const session = input.value || 'default';
+  if (session !== view.sessionId) {
+    view = createView({ sessionId: session, now: performance.now(), locale: view.locale });
+    lastMain = '';
+  }
+  try {
+    const response = await fetch(`/state?session=${encodeURIComponent(session)}`, { cache: 'no-store' });
+    const body = await response.json();
+    if (body.ok !== true) throw new Error('bad state');
+    foldSnapshot(view, body.snapshot, performance.now(), {
+      sessionId: session,
+      taskText: body.meta?.taskText,
+      source: 'hooks',
+    });
+    online = true;
+  } catch {
+    online = false;
+  }
+  updateChrome();
+  setTimeout(poll, 240);
+}
+
+function frame() {
+  const now = performance.now();
+  stepLifecycle(view, now);
+  const box = document.getElementById('stage').getBoundingClientRect();
+  const size = Math.max(120, Math.floor(Math.min(box.width, box.height) * 0.9));
+  const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+  if (canvas.width !== Math.round(size * dpr) || canvas.height !== Math.round(size * dpr)) {
+    canvas.width = Math.round(size * dpr);
+    canvas.height = Math.round(size * dpr);
+    canvas.style.width = `${size}px`;
+    canvas.style.height = `${size}px`;
+  }
+  const context = canvas.getContext('2d');
+  if (context !== null) {
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const main = centerText(view).main;
+    if (main !== lastMain) {
+      lastMain = main;
+      alpha = 0;
+    }
+    alpha = Math.min(1, alpha + 0.06);
+    drawField(context, view, ringGeometry(size), now, { centerAlpha: alpha, theme });
+  }
+  requestAnimationFrame(frame);
+}
+
+updateChrome();
+poll();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

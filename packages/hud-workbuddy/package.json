@@ -1,0 +1,17 @@
+{
+  "name": "@dsh-llsa/hud-workbuddy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WorkBuddy host shell for the shared DSH HUD core. No runtime dependencies.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "scripts": {
+    "sync": "node scripts/sync-core.mjs",
+    "check": "node scripts/sync-core.mjs --check && node scripts/run-tests.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "start": "node bin/hud-service.mjs"
+  }
+}
