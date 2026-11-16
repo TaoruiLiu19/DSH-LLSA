@@ -1,152 +1,151 @@
-# HUD 专注视图
+# DSH HUD — focus view
 
-**Agent 在忙什么，抬眼就能看懂。**
+**Know what your agent is doing, at a glance.**
+
+[中文](README.zh.md) · [Changelog](CHANGELOG.md) · [How it works](#how-it-works) · [Settings](#settings) · [Troubleshooting](#troubleshooting)
+
+[![npm](https://img.shields.io/npm/v/@dsh-llsa/hud.svg)](https://www.npmjs.com/package/@dsh-llsa/hud)
+[![downloads](https://img.shields.io/npm/dm/@dsh-llsa/hud.svg)](https://www.npmjs.com/package/@dsh-llsa/hud)
+[![license](https://img.shields.io/npm/l/@dsh-llsa/hud.svg)](LICENSE)
+[![node](https://img.shields.io/node/v/@dsh-llsa/hud.svg)](package.json)
+[![tests](https://img.shields.io/badge/tests-122%20passing-brightgreen.svg)](#development)
+[![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](package.json)
+[![awesome-dsh-plugin](https://img.shields.io/badge/awesome--dsh--plugin-listed-blueviolet.svg)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/README.md#L1837)
 
 <p align="center">
-  <img src="docs/hud-field-dark.png" width="48%" alt="深色主题下的 HUD：中心显示执行中，外圈是终端、代码、文档、检索，内圈两个子 Agent">
-  <img src="docs/hud-field-light.png" width="48%" alt="浅色主题下的同一块场：白色磨砂遮罩、深色文字，颜色跟着宿主走">
+  <img src="docs/hud-field-dark.png" width="48%" alt="Dark theme: the centre says 执行中, the ring shows terminal, code, document and search seats, two sub-agents on the inner ring">
+  <img src="docs/hud-field-light.png" width="48%" alt="Light theme: the same field with a pale scrim and dark ink">
 </p>
 
-<p align="center"><sub>图为按插件同一套几何与调色板离线渲染的示意，不是运行截图</sub></p>
+<p align="center"><sub>Renders of the real geometry and palette, not screenshots of a running app</sub></p>
 
-为 DeepSeek Harness Web 提供实时状态浮层：中心显示任务状态，外圈显示正在使用的工具类别，中间一层显示子 Agent。适合等待长任务、观察多智能体协作，以及及时发现需要你回复的问题。
+A read-only overlay for a DeepSeek Harness conversation. The centre says what the run is doing; fixed seats around the ring say what it is touching; a second line names the object. It exists for the two minutes you spend wondering *is it stuck, or still working?*
 
-[返回 DSH-LLSA](../../README.md) · [更新记录](CHANGELOG.md) · [npm](https://www.npmjs.com/package/@dsh-llsa/hud) · [它是怎么工作的](#它是怎么工作的) · [配置选项](#配置选项) · [常见问题](#常见问题)
+**It never calls a model, never writes a file, and never spends a token of its own.** It reads events and draws. A run you are watching still costs exactly what it cost before.
 
-## 一眼看懂协作现场
+## Why this one
 
-| 看哪里 | 你能知道什么 |
+- **One glance, not a log.** Seven state words (`执行中` / `计划中` / `思考中` / `停顿中` / `等你确认` / `成功` / `失败` / `待命`) in the centre, and activity on a ring that **does not re-flow**: a seat is pinned to an angle, so a new material does not make the whole field jump.
+- **Silent when it has nothing to say.** Unknown tools fall into one catch-all seat; bookkeeping (todos, goals, schedules) lights nothing at all and the centre says `计划中` instead. The HUD never invents a state it cannot see.
+- **Read-only by construction.** One GET, one snapshot, no writes, no approvals, no delegation. The Host half derives two hints (a language, a material) from a call's own arguments and forwards neither.
+- **Checks, not promises.** 122 tests, a contract fixture replay, a bundle-drift check, and `prepublishOnly` runs the same gate.
+
+## Install
+
+Requires **Node.js 24.11+** and a working **DeepSeek Harness Web**. The HUD is an optional bundle; installing it does not require building the rest of the workspace.
+
+1. Open **Plugins** in the Harness sidebar.
+2. Under install-bundle, paste the package name:
+
+   ```text
+   @dsh-llsa/hud
+   ```
+
+   Installing from a source checkout works too — paste the full path to `packages/hud` instead, and edits to `client.js` hot-replace:
+
+   ```text
+   D:/projects/DSH-LLSA/packages/hud
+   ```
+
+3. If the installer asks for a restart, restart the Harness and refresh the browser.
+
+Sessions that expose a `plugin_manager` tool can ask it to run `install_bundle` with the same spec. Installation applies to the current Harness profile.
+
+> The root `npm start` of DSH-LLSA does not enable the HUD, and the combined build does not include it. `npm install @dsh-llsa/hud` at the repo root only puts it in a `node_modules` — install it through the plugin page so the Harness actually loads it.
+
+## What you see
+
+| Where | What it tells you |
 |---|---|
-| **中心状态** | 执行中、计划中、思考中、停顿中、等你确认、成功、失败或待命；必要时附上 Python 等对象名 |
-| **外圈材料** | 终端、代码、检索、文档、网页、其它六类活动；位置固定，节点增减不会让整圈跳位 |
-| **子 Agent 圈** | 当前快照中的子 Agent 与状态；只有存在多个 Agent 时才出现 |
-| **返回胶囊** | 退出浮层后，点击消息区的胶囊重新查看 |
+| **Centre** | The run's state, plus the object it is working on (`执行中 / Python`) |
+| **Ring** | Six materials — terminal, code, search, documents, web, other — each in a fixed seat |
+| **Inner ring** | Sub-agents and their states; only drawn when more than one agent is running |
+| **Capsule** | After you leave the field, the pill in the corner re-opens it |
 
-节点由实际事件驱动。执行时有呼吸动效，等待确认时停止呼吸；状态同时使用文字和颜色表达。中心的“成功”表示运行结束状态，不代表结果已经通过业务正确性验证。
+A material node has three readable properties: **colour** (blue in use, amber waiting on you, red failed, green done), **motion** (breathing while running, still once finished), and **words** (`编写中`, `阅读中`, `扫描中`, `完成` …).
 
-**主题跟随宿主。** 浮层不假定你在深色模式下工作：它读取界面背景的实际亮度，浅色主题下换成白色磨砂遮罩、深色文字和更重的强调色，切主题时下一帧就重画。上面两张图是同一块场在两套主题下的样子。
+The run and the material speak different vocabularies on purpose: `成功` / `失败` describe the **run**; `完成` describes **one material**. The green in the centre is a run verdict, not a correctness claim.
 
-> **HUD 本身不调用模型，也不消耗模型 token。** 它读取状态并绘图，不修改任务、不派发 Agent，也不执行审批。正在观察的任务仍会产生原有模型费用。节省通信成本由 [LeanLink](../../README.md#认识-leanlink) 负责，HUD 当前不展示节省金额。
+## States
 
-## 安装与第一次使用
+| Shown | Meaning |
+|---|---|
+| 执行中 | Handling a tool or material |
+| 计划中 | Doing bookkeeping (todos, goals, schedules); draws no material |
+| 思考中 | Running, with no tool activity to show — not a replay of hidden reasoning |
+| 停顿中 | The Host marked a running agent as silent past its threshold; not the same as failed |
+| 等你确认 | Something needs you — a question is open |
+| 成功 / 失败 | The run's outcome |
 
-需要 **Node.js 24.11+**，以及已能正常打开的 **DeepSeek Harness Web**。本仓库使用 Harness `0.2.2-rc.1`；HUD 是独立的可选 bundle，当前包版本见 [package.json](package.json)。
+A question turns the field amber; answering it, or the turn ending, returns it to `执行中` / `成功` within a fraction of a second.
 
-### 1. 获取源码目录
-
-已有 DSH-LLSA 仓库时，在仓库根目录运行 `git pull`。首次获取：
-
-```sh
-git clone https://github.com/TaoruiLiu19/DSH-LLSA.git
-cd DSH-LLSA
-```
-
-HUD 所在目录为 `packages/hud`。仓库已包含生成好的 `client.js`，仅安装 HUD 无需先构建整个工作台。
-
-### 2. 在正在使用的 Harness 中安装 bundle
-
-HUD 已发布到 npm。打开 Harness Web 侧边栏的 **插件** 页面，通过安装组合包入口，直接填包名：
-
-```text
-@dsh-llsa/hud
-```
-
-开发时也可以改填 `packages/hud` 的**完整本地路径**，这样改 `client.js` 会热替换：
-
-```text
-D:/projects/DSH-LLSA/packages/hud
-```
-
-把示例换成自己的真实路径。支持 `plugin_manager` 工具的会话也可以请求它通过 `install_bundle` 安装；若当前预设没有该工具，使用插件页面。安装器若返回需要重启，重启当前 Harness，再刷新浏览器。
-
-安装作用于当前 Harness profile。应在自己实际使用的实例中操作。`packages/hud` 里的源码与 npm 上的 `@dsh-llsa/hud` 是同一份内容，装哪个都行；从仓库根目录执行 `npm install @dsh-llsa/hud` 不会把插件装进 Harness，那只是把它放进某个 `node_modules`。
-
-**发行包说明：** DSH-LLSA 的根目录 `npm start` 不会自动启用 HUD；当前组合构建包也未打入 HUD。请单独安装本 bundle（npm 包名或源码目录均可）。它显示在 Harness 的会话界面，不是 `/collab` 或 `/orchestrator/local` 页面里的内嵌组件。
-
-### 3. 观察一次任务
-
-在 Harness 会话里发送正常任务，例如：
-
-> 检查当前项目的 package.json，告诉我有哪些测试命令。先不要运行测试，也不要修改文件。
-
-任务开始后观察浮层和工具节点。这个例子只验证显示入口；实际能否读取文件取决于该会话的工具和权限。
-
-- **退出浮层：** 按 `Esc` 或点击浮层空白处。
-- **重新打开：** 点击消息区右下角的状态胶囊。
-- **临时隐藏／恢复：** `Ctrl+Shift+H`；macOS 使用 `Cmd+Shift+H`，只影响当前页面。
-- **长期关闭：** 在插件设置里关闭 `focusMode`。
-- **需要回复时：** 查看“等你确认”提示，在 Harness 原生问答界面回复。已经主动关闭的浮层不会因为提问而强行重开。
-
-## 它是怎么工作的
+## How it works
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/hud-architecture-dark.png">
-  <img src="docs/hud-architecture-light.png" alt="HUD 运行时结构：会话事件进入采集器，折成 hud-v1 快照，经只读路由被浏览器轮询，投影成视图后交给画布与专注层">
+  <img src="docs/hud-architecture-light.png" alt="Runtime structure: session events enter the collector, become a hud-v1 snapshot, are polled over one read-only route, and are folded into a view for the canvas and the focus layer">
 </picture>
 
-<p align="center"><sub>交互版：<a href="docs/hud-runtime.html">docs/hud-runtime.html</a>（可切换明暗与动效，按路径高亮，也能导出图片）</sub></p>
+<p align="center"><sub>Interactive version: <a href="docs/hud-runtime.html">docs/hud-runtime.html</a> — dark/light toggle, route highlighting, image export</sub></p>
 
-一条只读的链路，没有第二条：
+One read-only path, no second one:
 
-- **宿主半边**只订阅 `session/event`、`agent/status`、`subagent/*`，把它们折成一份 `hud-v1` 快照。工具参数只在本机用来推导类别（解释器语言、源码扩展名），**命令原文与路径从不转发给浏览器**。
-- **浏览器半边**发一次只读 `GET /dsh-hud/api/state`，把快照投影成视图；绘制每帧只改透明度、热度与脉冲，不重算状态。
-- **契约**是唯一接口：快照 8 个固定字段、`additionalProperties: false`，别名表 81 项与契约逐条镜像。派生信息（语言、材料覆盖）走契约之外的 `meta`，因此加它们不需要改协议。
+- **Host half** subscribes to `session/event`, `agent/status` and `subagent/*`, and folds them into a single `hud-v1` snapshot. Tool arguments are used locally to derive two enums (an interpreter language and a material override) and are never forwarded.
+- **Browser half** issues one `GET /dsh-hud/api/state`, folds the snapshot into a view, and redraws on a canvas. Each frame only advances alpha, heat and pulses — it never recomputes state.
+- **The contract** is the whole interface: eight fixed fields, `additionalProperties: false`, and an alias table mirrored one-to-one. Derived hints ride outside the contract in `meta`, which is why adding them did not change the protocol.
 
-## 状态与显示边界
+## Themes
 
-| 显示 | 含义 |
-|---|---|
-| 执行中 | 正在处理工具或材料 |
-| 计划中 | 当前进行待办、目标等计划管理；不另画材料节点 |
-| 思考中 | 运行中，当前没有可展示的工具活动；不是模型内部推理的回放 |
-| 停顿中 | 服务端标记运行中的 Agent 超过静默阈值；不等于已经故障 |
-| 等你确认 | 存在需要用户处理的等待状态 |
-| 成功／失败 | 本轮运行的完成状态 |
+The field follows the host's surface instead of assuming a dark window. It reads the luminance of the first painted ancestor of the conversation column: brighter than 0.5 is a light theme, and the whole palette inverts — pale scrim, dark ink, deeper accents, weaker glows, stronger hairlines. Switching the shell's theme repaints on the next frame.
 
-代码文件可归入“代码”节点；受支持的终端解释器命令可产生代码执行提示。无法识别的复杂命令不会猜测语言。未知工具归入“其它”。节点连线是预设的活动关系，**不是完整调用链、网络流量图或 token 传输计量图**。
+If a theme paints its conversation with an image or gradient rather than a colour, the probe walks to the end and falls back to `prefers-color-scheme`.
 
-HUD 只展示当前会话，不把所有工单同时聚合到一个全局视图。
+## Limits
 
-## 配置选项
+- **One session at a time** — the focused one. There is no all-sessions wallboard.
+- **Core event mode** shows a sub-agent's state and short label but not its own tool activity, and does not treat approvals as attention. A compatible external snapshot (`hudEndpoint`) does.
+- **The arc between terminal and code** is one pre-set relation lit by a declared execution. It is not a call graph, a network trace, or a token meter.
+- **Material failure is not observable.** A failed run says `失败` and that earlier results were kept; it does not name the step, because the HUD does not read tool output.
+- `stalled` is decided by the Host, never by the browser's own clock.
 
-在 Harness 插件页面打开本插件的设置表单。
+## Settings
 
-| 选项 | 默认值 | 用途 |
+Open the plugin's settings form in the Harness plugin page.
+
+| Option | Default | Purpose |
 |---|---|---|
-| `focusMode` | `true` | 启用专注浮层；关闭后不显示浮层、胶囊和提示 |
-| `hudEndpoint` | 空字符串 | 可选的外部 `hud-v1` 快照地址；普通使用保持为空 |
-| `hudTimeoutMs` | `900` | 外部快照请求超时，单位毫秒 |
-| `maxSessions` | `32` | 采集器最多保留的会话数量；不是同时展示数量 |
-| `childrenRefreshMs` | `1200` | 子 Agent 列表缓存时间，单位毫秒 |
+| `focusMode` | `true` | Enables the focus layer; off means no overlay, capsule or hint |
+| `hudEndpoint` | `""` | Optional external `hud-v1` snapshot URL; leave empty for normal use |
+| `hudTimeoutMs` | `900` | Timeout for that external request, in ms |
+| `maxSessions` | `32` | Sessions the collector keeps; not how many are displayed |
+| `childrenRefreshMs` | `1200` | Cache time for the sub-agent list, in ms |
 
-默认从 Harness 会话事件生成快照，不要求安装 Super-agent。仅在已有兼容接口时配置 `hudEndpoint`：其中 `{session}` 会替换为 URL 编码的会话 ID，接口必须能将它映射到正确的运行。不要把会话 ID 直接假定为工单 runId。外部接口不可用、超时或数据格式不兼容时，回退到核心事件。
+Keys: `Esc` or clicking the blank area leaves the field; the corner capsule returns; `Ctrl/Cmd+Shift+H` hides it for the current page without saving; turning `focusMode` off turns it off for good.
 
-核心事件模式能够展示用户提问等待，但不覆盖审批请求；子 Agent 的工具事件也不会全部合并到主会话材料圈。若需要完整编排状态，须由兼容的外部快照提供。快照里的 `stalled` 由服务端决定，浏览器不自行根据等待时长修改状态。
+## Troubleshooting
 
-## 常见问题
-
-| 现象 | 排查方式 |
+| Symptom | What to check |
 |---|---|
-| 安装后没有出现浮层 | 确认当前 profile 已启用 bundle、`focusMode` 为开启；刷新后发起一次任务，检查是否曾用快捷键隐藏 |
-| 启动时短暂未显示 | 等待 Web 服务注册；插件会重试连接，不会把首次请求失败立即判为离线 |
-| 一直显示“HUD 未连接” | 确认访问的是安装插件的 Harness 实例，刷新页面；检查宿主日志及 `/dsh-hud/api/ping` 是否可访问 |
-| 子 Agent 没有工具动画 | 核心事件模式只展示它的状态和短名，不合并所有子会话工具事件 |
-| 某个工具落入“其它” | 工具没有材料映射，或快照的别名版本不匹配；基础状态仍可显示 |
-| 浅色主题下颜色偏淡 | 浮层按界面背景亮度自动选色板；若宿主用背景图而非纯色，探测可能退回系统偏好 |
-| 想看准确 token 和费用 | 使用 DSH-LLSA 的 `/collab` 用量视图；HUD 不做账单统计 |
+| No overlay after install | The profile has the bundle enabled and `focusMode` is on; start a new run, and check you did not hide it with the shortcut |
+| Briefly missing at startup | The Host is registering the route; it retries instead of reporting offline on the first failure |
+| “HUD 未连接” stays | You are on the instance that has the plugin; refresh; check `/dsh-hud/api/ping` |
+| Sub-agent has no tool animation | Core mode shows its state and label only |
+| A tool lands in “其它” | It has no material mapping, or the snapshot's alias version differs |
+| Too dim on a light theme | The palette follows the measured background; a background image can defeat the probe |
+| Exact tokens and cost | Use `/collab` in DSH-LLSA; the HUD does not do billing |
 
-`/dsh-hud/api/ping` 中的 `version` 是快照协议版本 **1**，不是 HUD 包版本。请保留本机认证，不要在反馈中分享认证链接或密钥。
+`/dsh-hud/api/ping` reports the **snapshot protocol** version (1), not the package version. Keep your local auth; do not paste authenticated links into issues.
 
-## 开发与验证
+## Development
 
-在完整仓库根目录运行，HUD 检查本身无需模型 API：
+No model API is needed for any of this:
 
 ```sh
-node packages/hud/scripts/build-client.mjs --check
-node packages/hud/scripts/run-tests.mjs
+node packages/hud/scripts/build-client.mjs --check   # the committed bundle matches src/
+node packages/hud/scripts/run-tests.mjs              # 122 tests, no child processes
 ```
 
-修改浏览器源码后重新生成，再验证：
+After editing browser sources, rebuild and re-check:
 
 ```sh
 node packages/hud/scripts/build-client.mjs
@@ -154,22 +153,20 @@ node packages/hud/scripts/build-client.mjs --check
 node packages/hud/scripts/run-tests.mjs
 ```
 
-也可以使用 `npm run check --prefix packages/hud`。当前通过 **117 项测试**，覆盖契约夹具回放、问答等待恢复、会话切换、固定席位布局、路径脱敏、文件工具事件、取消后的执行状态清理，以及浅色/深色调色板。测试数量以后续命令输出为准；这些自动化检查不能替代所有浏览器环境的人工体验验证。
+or `npm run check --prefix packages/hud`. Tests read the repository's [contract fixtures](../../contracts/fixtures/), so the full checkout is the recommended place to run them.
 
-测试读取仓库的 [契约夹具](../../contracts/fixtures/)；只有单独 package 的副本可能跳过回放，因此完整仓库是推荐验证环境。
-
-| 文件 | 职责 |
+| Path | Responsibility |
 |---|---|
-| `src/index.js`、`src/source.js` | 宿主只读路由、事件采集和快照 |
-| `src/model.js`、`src/materials.js` | 状态投影、材料分类、固定席位与调色板 |
-| `src/render.js`、`src/focus.js` | 绘制、专注浮层、返回胶囊、主题探测 |
-| `src/client-entry.js` | 会话切换、轮询、界面入口 |
-| `src/labels.js` | 展示短名脱敏与长度限制 |
-| `client.js` | 已生成的浏览器产物，请通过构建脚本更新 |
-| `docs/` | README 用的图，以及架构图的可交互版本与它的源规格 |
+| `src/index.js`, `src/source.js` | Host routes, event collection, snapshot |
+| `src/model.js`, `src/materials.js` | State projection, materials, fixed seats, palettes |
+| `src/render.js`, `src/focus.js` | Canvas drawing, focus layer, capsule, theme probe |
+| `src/client-entry.js` | Session switching, polling, slot registration |
+| `src/labels.js` | Display-name sanitising and length caps |
+| `client.js` | Generated browser artifact — always rebuild, never edit |
+| `docs/` | README figures, the interactive diagram, and its JSON source |
 
-协议使用 [hud-v1 schema](../../contracts/hud-v1.schema.json)，工具保留原生 ID，别名表与材料分类分离。工具参数只在宿主侧用于推导类别，不转发原始命令和路径；HUD 不提供模型隐藏推理的记录。
+Protocol: [hud-v1 schema](../../contracts/hud-v1.schema.json). Tool IDs stay native; the alias table is separate from the material taxonomy. Nothing here records or reconstructs hidden model reasoning.
 
-## 许可
+## License
 
-[MIT](LICENSE)。第三方说明见 [NOTICE](NOTICE)。
+[MIT](LICENSE). Third-party notices in [NOTICE](NOTICE).

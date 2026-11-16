@@ -1,6 +1,6 @@
 {
   "name": "@dsh-llsa/hud",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "type": "module",
   "description": "Read-only HUD for DSH agent activity: a one-glance field of conclusions, materials and sub-agents, with a focus mode over the conversation.",
   "license": "MIT",
@@ -45,6 +45,7 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
+    "README.zh.md",
     "CHANGELOG.md",
     "LICENSE",
     "NOTICE"

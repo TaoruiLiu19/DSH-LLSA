@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.5
+
+Documentation only: the README is now an English/Chinese pair (English is the
+default, because the package page and the plugin list are read internationally),
+with badges for version, downloads, license, Node, tests, dependencies and the
+market listing, and a scan-friendly outline that leads with what the field shows
+rather than with the architecture.
+
 ## 0.4.4
 
 - **等你确认 no longer outlives the question.** Two things could leave the field
