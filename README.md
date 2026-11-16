@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-80cbc4" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/Node.js-24.11%2B-89b4fa" alt="Node.js 24.11+">
 </p>
-<p align="center"><a href="#快速开始">快速开始</a> · <a href="#第一次协作">第一次协作</a> · <a href="#认识-leanlink">认识 LeanLink</a> · <a href="#hud-专注视图">HUD 专注视图</a> · <a href="#使用帮助">使用帮助</a></p>
+<p align="center"><a href="#快速开始">快速开始</a> · <a href="#第一次协作">第一次协作</a> · <a href="#认识-leanlink">认识 LeanLink</a> · <a href="#网页协作">网页协作</a> · <a href="#hud-专注视图">HUD 专注视图</a> · <a href="#使用帮助">使用帮助</a></p>
 
 ---
 
@@ -30,13 +30,14 @@
 
 ## 组合包包含什么
 
-DSH-LLSA 把工单编排、Agent 协作和启动器装进同一个安装包，三个组件随 `npm ci` 一起安装。
+DSH-LLSA 把工单编排、Agent 协作、启动器和可选的网页协作装进同一个安装包，四个组件随 `npm ci` 一起安装。
 
 | 内置组件 | 使用时负责什么 |
 |---|---|
 | `@dsh-llsa/superagent` | 基于 DeepSeek 公开研究原型修改，负责接收本机工单、分派任务和验收交付 |
 | `@dsh-llsa/collab` | 管理子 Agent、紧凑回传、历史与用量记录，并提供可选的本机 CSV 执行器 |
 | `@dsh-llsa/launcher` | 按锁定版本启动 DeepSeek Harness，并加载上述组件 |
+| `@dsh-llsa/web-collab` | 提供网页初审和子 Agent 咨询，默认关闭 |
 
 使用 `/orchestrator/local` 提交工单，使用 `/collab` 查看协作记录。想在 Harness 对话界面实时看 Agent 状态时，可以[单独安装 HUD](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)。
 
@@ -74,7 +75,7 @@ npm ci
 npm start
 ```
 
-保留解压后目录里的 `vendor/`、`package.json` 和 `package-lock.json`。`vendor/` 已装入三个组件包，安装时还需要联网下载 Harness 等锁定依赖。真实任务使用自己配置的模型 API。
+保留解压后目录里的 `vendor/`、`package.json` 和 `package-lock.json`。`vendor/` 已装入四个组件包，安装时还需要联网下载 Harness 等锁定依赖。真实任务使用自己配置的模型 API。
 
 </details>
 
@@ -113,6 +114,29 @@ npm start
 无需 API 的回归测试覆盖批次执行、产物验收和子 Agent 授权。按以上方式处理 CSV 时，确定性步骤在本机执行，模型规划、分析和验收仍会使用 token。含 CSV 工具事件的快照使用别名表 v2，识别该工具类别可使用本仓库 `packages/hud`。
 
 已保存规则、表头映射和 MCP 等用法见 [独立 Task Reuse 使用说明](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/task-reuse/README.md)。
+
+### 网页协作
+
+**默认关闭。** 网页可为本机任务提供初审或核对建议，由 Harness Agent 核对原始资料并交付结果。完成源码构建或安装包含网页协作的 CI 构建包后，先退出正在运行的实例。进入源码根目录或解压后的 `package/`，按操作系统选择启动命令。
+
+```powershell
+$env:DSH_LLSA_WEB_COLLAB = '1'
+npm start
+```
+
+```sh
+DSH_LLSA_WEB_COLLAB=1 npm start
+```
+
+先打开终端打印的 Harness 认证链接，再访问同一地址的 `/web-collab`。每个任务在页面勾选 **网页协作** 后才会使用建议。打开 **多智能体** 后，在任务框粘贴资料，LLSA 会分派并验收工单，子 Agent 可按需咨询本分支的疑点。单 Agent 模式支持附件。多智能体工单的进度和回复可在 `/orchestrator/local` 查看，协作记录和 Harness 模型用量在 `/collab` 查看。
+
+- **手动咨询**适用于 ChatGPT、DeepSeek 等聊天网页。复制咨询提示，在网页发送，再把回复粘贴回来。为子 Agent 回填时，保留回复里的咨询编号，也可导入对应的 Markdown 文件。
+- **自动咨询**适用于已配置的 Open WebUI。在启动前设置 `DSH_WEB_COLLAB_OPEN_WEBUI_URL`（实例地址）、`DSH_WEB_COLLAB_OPEN_WEBUI_MODEL`（模型 ID）和 `DSH_WEB_COLLAB_OPEN_WEBUI_KEY`（API 密钥）。非本机地址使用 HTTPS，密钥保留在本机启动环境。配置后可用页面的 **用 Open WebUI 咨询** 获取初审建议，启用网页协作的子 Agent 也可自动获取回复。[Open WebUI 官方接口](https://docs.openwebui.com/reference/api-endpoints/#chat-completions)
+
+咨询只发送你提供的内容或当前分支用于核对的片段。发送前确认这些资料允许交给所选服务。网页回复是参考意见，最终核对和交付仍由 Harness Agent 完成。网页侧用量与 Harness 侧用量应分别记录，整单费用取决于咨询是否替代了其他模型请求。Open WebUI 所连接的模型可能单独收费，这笔费用由其模型服务计收，超出本机 Harness 预算的统计范围。
+
+要关闭功能，将 `DSH_LLSA_WEB_COLLAB` 清除或设为 `0`，再重启 DSH-LLSA。
+此前使用 `dsh plugin` 单独安装过网页协作时，先从同一 Harness 配置中移除独立安装，再使用组合包内置版本。
 
 ## 第一次协作
 
@@ -240,9 +264,10 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 | DSH-LLSA 组合发行 / 启动器 | 0.4.2 |
 | `@dsh-llsa/collab` | 0.4.2 |
 | `@dsh-llsa/superagent` | 0.4.2 |
+| `@dsh-llsa/web-collab`（默认关闭） | 0.2.0 |
 | DeepSeek Harness | 0.2.2-rc.1 |
 
-三个内置组件通过组合包安装。启动器按锁文件使用指定版本的 Harness。HUD 的 npm 包单独发行，[安装与版本信息见 HUD 文档](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)。
+四个内置组件通过组合包安装。启动器按锁文件使用指定版本的 Harness。HUD 的 npm 包单独发行，[安装与版本信息见 HUD 文档](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)。
 
 组合包使用基于 [DeepSeek Super-agent 研究原型](https://github.com/deepseek-ai/dsh-superagent-prototype/commit/8c32a9dc5d72c033816c6a8110b37f40cf94fba4) 的修改版。完整工单流程依赖这份修改版提供的输入版本、验收和停止恢复接口。上游发布新版后，先验证兼容性及旧状态的恢复，再随组合包更新。现有安装可继续按原锁文件运行。[上游署名与派生说明](NOTICE)
 
@@ -260,7 +285,7 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 - 原有完整任务快照保留兼容字段，新增 `hud`，以及与其一致的顶层 `v`、`seq`、`now`。浮窗应使用 `view=hud`，不要读取原始 `events` 或自行推导状态。
 - `agents` 提供稳定 ID、父子关系、工单、五态、状态起始时间、静默标记和最小活动事件。`label` 是最多 12 个 Unicode 字符的短名：任务标题优先，其次会话标题；移除路径、URL、邮箱、纯数字 ID、代码与换行，过滤后为空则使用角色或“智能体”。原生 Assignment 无独立标题字段，适配器取关联任务的 `execution.name` / `ticket.title`；托管子任务使用分配时的 objective。每次 assignment 的短名持久化固定，变更经带 `label` 的 `agent.register` 发布。父节点可能属于另一个工单快照，不能据此猜测其活动状态。
 - `seq` 在每个 run 内单调递增，重启不清零；客户端按 `(runId, seq)` 维护游标，跨 run 不可比较。轮询时间与 `stalled` 变化不会增加序号。`stalledAfterMs` 默认为 20000；只有 `running` 可以静默。`stalled` 由服务端计算，客户端只展示服务端值，不自行判断失败或静默。
-- 普通快照使用 `aliasVersion: 1`，含 CSV 工具事件的快照使用 `aliasVersion: 2`，`tool` 保留原生工具 ID。按版本读取 [v1](contracts/tool-aliases-v1.json) 或 [v2](contracts/tool-aliases-v2.json) 的 `aliases` 映射。新增映射版本独立于 HUD 的 `v`。自定义名称或第三方工具可落“其它”。测试覆盖锁定宿主和本项目内置工具。
+- `tool` 保留原生工具 ID。快照按可见工具活动选择 `aliasVersion`。普通活动用 1，CSV 工具用 2，涉及 `collab_consult_web` 时用 3。HUD 快照的 `v` 仍为 1。旧映射保留，自定义名称或第三方工具可落“其它”。[别名表 v1](contracts/tool-aliases-v1.json) · [v2](contracts/tool-aliases-v2.json) · [v3](contracts/tool-aliases-v3.json)
 - `events` 是最近 256 条最小事件，`eventsFromSeq` 给出窗口起点。若客户端游标落后于窗口，直接采用最新状态并跳过丢失的动画，不回放猜测事件。事件的 `seq`、`agentId` 用于寻址；`state.changed` 额外提供 `from/to/reason`。
 - turn 正常结束的 `done` 只表示本轮结束，不代表工单验收通过。取消或输入作废为 `idle`；进程重启后未闭合 turn 清理为 `idle`。缺失的工具/turn 结束以 `synthetic: true` 和原因显式补齐，绝不冒充成功。工具 id 不含参数、路径、命令或输出。
 - 实际状态接入 `turn/start/end`、`tool/call/result`、审批对象与用户问题回复。等待确认不会因工具等待超时自动消失；收到用户回复后按是否有打开的 turn 恢复。历史上尚未接入的活动不补造。
@@ -276,6 +301,7 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 packages/dsh-collab/   协作通信与记录
 packages/superagent/   上游派生的执行插件
 packages/launcher/     本机启动器
+packages/web-collab/   可选的网页协作入口
 scripts/               构建、打包与安装验证
 assets/                产品海报
 ```
@@ -291,7 +317,7 @@ npm run verify:rebuild
 npm run verify:kit
 ```
 
-`pack:release` 先检查并构建，再生成四个归档与 `SHA256SUMS`。后两条命令分别检查重复构建一致性，以及全新目录中的安装、认证、页面与协作桥。已构建源码还可运行 `npm run smoke`。
+`pack:release` 先检查并构建，再生成五个归档与 `SHA256SUMS`。后两条命令分别检查重复构建一致性，以及全新目录中的安装、认证、页面与协作桥。已构建源码还可运行 `npm run smoke`。
 
 这些验证使用隔离配置，不提交模型任务；真实任务质量需要另行验收。Windows / Ubuntu 各自验证通过后，CI 还会下载两套产物、核对实际归档哈希并比较 SHA256SUMS；文件名或内容不一致会让整个流程失败。远端状态见页首 CI 标记。构建产物通过 Actions 分发，不提交进源码树。
 

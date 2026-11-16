@@ -23,7 +23,13 @@ function run(command, args) {
 }
 const manifest = JSON.parse(await readFile(join(kit, 'package.json'), 'utf8'));
 assert.equal(manifest.version, release.version, 'Archive name and contained kit version must agree');
-assert.equal(Object.keys(manifest.dependencies).filter(name => name.startsWith('@dsh-llsa/')).length, 3);
+assert.deepEqual(Object.keys(manifest.dependencies).filter(name => name.startsWith('@dsh-llsa/')).sort(), [
+  '@dsh-llsa/collab', '@dsh-llsa/launcher', '@dsh-llsa/superagent', '@dsh-llsa/web-collab',
+]);
+for (const filename of ['README.md', 'README.en.md']) {
+  assert.deepEqual(await readFile(join(kit, filename)), await readFile(join(root, filename)),
+    `Installed ${filename} must match the source guide`);
+}
 const sample = join(kit, 'examples/csv-workflow/workflow.csv');
 assert.ok((await stat(sample)).isFile(), 'Missing synthetic CSV example');
 run(process.execPath, [npm, 'ci', '--no-audit', '--no-fund']);
@@ -50,5 +56,5 @@ assert.equal(sampleSummary.replaceAll('\r\n', '\n'), '地区,count\n北区,14\n�
 run(process.execPath, [join(root, 'scripts/check-versions.mjs'), kit]);
 run(process.execPath, [npm, 'ls', '@deepseek-ai/cordis', '@deepseek-ai/schemastery', '--depth=0']);
 await smoke(kit, 'node_modules/@dsh-llsa/launcher/lib/start.js');
-await smoke(kit, 'node_modules/@dsh-llsa/launcher/lib/start.js', { csvWorkspace: 'examples/csv-workflow' });
-console.log('PASS: clean install kit and startup with built-in CSV disabled and configured');
+await smoke(kit, 'node_modules/@dsh-llsa/launcher/lib/start.js', { csvWorkspace: 'examples/csv-workflow', webCollab: true });
+console.log('PASS: clean install kit and startup with optional CSV and Web Collab disabled and enabled');

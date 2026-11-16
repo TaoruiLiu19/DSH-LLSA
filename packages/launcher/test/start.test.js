@@ -13,3 +13,11 @@ test('patch is local-only, requires managed lifecycle and carries no credential'
   assert.equal(patch[0].insert[0].config.moneyPolicyFile,'');
   assert.equal(makePatch('/tmp/state','/plugin.js','/superagent.js','/local/prices.json')[0].insert[0].config.moneyPolicyFile,'/local/prices.json');
 });
+test('web collaboration is mounted only on opt-in', () => {
+  const disabled = makePatch('/tmp/state', '/plugin.js', '/superagent.js')[0].insert;
+  assert.equal(disabled.some(({ id }) => id === 'llsa-web-collab'), false);
+  assert.equal(disabled.find(({ id }) => id === 'llsa-superagent').config.webCollaboration, undefined);
+  const enabled = makePatch('/tmp/state', '/plugin.js', '/superagent.js', '', undefined, 'C:\\app\\web-collab\\index.js')[0].insert;
+  assert.equal(enabled.find(({ id }) => id === 'llsa-superagent').config.webCollaboration, true);
+  assert.equal(enabled.find(({ id }) => id === 'llsa-web-collab').name, 'C:/app/web-collab/index.js');
+});

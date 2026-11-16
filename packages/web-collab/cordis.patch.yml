@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-web-collab
+      name: '@dsh-llsa/web-collab'

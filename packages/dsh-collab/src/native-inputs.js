@@ -29,8 +29,11 @@ export class NativeInputs {
       }
       if(tables.length>=8)break;
     }
+    const origin = Array.isArray(content?.sources) && content.sources.find(source =>
+      source?.id === content.origin?.triggerId && source.source === 'local');
     const descriptor = { version: snapshot.version, handle: `input:${snapshot.version.slice(0, size)}`,
-      artifactRef: artifact.id, bytes: artifact.bytes, ...(tables.length?{tables}:{}) };
+      artifactRef: artifact.id, bytes: artifact.bytes, ...(tables.length?{tables}:{}),
+      ...(origin?.meta?.webConsultationEnabled === true ? { webConsultationEnabled: true } : {}) };
     this.store.appendEvent({ runId, stepId: 'native-input', kind: 'input_snapshot',
       payload: descriptor, inputRefs: [artifact.id,...tables.map(t=>t.artifactRef)] });
     return descriptor;

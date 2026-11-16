@@ -91,6 +91,20 @@ test('a plain turn becomes a schema-valid snapshot', () => {
   assert.equal(collector.taskTextOf('s1'), '核对报价单');
 });
 
+test('core snapshots advertise the aliases needed for CSV and web events', () => {
+  const collector = createCollector();
+  const time = Date.parse('2026-11-12T03:20:00Z');
+  collector.observeEvent('tools', { type: 'turn/start', seq: 1, time, data: { turn: 1 } });
+  assert.equal(collector.snapshotFor('tools', { now: time }).aliasVersion, 1);
+  collector.observeEvent('tools', {type: 'tool/call', seq: 2, time, data: { callId: 'csv', name: 'collab_csv_workflow' } });
+  assert.equal(collector.snapshotFor('tools', { now: time }).aliasVersion, 2);
+  collector.observeEvent('tools', {type: 'tool/call', seq: 3, time, data: { callId: 'web', name: 'collab_consult_web' } });
+  const snapshot = collector.snapshotFor('tools', { now: time });
+  assertSnapshotShape(snapshot);
+  assert.equal(snapshot.aliasVersion, 3);
+  assert.equal(snapshot.events.at(-1).tool, 'collab_consult_web');
+});
+
 test('a completed turn lands on done, an errored one on failed', () => {
   const ok = createCollector();
   ok.observeEvent('a', { type: 'turn/start', seq: 1, time: Date.parse('2026-11-12T03:20:00Z'), data: { turn: 1 } });

@@ -14,18 +14,25 @@ export function parsePort(value = '3095'): number {
   return port;
 }
 
-export function makePatch(state: string, collab: string, superagent: string, moneyPolicyFile = '', csv?: { csvWorkspace: string, csvEngine: string, csvPython: string, csvDefaultEnabled: boolean }) {
+export function makePatch(state: string, collab: string, superagent: string, moneyPolicyFile = '', csv?: { csvWorkspace: string, csvEngine: string, csvPython: string, csvDefaultEnabled: boolean }, webCollab?: string) {
+  const modulePath = (file: string) => file.replaceAll('\\', '/');
   return [{ insert: [
-    { id: 'llsa', name: collab, config: { stateDir: join(state, 'collab'), bridgeProjection: true,
-      explicitEvidenceRefs: true, encodingEvidenceFile: '', moneyPolicyFile, maxRunTokens: 300000, maxOutputTokens: 1536, ...csv } },
+    { id: 'llsa', name: modulePath(collab), config: { stateDir: join(state, 'collab'), bridgeProjection: true,
+      explicitEvidenceRefs: true, encodingEvidenceFile: '', moneyPolicyFile, maxRunTokens: 300000, maxOutputTokens: 1536, ...csv,
+      ...(webCollab ? { webCollaboration: true } : {}) } },
     { id: 'llsa-worker', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'dsh-superagent-worker', plugins: [] } },
     { id: 'llsa-router', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'dsh-superagent-router', plugins: [] } },
-    { id: 'llsa-superagent', name: superagent, config: { stateDir: join(state, 'superagent'), localOnly: true, requireCollaboration: true } },
+    { id: 'llsa-superagent', name: modulePath(superagent), config: { stateDir: join(state, 'superagent'), localOnly: true,
+      requireCollaboration: true, ...(webCollab ? { webCollaboration: true } : {}) } },
+    ...(webCollab ? [{ id: 'llsa-web-collab', name: modulePath(webCollab) }] : []),
   ] }];
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
-  if (args.includes('--help')) { console.log('Usage: npm start -- [port]\nDefault: 127.0.0.1:3095\nDSH_LLSA_STATE: optional state directory'); return; }
+  if (args.includes('--help')) {
+    console.log('Usage: npm start -- [port]\nDefault: 127.0.0.1:3095\nDSH_LLSA_STATE: optional state directory\nDSH_LLSA_WEB_COLLAB=1: load the optional web collaboration plugin');
+    return;
+  }
   if (args.length > 1) throw new Error('只接受一个端口参数；使用 --help 查看帮助。');
   const port = parsePort(args[0]);
   const require = createRequire(import.meta.url);
@@ -44,6 +51,10 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   };
   const collab = local ? join(here, 'collab.js') : pluginPath('@dsh-llsa/collab');
   const superagent = local ? join(here, 'superagent.js') : pluginPath('@dsh-llsa/superagent');
+  const webCollab = process.env.DSH_LLSA_WEB_COLLAB === '1'
+    ? local ? join(here, 'web-collab', 'index.js') : pluginPath('@dsh-llsa/web-collab')
+    : undefined;
+  if (webCollab && !existsSync(webCollab)) throw new Error('缺少网页协作组件。请运行 npm run build 或重新解压完整安装包。');
   const state = resolve(process.env.DSH_LLSA_STATE ?? '.dsh-llsa');
   await mkdir(state, { recursive: true });
   const patch = join(state, 'launch.json');
@@ -57,8 +68,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (csv && (!existsSync(csv.csvEngine) || !existsSync(csv.csvWorkspace))) {
     throw new Error('请检查 DSH_LLSA_CSV_WORKSPACE，并运行 npm run build 或重新解压完整安装包。');
   }
-  await writeFile(patch, JSON.stringify(makePatch(state, collab.replaceAll('\\', '/'), superagent.replaceAll('\\', '/'), moneyPolicyFile, csv), null, 2));
+  await writeFile(patch, JSON.stringify(makePatch(state, collab, superagent, moneyPolicyFile, csv, webCollab), null, 2));
   console.log(`DSH-LLSA · http://127.0.0.1:${port}/orchestrator/local\n先打开下方 Harness 认证链接，再进入任务页。Ctrl+C 停止。`);
+  if (webCollab) console.log(`网页协作 · http://127.0.0.1:${port}/web-collab`);
   const child = spawn(process.execPath, [join(dirname(harnessPath), 'lib/bin.js'), 'web', '--patch', patch,
     '--host', '127.0.0.1', '--port', String(port), '--no-open'], { stdio: 'inherit', windowsHide: true });
   const stop = () => { child.kill(); };

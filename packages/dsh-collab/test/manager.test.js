@@ -63,6 +63,65 @@ test('money admission persists across recovery and operator resume cannot reset 
 
 function inputSnapshot(text) { return { text, version: createHash('sha256').update(text).digest('hex') }; }
 
+const webTaskInput = (text, enabled = true) => inputSnapshot(JSON.stringify({
+  origin: { triggerId: 'origin' },
+  sources: [{ id: 'origin', source: 'local', text, meta: enabled ? { webConsultationEnabled: true } : {} }],
+}));
+
+test('web consultation requires launch and task opt-in and archives one bounded reply per attempt', async t => {
+  const { manager, root, store } = fixture(t, { webCollaboration: true });
+  const requests = [];
+  const markdown = '建'.repeat(260);
+  manager.attachWebAdvisor({ async ask(request) {
+    requests.push(request);
+    return { consultationId: 'mock-1', markdown, provider: 'manual' };
+  } });
+  manager.syncNativeInput('r1', webTaskInput('Check one rule', false));
+  const off = await manager.delegate(root, { objective: 'Verify locally' });
+  assert.equal(manager.isToolAvailable(off.childId, 'collab_consult_web'), false);
+  assert.equal((await manager.consultWeb(off.childId, 'Check one rule')).status, 'unavailable');
+
+  const oldVersion = manager.syncNativeInput('r1', webTaskInput('Check one rule')).version;
+  const on = await manager.delegate(root, { objective: 'Check the rule' });
+  assert.equal(manager.isToolAvailable(root.id, 'collab_consult_web'), false);
+  assert.equal(manager.isToolAvailable(on.childId, 'collab_consult_web'), true);
+  await assert.rejects(manager.consultWeb(on.childId, '问'.repeat(342)), { code: 'INVALID_WEB_QUESTION' });
+  const reply = await manager.consultWeb(on.childId, 'Check just this rule');
+  assert.equal(reply.status, 'ready');
+  assert.equal(reply.provenance, 'unverified_web_advice');
+  assert.equal(reply.nextStart, 768);
+  assert.equal(Buffer.byteLength(reply.markdownPreview), 768);
+  assert.equal(requests[0].question, 'Check just this rule');
+  assert.equal(requests[0].inputVersion, oldVersion);
+  assert.equal(manager.readArtifact('r1', reply.artifactRef, {}, on.childId).data.toString(), markdown);
+  assert.throws(() => manager.readArtifact('r1', reply.artifactRef, {}, off.childId), { code: 'FORBIDDEN' });
+  assert.equal(store.eventsByKind('r1', 'web_consultation_received').length, 1);
+  assert.equal((await manager.consultWeb(on.childId, 'Ask again')).status, 'unavailable');
+  assert.equal(requests.length, 1);
+
+  const disabled = new CollaborationManager({ store });
+  disabled.attachWebAdvisor({ ask() { throw new Error('disabled advisor called'); } });
+  assert.equal(disabled.isToolAvailable(on.childId, 'collab_consult_web'), false);
+  await disabled.close();
+});
+
+test('native input changes abort outstanding web consultation and prevent late replies', async t => {
+  const { manager, root, store } = fixture(t, { webCollaboration: true });
+  const late = deferred();
+  let request;
+  manager.attachWebAdvisor({ ask(input) { request = input; return late.promise; } });
+  manager.syncNativeInput('r1', webTaskInput('First version'));
+  const child = await manager.delegate(root, { objective: 'Verify one item' });
+  const pending = manager.consultWeb(child.childId, 'Check the original rule');
+  assert.ok(request.isCurrent());
+  manager.syncNativeInput('r1', webTaskInput('Corrected version'));
+  assert.equal(request.signal.aborted, true);
+  assert.equal(request.isCurrent(), false);
+  late.resolve({ consultationId: 'late', markdown: 'Old advice', provider: 'manual' });
+  assert.deepEqual(await pending, { status: 'unavailable', code: 'CHILD_CONSULTATION_CANCELLED' });
+  assert.equal(store.eventsByKind('r1', 'web_consultation_received').length, 0);
+});
+
 test('native worker can accept a submitted prerequisite while its dependant is queued', async t => {
   const {manager,root,backend}=fixture(t);let lifecycle;
   const ticket={id:'t1',title:'dependency',assignments:[{id:'a1'}]};

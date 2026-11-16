@@ -8,6 +8,7 @@ import type { SettingsView } from './views/settings.ts'
 import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
 import type { TicketListView } from './views/tickets.ts'
+import type { LocalTaskInput } from './local-tasks.ts'
 
 export const TICKET_FILTERS = ['open', 'person', 'working', 'idle', 'ended'] as const
 export const THREAD_FILTERS = ['subscribed', 'evaluating', 'recent', 'all'] as const
@@ -18,7 +19,7 @@ interface Paged { offset?: number; limit?: number }
 type Delivery = 'injected' | 'pending'
 
 export interface Api {
-  'POST local/tasks': { body: { requestId: string; prompt: string; outputFormat?:'text'|'json' }; response: { triggerId: string; reused: boolean } }
+  'POST local/tasks': { body: LocalTaskInput; response: { triggerId: string; reused: boolean } }
   'GET local/tasks': { response: unknown }
   'GET state': { response: StateView }
   'GET overview': { response: OverviewView }

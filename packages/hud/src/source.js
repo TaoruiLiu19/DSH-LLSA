@@ -19,7 +19,7 @@
  * parsed (§5.6).
  */
 import { hudLabel } from './labels.js';
-import { ALIAS_VERSION, materialForTool } from './materials.js';
+import { ALIAS_VERSION, aliasVersionForTool, materialForTool } from './materials.js';
 
 /** The event window of §2.1. Older events are dropped, and `eventsFromSeq` moves. */
 export const EVENT_WINDOW = 256;
@@ -630,9 +630,12 @@ export function createCollector(options = {}) {
       });
     }
     const events = state === undefined ? [] : state.events.map(event => ({ ...event }));
+    let aliasVersion = ALIAS_VERSION;
+    for (const event of events) aliasVersion = Math.max(aliasVersion, aliasVersionForTool(event.tool));
+    for (const agent of agents) aliasVersion = Math.max(aliasVersion, aliasVersionForTool(agent.lastEvent?.tool));
     return {
       v: 1,
-      aliasVersion: ALIAS_VERSION,
+      aliasVersion,
       seq: state === undefined ? 0 : state.seq,
       now: iso(now),
       stalledAfterMs: STALLED_AFTER_MS,

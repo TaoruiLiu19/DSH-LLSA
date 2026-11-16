@@ -17,6 +17,7 @@ const absolute = (description: string) => s.transform(s.string(), value => {
 /** Plugin configuration of the dsh-superagent entry. Volatile fields apply without a restart because dsh-superagent reads them on each use; changing `stateDir` remounts the plugin. */
 export const Config = s.object({
   localOnly: s.boolean().default(false).description('Local pasted-content tasks only; no GitHub/Feishu setup, external channels or shell/file tools.'),
+  webCollaboration: s.boolean().default(false).description('Allow per-task opt-in to the separately enabled web collaboration plugin.'),
   requireCollaboration: s.boolean().default(false).description('Refuse worker model requests until the collaboration lifecycle adapter is attached.'),
   stateDir: absolute('Directory for the database, locks, worker shims, the agent\'s git configuration and, by default, the ticket directories.').required(),
   promptMaxChars: s.number().min(LIMITS.promptMaxChars.min).max(LIMITS.promptMaxChars.max).step(1).default(100000)
@@ -29,6 +30,7 @@ export const Config = s.object({
 export type DeploymentConfig = ReturnType<typeof Config>
 export interface Machine {
   localOnly?: boolean
+  webCollaboration?: boolean
   requireCollaboration?: boolean
   stateDir: string
   promptMaxChars: Volatile<number>
@@ -46,7 +48,8 @@ export function machineOf(config: DeploymentConfig): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
   if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; supported keys: ${Object.keys(Config.dict ?? {}).join(', ')}`)
   const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs } = config
-  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, localOnly: config.localOnly, requireCollaboration: config.requireCollaboration }
+  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, localOnly: config.localOnly,
+    webCollaboration: config.webCollaboration, requireCollaboration: config.requireCollaboration }
 }
 
 export const GithubAccountsSchema = z.object({

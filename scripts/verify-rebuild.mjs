@@ -14,4 +14,4 @@ const result = spawnSync(process.execPath, [npm, 'run', 'pack:release'], {
 if (result.error) throw result.error;
 if (result.status !== 0) throw new Error('Rebuild failed');
 if (readFileSync(checksum, 'utf8') !== before) throw new Error('Release is not byte-for-byte reproducible');
-console.log('PASS: all four release archives reproduced byte-for-byte');
+console.log(`PASS: ${before.trim().split(/\r?\n/).length} release archives reproduced byte-for-byte`);

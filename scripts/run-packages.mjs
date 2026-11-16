@@ -4,7 +4,10 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const command = process.argv[2];
 if (!['ci', 'typecheck', 'test', 'build'].includes(command)) throw new Error('Unknown package operation');
 if (!process.env.npm_execpath) throw new Error('Run through npm: npm ci / npm run build');
-for (const name of ['dsh-collab', 'superagent', 'launcher']) {
+// Web Collab resolves its peers from the root install and has no separate build.
+const packages = ['dsh-collab', 'superagent', 'launcher'];
+if (command === 'test') packages.push('web-collab');
+for (const name of packages) {
   // Collab is JavaScript, so validate its checked boundaries before root bundling.
   const operation = command === 'build' && name === 'dsh-collab' ? 'typecheck' : command;
   const args = operation === 'ci' ? ['ci', '--no-audit', '--no-fund'] : ['run', operation];

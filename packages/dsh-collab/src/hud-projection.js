@@ -1,6 +1,7 @@
 import { hudLabel } from './hud-label.js';
 /** Server-owned HUD projection. Internal correlation keys never enter the public snapshot. */
-export const HUD_ALIAS_VERSION = 2;
+export const HUD_ALIAS_VERSION = 3;
+const toolAliasVersion = new Map([['collab_csv_workflow', 2], ['collab_consult_web', HUD_ALIAS_VERSION]]);
 const states = new Set(['idle','running','waiting-human','done','failed']);
 const safeTool = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value) ? value : null;
 export function emptyHud() { return { seq:0, agents:{}, events:[] }; }
@@ -81,9 +82,10 @@ export function reduceHud(previous, input) {
 
 export function hudSnapshot(state, now, stalledAfterMs=20000) {
   const agents = Object.values(state.agents);
-  const hasCsvTool = state.events.some(event => event.tool === 'collab_csv_workflow') ||
-    agents.some(agent => agent.lastEvent?.tool === 'collab_csv_workflow');
-  return {v:1,aliasVersion:hasCsvTool ? HUD_ALIAS_VERSION : 1,seq:state.seq,now,stalledAfterMs,eventsFromSeq:state.events[0]?.seq ?? state.seq,
+  let aliasVersion = 1;
+  for (const event of state.events) aliasVersion = Math.max(aliasVersion, toolAliasVersion.get(event.tool) ?? 1);
+  for (const agent of agents) aliasVersion = Math.max(aliasVersion, toolAliasVersion.get(agent.lastEvent?.tool) ?? 1);
+  return {v:1,aliasVersion,seq:state.seq,now,stalledAfterMs,eventsFromSeq:state.events[0]?.seq ?? state.seq,
     agents:agents.map(a=>({id:a.id,label:a.label,role:a.role,parentId:a.parentId,ticketId:a.ticketId,
       state:a.state,since:a.since,stalled:a.state==='running' && Date.parse(now)-Date.parse(a.lastActivity)>stalledAfterMs,
       lastEvent:a.lastEvent ? {kind:a.lastEvent.kind,at:a.lastEvent.at,tool:a.lastEvent.tool} : null})),

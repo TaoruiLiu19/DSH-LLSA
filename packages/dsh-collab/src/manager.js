@@ -29,6 +29,7 @@ import { runCsvBatch, validateCsvBatch } from './csv-workflow-batch.js';
  * @property {object|null} [moneyPolicy]
  * @property {(job: {input: Buffer, steps: JsonValue[], signal?: AbortSignal}) => Promise<{output: Buffer, receipt: object}>} [csvExecutor]
  * @property {boolean} [csvDefaultEnabled]
+ * @property {boolean} [webCollaboration]
  */
 
 const uid = prefix => `${prefix}-${randomUUID()}`;
@@ -42,7 +43,7 @@ export const COMPACT_GUIDANCE = 'Use collab_publish for public steps and final r
 /** Host orchestration; backend owns actual DSH handles. No model reasoning is fabricated. */
 export class CollaborationManager {
   /** @param {ManagerOptions} options */
-  constructor({ store, registry = new ProtocolRegistry(), countTokens, counterName = 'heuristic', backend = null, maxActiveChildren = 2, maxRunTokens = 200000, maxOutputTokens = 4096, closeTimeoutMs = 10000, qualityEvidence = [], minEvidenceSamples = MIN_EVIDENCE_SAMPLES, explicitEvidenceRefs = false, moneyPolicy = null, csvExecutor, csvDefaultEnabled = false }) {
+  constructor({ store, registry = new ProtocolRegistry(), countTokens, counterName = 'heuristic', backend = null, maxActiveChildren = 2, maxRunTokens = 200000, maxOutputTokens = 4096, closeTimeoutMs = 10000, qualityEvidence = [], minEvidenceSamples = MIN_EVIDENCE_SAMPLES, explicitEvidenceRefs = false, moneyPolicy = null, csvExecutor, csvDefaultEnabled = false, webCollaboration = false }) {
     if (typeof explicitEvidenceRefs !== 'boolean') fail('INVALID_ARGUMENT','explicitEvidenceRefs must be boolean');
     this.explicitEvidenceRefs = explicitEvidenceRefs;
     this.store = store; this.registry = registry; this.countTokens = countTokens; this.counterName = counterName;
@@ -51,6 +52,9 @@ export class CollaborationManager {
     this.csvControllers = new Map();
     this.csvDefaultEnabled = Boolean(csvExecutor && csvDefaultEnabled);
     this.csvPolicy = new Map();
+    this.webCollaboration = webCollaboration === true;
+    this.webAdvisor = null;
+    this.webPending = new Map();
     this.qualityEvidence = normalizeQualityEvidence([...qualityEvidence]);
     if (!Number.isSafeInteger(minEvidenceSamples) || minEvidenceSamples < MIN_EVIDENCE_SAMPLES) fail('INVALID_ARGUMENT', 'Encoding evidence requires at least five samples');
     this.minEvidenceSamples = minEvidenceSamples;
@@ -174,6 +178,7 @@ export class CollaborationManager {
         payload: { previousVersion: item.inputVersion ?? null, currentVersion: current.version, resultEventId: item.resultEventId ?? null } });
       this.pending.delete(item.childId ?? item.attemptId);
       this.csvControllers.get(item.attemptId)?.abort();
+      this.webPending.get(item.childId)?.abort();
       const handle = this.handles.get(item.childId);
       if (handle) Promise.resolve().then(() => handle.dispose()).catch(error => { this.lastError = error.message; });
     }
@@ -206,6 +211,11 @@ export class CollaborationManager {
     const binding = this.bindings.get(sessionId);
     if (toolName === 'collab_delegate_task') return !!binding && !binding.parentId && !!this.nativeInputs.current(binding.runId);
     const item = binding?.workItemId ? this.store.getWorkItems(binding.runId).find(work => work.id === binding.workItemId) : null;
+    if (toolName === 'collab_consult_web') {
+      return this.#canConsultWeb(binding, item) &&
+        !this.store.eventsByKind(binding.runId, 'web_consultation_requested')
+          .some(event => event.stepId === item.id && event.attemptId === item.attemptId);
+    }
     if (toolName === 'collab_csv_workflow') {
       if (!binding || !this.isCsvWorkflowEnabled(binding.runId)) return false;
       if (!binding.parentId) return true;
@@ -234,6 +244,80 @@ export class CollaborationManager {
   #event(binding, stepId, kind, payload, parents = []) {
     this.#current(binding);
     return this.store.appendEvent({ runId: binding.runId, stepId, attemptId: binding.attemptId ?? 'root', kind, payload: { ...copy(payload), actorId: binding.id }, parents });
+  }
+  attachWebAdvisor(advisor) {
+    if (this.webAdvisor !== advisor) {
+      for (const controller of this.webPending.values()) controller.abort();
+      this.webAdvisor = advisor;
+    }
+  }
+  #canConsultWeb(binding, item) {
+    if (!this.webCollaboration || !this.webAdvisor || this.closing || !binding?.parentId || !item ||
+        item.computation || item.csvWorkflow || item.childId !== binding.id || item.attemptId !== binding.attemptId ||
+        !['starting', 'running'].includes(item.state) || this.finalEvents.has(binding.id) ||
+        this.bindings.get(binding.parentId)?.runId !== binding.runId) return false;
+    return this.store.getRun(binding.runId)?.source === 'superagent' && this.isCurrentInput(item) &&
+      this.nativeInputs.current(binding.runId)?.webConsultationEnabled === true;
+  }
+  /** @param {string} sessionId @param {string} question @param {{signal?: AbortSignal, assertSession?: () => void}} [options] */
+  async consultWeb(sessionId, question, { signal, assertSession } = {}) {
+    question = typeof question === 'string' ? question.trim() : '';
+    if (!question || !question.isWellFormed() || Buffer.byteLength(question) > 1024) {
+      fail('INVALID_WEB_QUESTION', 'Provide one short question of at most 1024 UTF-8 bytes.');
+    }
+    assertSession?.();
+    if (signal?.aborted || !this.isToolAvailable(sessionId, 'collab_consult_web')) {
+      return { status: 'unavailable', code: 'WEB_CONSULTATION_UNAVAILABLE' };
+    }
+    const binding = this.bindings.get(sessionId);
+    const item = this.#current(binding);
+    const scope = { runId: binding.runId, workItemId: item.id, attemptId: item.attemptId, inputVersion: item.inputVersion };
+    const request = this.#event(binding, item.id, 'web_consultation_requested', {
+      ...scope, questionBytes: Buffer.byteLength(question), questionHash: createHash('sha256').update(question).digest('hex'),
+    });
+    const controller = new AbortController();
+    this.webPending.set(sessionId, controller);
+    const requestSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(65_000), ...(signal ? [signal] : [])]);
+    const isCurrent = () => {
+      if (requestSignal.aborted) return false;
+      try {
+        assertSession?.();
+        return this.#canConsultWeb(binding, this.#current(binding));
+      } catch { return false; }
+    };
+    let cancel;
+    try {
+      const cancelled = new Promise((_, reject) => {
+        cancel = () => reject(Object.assign(new Error('Web consultation cancelled'), { code: 'CHILD_CONSULTATION_CANCELLED' }));
+        requestSignal.addEventListener('abort', cancel, { once: true });
+      });
+      const answer = await Promise.race([this.webAdvisor.ask({ ...scope, question, signal: requestSignal, isCurrent }), cancelled]);
+      if (!isCurrent()) fail('CHILD_CONSULTATION_STALE', 'The input or attempt changed before the reply arrived.');
+      const markdown = answer?.markdown;
+      if (typeof markdown !== 'string' || !markdown.trim() || !markdown.isWellFormed() || Buffer.byteLength(markdown) > 2048 ||
+          typeof answer.consultationId !== 'string' || !/^[A-Za-z0-9-]{1,100}$/.test(answer.consultationId) ||
+          !['manual', 'open-webui'].includes(answer.provider)) {
+        fail('INVALID_WEB_ADVICE', 'The advisor did not return valid Markdown.');
+      }
+      const artifact = this.store.putArtifact(markdown, { mediaType: 'text/markdown; charset=utf-8' });
+      const detail = { ...scope, consultationId: answer.consultationId, artifactRef: artifact.id,
+        bytes: artifact.bytes, provider: answer.provider, provenance: 'unverified_web_advice' };
+      this.#event(binding, item.id, 'web_consultation_received', detail, [request.id]);
+      const data = Buffer.from(markdown, 'utf8');
+      let previewEnd = Math.min(data.length, 768);
+      while (previewEnd < data.length && (data[previewEnd] & 0xc0) === 0x80) previewEnd--;
+      return { status: 'ready', ...detail, markdownPreview: data.toString('utf8', 0, previewEnd),
+        nextStart: previewEnd < data.length ? previewEnd : null };
+    } catch (error) {
+      const code = /^(?:CHILD_CONSULTATION_[A-Z_]+|ADVISOR_[A-Z_]+|INVALID_WEB_ADVICE)$/.test(error?.code)
+        ? error.code : 'WEB_CONSULTATION_FAILED';
+      if (!this.closed) this.store.appendEvent({ runId: scope.runId, stepId: item.id, attemptId: item.attemptId,
+        kind: 'web_consultation_unavailable', payload: { ...scope, actorId: sessionId, code }, parents: [request.id] });
+      return { status: 'unavailable', code };
+    } finally {
+      requestSignal.removeEventListener('abort', cancel);
+      this.webPending.delete(sessionId);
+    }
   }
   /** @param {string} sessionId @param {{inputRef: string, steps: JsonValue[]}} args @param {{signal?: AbortSignal}} [options] */
   async runCsvStep(sessionId, { inputRef, steps }, { signal } = {}) {
@@ -277,7 +361,10 @@ export class CollaborationManager {
       }
     }
     const event = this.#event(binding, stepId || item?.id || 'root-result', final ? 'final_result' : 'step_result', { result, artifactRef: artifact.id, provenance: verification ? 'host_verified_fields' : 'agent_claim', final, ...(verification ? { verification } : {}) }, parents);
-    if (final) this.finalEvents.set(sessionId, event);
+    if (final) {
+      this.finalEvents.set(sessionId, event);
+      this.webPending.get(sessionId)?.abort();
+    }
     return { eventId: event.id, stepId: event.stepId, runId: binding.runId, artifactRef: artifact.id, submitted: true, ...(verification ? { verification } : {}) };
   }
   #boundContract(item) {
@@ -377,13 +464,24 @@ export class CollaborationManager {
     }
     return view;
   }
-  /** @param {string} runId @param {string} ref @param {import('./types.js').ArtifactRange} [options] */
-  readArtifact(runId, ref, options = {}) {
+  isWebAdviceArtifact(runId, ref) {
+    return this.webCollaboration && this.store.eventsByKind(runId, 'web_consultation_received')
+      .some(event => event.payload.artifactRef === ref);
+  }
+  /** @param {string} runId @param {string} ref @param {import('./types.js').ArtifactRange} [options] @param {string} [sessionId] */
+  readArtifact(runId, ref, options = {}, sessionId) {
     ref = this.nativeInputs.resolve(runId, ref);
     // Only host-owned envelope fields grant access. A model's result can mention any string;
     // mentioning another run's digest must not turn it into readable evidence.
     let referenced = false;
-    for (const event of this.#events(runId)) if (event.payload?.artifactRef === ref || event.inputRefs?.includes(ref)) { referenced = true; break; }
+    const binding = sessionId && this.bindings.get(sessionId);
+    for (const event of this.#events(runId)) {
+      if (event.payload?.artifactRef !== ref && !event.inputRefs?.includes(ref)) continue;
+      if (event.kind === 'web_consultation_received' && binding?.parentId &&
+          (event.payload.actorId !== sessionId || event.attemptId !== binding.attemptId)) continue;
+      referenced = true;
+      break;
+    }
     if (!referenced) fail('FORBIDDEN', 'Artifact is not referenced by this run');
     const meta = this.store.getArtifact(ref); if (!meta) fail('NOT_FOUND', 'Artifact not found');
     const range = { ...options };
@@ -624,6 +722,7 @@ export class CollaborationManager {
     }
   }
   async settle(childId, result) {
+    this.webPending.get(childId)?.abort();
     if (this.closed) return { unknown:true, note:'Activation settled after shutdown deadline' };
     const binding = this.bindings.get(childId); if (!binding) return;
     this.handles.delete(childId);
@@ -695,6 +794,7 @@ export class CollaborationManager {
     const binding = this.authorize(agentId, runId); if (!binding.parentId) fail('INVALID_ARGUMENT', 'Interrupt a managed child, not the root');
     const handle = this.handles.get(agentId); if (!handle) fail('UNAVAILABLE', 'Activation handle is unavailable; inspect its recorded state');
     const item = this.#current(binding); this.store.saveWorkItem({ ...item, state: 'stopping' });
+    this.webPending.get(agentId)?.abort();
     this.store.appendEvent({ runId, stepId: item.id, attemptId: item.attemptId, kind: 'interrupt_requested', payload: { agentId } });
     await handle.dispose(); return { interrupted: true, agentId };
   }
@@ -763,6 +863,7 @@ export class CollaborationManager {
     if (this.closePromise) return this.closePromise;
     this.closing = true; this.pending.clear();
     for (const controller of this.csvControllers.values()) controller.abort();
+    this.attachWebAdvisor(null);
     this.closePromise = (async () => {
       let timer;
       const drain = (async () => {

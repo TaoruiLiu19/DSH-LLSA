@@ -4,7 +4,7 @@ import { Script } from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -13,7 +13,7 @@ import { PANEL_HTML, PANEL_SCRIPT } from '../packages/dsh-collab/src/text-assets
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
-export async function smoke(cwd = root, entry = 'dist/start.js', { csvWorkspace } = {}) {
+export async function smoke(cwd = root, entry = 'dist/start.js', { csvWorkspace, webCollab = false } = {}) {
   const state = await mkdtemp(join(tmpdir(), 'dsh-llsa-smoke-'));
   const reservation = createServer();
   await new Promise((accept, reject) => {
@@ -30,6 +30,7 @@ export async function smoke(cwd = root, entry = 'dist/start.js', { csvWorkspace 
   env.DSH_HOME = join(state, 'harness');
   env.DSH_LLSA_STATE = join(state, 'plugin');
   if (csvWorkspace) env.DSH_LLSA_CSV_WORKSPACE = resolve(cwd, csvWorkspace);
+  if (webCollab) env.DSH_LLSA_WEB_COLLAB = '1';
   const child = spawn(process.execPath, [resolve(cwd, entry), String(port)], {
     cwd, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     detached: process.platform !== 'win32',
@@ -97,8 +98,42 @@ export async function smoke(cwd = root, entry = 'dist/start.js', { csvWorkspace 
     const native = await fetch(origin + '/orchestrator/api/state', { headers, signal: AbortSignal.timeout(5000) });
     assert.equal(native.status, 200);
     assert.ok((await native.json()).setup, 'Native task state missing');
+    const get = (route, extra = {}) => fetch(origin + route, {
+      headers: { ...headers, ...extra }, signal: AbortSignal.timeout(5000),
+    });
+    const tasks = await get('/orchestrator/api/local/tasks');
+    assert.equal(tasks.status, 200);
+    assert.equal((await tasks.json()).webConsultationProtocol === 1, webCollab,
+      'Native consultation capability did not match the launch configuration');
+
+    const webPage = await get('/web-collab');
+    const webPanel = await readFile(resolve(root, 'packages/web-collab/src/panel.html'));
+    if (webCollab) {
+      assert.equal(webPage.status, 200);
+      assert.match(webPage.headers.get('content-type'), /text\/html/);
+      assert.deepEqual(Buffer.from(await webPage.arrayBuffer()), webPanel);
+      const toggle = webPanel.toString('utf8').match(/<input\b[^>]*\bid="web"[^>]*>/)?.[0];
+      assert.ok(toggle, 'Web collaboration task opt-in is missing');
+      assert.doesNotMatch(toggle, /\bchecked\b/i, 'Every task must start with web consultation off');
+      for (const file of ['panel.js', 'native-handoff.js', 'task-evidence.js']) {
+        const module = await get(`/web-collab/${file}`);
+        assert.equal(module.status, 200, `${file} HTTP status`);
+        assert.match(module.headers.get('content-type'), /javascript/);
+        assert.deepEqual(Buffer.from(await module.arrayBuffer()), await readFile(resolve(root, 'packages/web-collab/src', file)));
+      }
+      const status = await get('/web-collab/api/status', { 'x-web-collab-request': '1' });
+      assert.equal(status.status, 200);
+      assert.equal((await status.json()).advisorAvailable, false, 'A fresh launch must work without Open WebUI');
+    } else {
+      assert.notDeepEqual(Buffer.from(await webPage.arrayBuffer()), webPanel, 'Web Collab is enabled without opt-in');
+      const status = await get('/web-collab/api/status', { 'x-web-collab-request': '1' });
+      assert.ok(status.status === 404 || !/application\/json/i.test(status.headers.get('content-type') ?? ''),
+        'The optional Web Collab API is registered on a default launch');
+      await status.body?.cancel();
+    }
     console.log('PASS: isolated Harness, both panels, collaboration bridge and native state; no model task submitted');
     if (csvWorkspace) console.log('PASS: local CSV policy toggles on and off over the running web API');
+    console.log(`PASS: Web Collab ${webCollab ? 'loads its shipped panel and starts without an advisor' : 'is disabled by default'}`);
   } catch (error) {
     // Keep ephemeral auth URLs out of CI output even when boot fails.
     const safe = output.replace(/([?&]token=)[^\s&]+/g, '$1[REDACTED]');
@@ -116,5 +151,5 @@ export async function smoke(cwd = root, entry = 'dist/start.js', { csvWorkspace 
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  await smoke();
+  await smoke(root, 'dist/start.js', { webCollab: process.argv.includes('--web-collab') });
 }

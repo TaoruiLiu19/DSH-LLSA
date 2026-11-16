@@ -47,7 +47,7 @@ import type { ResourceHost } from './resources.ts'
 import { mainTools, type MainToolsHost } from './tools/main.ts'
 import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
 import { CollabBridge } from './collab-bridge.ts'
-import { installLocalSource, localTrigger } from './local-tasks.ts'
+import { installLocalSource, localTrigger, WEB_CONSULTATION_PROTOCOL } from './local-tasks.ts'
 
 // Source plugins interact with dsh-superagent exclusively through the `SourceHost` service interface.
 declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceHost } }
@@ -205,7 +205,7 @@ export class Runtime extends Service implements SourceHost {
   }
   submitLocal(input: unknown) {
     if (!this.machine.localOnly || !this.configured() || this.closing()) throw new Error('Local task mode unavailable')
-    const trigger = localTrigger(input, this.store)
+    const trigger = localTrigger(input, this.store, this.machine.webCollaboration === true)
     const prior = this.store.triggers.get(trigger.id)
     if (!prior) this.receive(trigger)
     return { triggerId: trigger.id, reused: !!prior }
@@ -213,6 +213,7 @@ export class Runtime extends Service implements SourceHost {
   localTasks() {
     if (!this.machine.localOnly) throw new Error('Local task mode unavailable')
     return { masterSessionId: this.masterId, tickets: this.collabBridge.snapshot().tickets,
+      ...(this.machine.webCollaboration === true ? { webConsultationProtocol: WEB_CONSULTATION_PROTOCOL } : {}),
       replies: this.store.db.prepare('SELECT value FROM collab_local_replies ORDER BY rowid DESC LIMIT 100').all().map(row => {
         const reply=JSON.parse(String(row.value)) as {id:string};return {...reply,status:this.store.replyStatus(reply.id)??'unknown'}
       }) }

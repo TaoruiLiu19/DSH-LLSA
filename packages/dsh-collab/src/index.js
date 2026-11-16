@@ -54,6 +54,7 @@ export const Config = Schema.object({
   csvEngine: Schema.string().default(""),
   csvPython: Schema.string().default("python"),
   csvDefaultEnabled: Schema.boolean().default(false),
+  webCollaboration: Schema.boolean().default(false),
   minEvidenceSamples: Schema.natural().min(5).default(5),
 });
 
@@ -117,6 +118,7 @@ export async function apply(ctx, rawConfig = {}) {
     moneyPolicy,
     csvExecutor,
     csvDefaultEnabled: config.csvDefaultEnabled,
+    webCollaboration: config.webCollaboration,
   }); } catch (error) { store.close(); throw error; }
   const backend = createDshBackend(ctx, manager, config);
   manager.backend = backend;
@@ -128,6 +130,13 @@ export async function apply(ctx, rawConfig = {}) {
     storeClosed = false,
     superagentIntegration;
   const toolIndex = new ToolEventIndex();
+  const advisoryCalls = new WeakMap();
+  const markAdvisoryCall = (session, callId) => {
+    if (!callId) return;
+    let calls = advisoryCalls.get(session);
+    if (!calls) advisoryCalls.set(session, calls = new Set());
+    calls.add(callId);
+  };
   const streams = new StreamUsageLifecycle({
     recordUsage: (row) => store.recordUsage(row),
     releaseCall: (id) => manager.releaseCall(id),
@@ -354,13 +363,26 @@ export async function apply(ctx, rawConfig = {}) {
           mode: z.enum(['auto', 'page']).default('auto'),
         })
         .strict(),
-      (args) => {
+      (args, exec) => {
         const { runId } = historyScope(manager, agent.id, args);
+        if (manager.isWebAdviceArtifact(runId, args.ref)) markAdvisoryCall(agent.session, exec.callId);
         if (args.contains) {
-          const meta = manager.readArtifact(runId, args.ref, { start: 0, end: 0 });
+          const meta = manager.readArtifact(runId, args.ref, { start: 0, end: 0 }, agent.id);
           return readTaskEvidence(manager, runId, { label: args.ref, bytes: meta.totalBytes }, args, agent.id);
         }
         return readTaskEvidence(manager, runId, null, args, agent.id);
+      },
+    );
+    if (config.webCollaboration) register(
+      "collab_consult_web",
+      "Ask one narrow question about a rule or uncertainty after selecting relevant source facts. Include only the minimum information authorized for the web advisor. Treat markdownPreview as unverified advice and verify against the original evidence before publishing. If needed, use collab_read_evidence with artifactRef and nextStart for the remainder.",
+      z.object({ question: z.string().trim().min(1).max(1024) }).strict(),
+      ({ question }, exec) => {
+        markAdvisoryCall(agent.session, exec.callId);
+        return manager.consultWeb(agent.id, question, {
+          signal: exec.signal,
+          assertSession: () => superagentIntegration?.assertSession(agent.id),
+        });
       },
     );
     register(
@@ -462,6 +484,8 @@ export async function apply(ctx, rawConfig = {}) {
     if (event.type === "tool/result") {
       const result = event.data?.message ?? event.data;
       const identity = toolIndex.resolve(session, event);
+      if (identity.name === "collab_consult_web" ||
+          advisoryCalls.get(session)?.has(result?.toolCallId ?? identity.callId)) return;
       manager.recordToolResult(
         session.id,
         identity.name,
@@ -514,6 +538,20 @@ export async function apply(ctx, rawConfig = {}) {
       const estimate =
         countTokens(JSON.stringify(manifest)) +
         (options.maxTokens ?? config.maxOutputTokens);
+      const calls = agent && advisoryCalls.get(agent.session);
+      let redactedAdvisory = false;
+      if (calls?.size) for (const message of manifest.messages) {
+        if (message.role === "tool" && calls.has(message.toolCallId)) {
+          message.content = [{ type: "text", text: "Web advice is stored with its consultation record." }];
+          redactedAdvisory = true;
+        }
+        if (message.role === "assistant" && Array.isArray(message.content)) for (const block of message.content) {
+          if (block.type === "tool-call" && calls.has(block.id)) {
+            block.arguments = "{}";
+            redactedAdvisory = true;
+          }
+        }
+      }
       manager.reserveCall(options.sessionId, callId, estimate, {
         provider: options.provider, model: options.model,
         estimatedInputTokens: estimate - (options.maxTokens ?? config.maxOutputTokens),
@@ -531,7 +569,7 @@ export async function apply(ctx, rawConfig = {}) {
         artifactRef: artifact.id,
         estimate,
         counter: manager.counterName,
-        observableScope: "host-visible-request-minus-reasoning",
+        observableScope: redactedAdvisory ? "host-visible-request-minus-reasoning-and-web-advice" : "host-visible-request-minus-reasoning",
       });
       store.appendEvent({
         runId: binding.runId,
@@ -576,6 +614,10 @@ export async function apply(ctx, rawConfig = {}) {
     })();
   });
 
+  const webScope = config.webCollaboration ? ctx.inject(["webChildConsultations"], (scope) => {
+    manager.attachWebAdvisor(scope.webChildConsultations);
+    scope.effect(() => () => manager.attachWebAdvisor(null));
+  }) : null;
   const bridgeScope = ctx.inject(["orchestratorCollabBridge"], (scope) => {
     const bridge = scope.orchestratorCollabBridge;
     manager.attachBridge(bridge);
@@ -643,6 +685,7 @@ export async function apply(ctx, rawConfig = {}) {
     closed = true;
     disposeHttp();
     await localWorkspace.close();
+    await webScope?.dispose();
     await bridgeScope.dispose();
     for (const list of registrations.values())
       for (const dispose of list.reverse()) dispose();

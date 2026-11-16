@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Harness 网页协作</title>
+  <style>
+    :root { color-scheme: light; font: 16px/1.55 "Inter", system-ui, sans-serif; color: #18263a; background: #f4f6fa; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { max-width: 820px; margin: 38px auto; padding: 0 16px 28px; }
+    h1 { margin: 0 0 6px; font-size: clamp(1.65rem, 5vw, 2.3rem); }
+    h2 { margin: 0 0 14px; font-size: 1.2rem; }
+    p { margin: 0 0 12px; }
+    form, section { background: #fff; border: 1px solid #d7dfeb; border-radius: 12px; padding: clamp(14px, 4vw, 24px); margin-top: 18px; }
+    fieldset { border: 1px solid #d7dfeb; border-radius: 8px; padding: 12px; margin: 12px 0; }
+    legend, label { font-weight: 600; }
+    small { color: #4d5c73; display: block; margin: 3px 0 10px; }
+    textarea { display: block; width: 100%; min-height: 88px; resize: vertical; padding: 9px; border: 1px solid #a7b4c7; border-radius: 6px; font: inherit; margin: 5px 0 10px; }
+    #prompt { min-height: 142px; }
+    .choices, .actions { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 10px 0; }
+    button { cursor: pointer; padding: 7px 13px; border: 1px solid #a7b4c7; border-radius: 6px; background: #fff; font: inherit; color: inherit; }
+    button:disabled { cursor: default; opacity: .56; }
+    button.primary { background: #2049b5; color: white; border-color: #2049b5; }
+    a { color: #2049b5; }
+    [role="alert"] { color: #9e1e2d; }
+    article + article { border-top: 1px solid #d7dfeb; padding-top: 12px; margin-top: 12px; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f6fa; border-radius: 6px; padding: 12px; }
+    footer { margin-top: 18px; }
+  </style>
+  <script type="module" src="/web-collab/panel.js"></script>
+</head>
+<body>
+  <h1>Harness 网页协作</h1>
+  <p>网页顾问负责初审，Harness Agent 负责核对资料并交付结果。</p>
+  <form id="task-form">
+    <label for="prompt">任务内容</label>
+    <textarea id="prompt" maxlength="20000" required></textarea>
+    <div id="evidence-fields">
+      <label for="evidence">证据文件（可选）</label>
+      <input id="evidence" type="file" multiple accept=".md,.markdown,.txt,.csv,.json,.log,text/plain,text/markdown,text/csv,application/json">
+      <small>UTF-8 文本，最多 8 份，每份 64 KiB，合计 256 KiB。</small>
+    </div>
+    <small id="paste-evidence" hidden>多智能体模式请把资料粘贴到任务内容中。</small>
+    <div class="choices">
+      <label><input id="multi" type="checkbox" disabled> 多智能体</label>
+      <label><input id="web" type="checkbox"> 网页协作</label>
+      <label><input id="json" type="checkbox"> 输出纯 JSON</label>
+    </div>
+    <small id="native-status">正在检查 DSH-LLSA…</small>
+    <fieldset id="web-fields" hidden>
+      <legend>网页初审</legend>
+      <small id="child-mode-hint" hidden>子 Agent 先核对任务资料，再按需向网页咨询具体疑点。这里的初审建议可留空。</small>
+      <label for="context">咨询内容</label>
+      <textarea id="context" maxlength="8192" placeholder="可只填写需要核对的片段。留空时使用任务内容。"></textarea>
+      <div class="actions">
+        <button id="copy" type="button">复制咨询提示</button>
+        <button id="consult" type="button" hidden>用 Open WebUI 咨询</button>
+      </div>
+      <textarea id="draft" aria-label="可复制的咨询提示" readonly hidden></textarea>
+      <label for="advice">网页建议</label>
+      <textarea id="advice" maxlength="4096" required placeholder="在聊天网页发送咨询提示，再把核对过的回复粘贴到这里。"></textarea>
+      <small id="advice-status" role="status"></small>
+      <small>提交前可以编辑建议。使用 Open WebUI 时，仅发送上面的咨询内容。</small>
+    </fieldset>
+    <div class="actions"><button id="submit" class="primary" type="submit">提交给单个 Agent</button></div>
+    <p id="notice" role="status"></p>
+    <p id="error" role="alert"></p>
+  </form>
+  <section id="child-consultations" hidden>
+    <h2>子 Agent 咨询</h2>
+    <div id="child-requests"></div>
+    <p id="child-error" role="alert"></p>
+  </section>
+  <section>
+    <h2>单 Agent 任务</h2>
+    <div id="jobs">正在读取…</div>
+    <p id="load-error" role="alert"></p>
+  </section>
+  <footer><a href="/">打开 Harness</a> <span id="native-links" hidden>· <a href="/orchestrator/local">查看多智能体工单</a> · <a href="/collab">查看 LeanLink 记录</a></span></footer>
+</body>
+</html>

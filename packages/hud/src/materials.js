@@ -18,7 +18,7 @@
  * 规格：`HUD-设计规格-v0.4-待实现.md`
  */
 
-/** The alias table emitted by the standalone HUD collector. */
+/** The base alias table version, used for ordinary tool activity. */
 export const ALIAS_VERSION = 1;
 
 /**
@@ -109,13 +109,21 @@ export const ALIASES = Object.freeze({
   working_directory: 'working_directory',
   write: 'write',
 });
+const csvAliases = Object.freeze({ ...ALIASES, collab_csv_workflow: 'collab_csv_workflow' });
 const aliasTables = new Map([
   [ALIAS_VERSION, ALIASES],
-  [2, Object.freeze({ ...ALIASES, collab_csv_workflow: 'collab_csv_workflow' })],
+  [2, csvAliases],
+  [3, Object.freeze({ ...csvAliases, collab_consult_web: 'collab_consult_web' })],
 ]);
 
 export function supportsAliasVersion(version) {
   return aliasTables.has(version);
+}
+
+/** The first published table that classifies this tool. Unknown IDs use the base table. */
+export function aliasVersionForTool(tool) {
+  for (const [version, aliases] of aliasTables) if (Object.hasOwn(aliases, tool)) return version;
+  return ALIAS_VERSION;
 }
 
 /**
@@ -134,7 +142,7 @@ const ALIAS_GROUPS = Object.freeze({
     'cordis_inspect_query',
   ],
   doc: ['read', 'read_image', 'write', 'edit', 'apply_patch', 'str_replace_editor', 'present', 'collab_csv_workflow'],
-  web: ['web_fetch', 'web_search'],
+  web: ['web_fetch', 'web_search', 'collab_consult_web'],
   shell: [
     'bash', 'pwsh', 'ralph', 'working_directory', 'load_workspace_dependencies',
     'terminal_open', 'terminal_read', 'terminal_send', 'terminal_close', 'terminal_list', 'terminal_signal',
@@ -366,7 +374,7 @@ const VERB_GROUPS = Object.freeze({
   write: ['write', 'edit', 'apply_patch', 'str_replace_editor', 'present', 'todo_write', 'create_goal', 'update_goal', 'schedule_create', 'schedule_edit', 'send_message', 'collab_send', 'collab_publish', 'collab_csv_workflow', 'orchestrator_reply'],
   execute: ['bash', 'pwsh', 'ralph', 'run_code', 'working_directory', 'load_workspace_dependencies', 'terminal_open', 'terminal_read', 'terminal_send', 'terminal_close', 'terminal_list', 'terminal_signal', 'job_list', 'job_output', 'job_kill', 'skill'],
   scan: ['glob', 'grep', 'session_search', 'session_trace', 'session_event_search', 'session_event_trace', 'cordis_inspect_list', 'cordis_inspect_query'],
-  fetch: ['web_fetch', 'web_search'],
+  fetch: ['web_fetch', 'web_search', 'collab_consult_web'],
   handoff: ['ask_user_question', 'subagent', 'workflow', 'list_agents', 'interrupt_agent'],
 });
 

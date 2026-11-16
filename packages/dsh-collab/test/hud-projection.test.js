@@ -17,9 +17,11 @@ test('label boundary fixtures: Unicode length, sanitization, fallback and title 
 });
 
 test('alias file covers producer inventory in both directions, with native IDs unchanged',()=>{
-  const table=read('tool-aliases-v2.json'),previous=read('tool-aliases-v1.json'),ids=emittedToolIds();
-  assert.equal(table.version,2);
-  for (const [id, alias] of Object.entries(previous.aliases)) assert.equal(table.aliases[id], alias);
+  const table=read('tool-aliases-v3.json'),ids=emittedToolIds();
+  assert.equal(table.version,3);
+  for (const version of [1, 2]) {
+    for (const [id, alias] of Object.entries(read(`tool-aliases-v${version}.json`).aliases)) assert.equal(table.aliases[id], alias);
+  }
   assert.deepEqual(Object.keys(table.aliases).sort(),ids);
   for(const id of ids) {
     assert.equal(typeof table.aliases[id],'string');
@@ -27,9 +29,24 @@ test('alias file covers producer inventory in both directions, with native IDs u
       {kind:'tool.start',tool:id,callId:'c',agentId:'a',at:'2026-11-12T00:00:01Z'});
     const snapshot = hudSnapshot(state,'2026-11-12T00:00:01Z');
     assert.equal(snapshot.agents[0].lastEvent.tool,id);
-    assert.equal(snapshot.aliasVersion,id === 'collab_csv_workflow' ? 2 : 1);
+    assert.equal(snapshot.aliasVersion,id === 'collab_consult_web' ? 3 : id === 'collab_csv_workflow' ? 2 : 1);
   }
   assert.equal(hudSnapshot(emptyHud(),'2026-11-12T00:00:00Z').aliasVersion,1);
+});
+
+test('the snapshot uses the highest alias version required by events and last activity',()=>{
+  const at = '2026-11-12T00:00:00Z';
+  let state = emptyHud();
+  for (const [agentId, tool] of [['csv', 'collab_csv_workflow'], ['web', 'collab_consult_web']]) {
+    state = reduceHud(state, {kind:'turn.start', turn:1, agentId, at});
+    state = reduceHud(state, {kind:'tool.start', tool, callId:agentId, agentId, at});
+  }
+  assert.equal(hudSnapshot(state, at).aliasVersion, 3);
+  // An older event may leave the window while it remains another agent's last activity.
+  state.events = state.events.filter(event => event.agentId !== 'web');
+  const snapshot = hudSnapshot(state, at);
+  assert.equal(snapshot.aliasVersion, 3);
+  assert.ok(validate(snapshot), JSON.stringify(validate.errors));
 });
 for(const file of ['hud-normal.json','hud-invalidated.json','hud-restarted.json','hud-attention.json','hud-stalled.json']) test(`deterministic HUD replay: ${file}`,()=>{
   const fixture=read('fixtures/'+file);

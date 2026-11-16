@@ -38,11 +38,11 @@ test('the shipped alias table is the contract’s', { skip: contractSkip }, () =
   assert.deepEqual(aliasTable(), contract, 'src/materials.js must mirror contracts/tool-aliases-v1.json');
   const generated = JSON.parse(readFileSync(new URL('../data/tool-aliases-v1.json', import.meta.url), 'utf8'));
   assert.deepEqual(generated, contract, 'data/tool-aliases-v1.json is the published copy');
-  assert.deepEqual(aliasTable(2), contractJson('tool-aliases-v2.json'));
+  for (const version of [2, 3]) assert.deepEqual(aliasTable(version), contractJson(`tool-aliases-v${version}.json`));
 });
 
 test('every published alias has exactly one destination', () => {
-  const aliasNames = new Set([...Object.values(aliasTable(1).aliases), ...Object.values(aliasTable(2).aliases)]);
+  const aliasNames = new Set(Object.values(aliasTable(3).aliases));
   for (const alias of aliasNames) {
     assert.ok(Object.hasOwn(MATERIAL_BY_ALIAS, alias), `alias ${alias} is unmapped`);
   }
@@ -167,6 +167,15 @@ test('alias version 2 shows native CSV work without changing existing classifica
   });
   assert.equal(verbFor('doc', tool, 'zh'), '整理中');
   assert.deepEqual(materialForTool('read', { aliasVersion: 2 }), materialForTool('read'));
+});
+
+test('alias version 3 classifies the consultation tool as web activity', () => {
+  const tool = 'collab_consult_web';
+  assert.equal(materialForTool(tool, { aliasVersion: 2 }).known, false);
+  assert.deepEqual(materialForTool(tool, { aliasVersion: 3 }), {
+    tool, alias: tool, material: 'web', known: true, aliasOk: true,
+  });
+  assert.deepEqual(materialForTool('collab_csv_workflow', { aliasVersion: 3 }), materialForTool('collab_csv_workflow', { aliasVersion: 2 }));
 });
 
 test('verbs are material x intent, always present', () => {

@@ -1,6 +1,6 @@
 /** Bundles share the root Harness dependency tree; package dev installs are not runtime hosts. */
 import { rolldown } from 'rolldown';
-import { mkdir, copyFile } from 'node:fs/promises';
+import { mkdir, copyFile, cp } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -27,3 +27,6 @@ await mkdir(csvDist, { recursive: true });
 for (const name of ['csv_core.py', 'csv_pipeline.py', 'run_workflow.py']) {
   await copyFile(resolve(root, 'packages/dsh-collab/csv-engine', name), resolve(csvDist, name));
 }
+
+// The plugin serves unbundled browser modules and HTML relative to its entry point.
+await cp(resolve(root, 'packages/web-collab/src'), resolve(root, 'dist/web-collab'), { recursive: true });

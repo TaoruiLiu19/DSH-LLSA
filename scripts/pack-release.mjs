@@ -112,6 +112,7 @@ const packageLocations = [
   ['dsh-collab', 'collab'],
   ['superagent', 'superagent'],
   ['launcher', 'launcher'],
+  ['web-collab', 'web-collab'],
 ];
 
 for (const [directoryName, label] of packageLocations) {
@@ -119,9 +120,10 @@ for (const [directoryName, label] of packageLocations) {
   const manifest = JSON.parse(await readFile(join(sourceDirectory, 'package.json'), 'utf8'));
   const packageDirectory = join(stagingDirectory, label);
   const packageContents = join(packageDirectory, 'package');
-  await mkdir(join(packageContents, 'lib'), { recursive: true });
+  await mkdir(packageContents, { recursive: true });
 
   if (label === 'collab') {
+    await mkdir(join(packageContents, 'lib'), { recursive: true });
     await copyFile(
       join(repositoryRoot, 'dist/collab.js'),
       join(packageContents, 'lib/index.js'),
@@ -133,6 +135,10 @@ for (const [directoryName, label] of packageLocations) {
     manifest.main = './lib/index.js';
     manifest.exports = { '.': './lib/index.js' };
     delete manifest.dsh;
+  } else if (label === 'web-collab') {
+    await cp(join(repositoryRoot, 'dist/web-collab'), join(packageContents, 'src'), { recursive: true });
+    await copyFile(join(sourceDirectory, 'cordis.patch.yml'), join(packageContents, 'cordis.patch.yml'));
+    await copyFile(join(sourceDirectory, 'README.md'), join(packageContents, 'README.md'));
   } else {
     await cp(join(sourceDirectory, 'lib'), join(packageContents, 'lib'), { recursive: true });
   }
@@ -140,10 +146,12 @@ for (const [directoryName, label] of packageLocations) {
   // Install packages carry runtime files and licenses, without development scripts.
   delete manifest.devDependencies;
   delete manifest.scripts;
-  manifest.files = ['lib', 'LICENSE', 'NOTICE'];
+  if (label !== 'web-collab') {
+    manifest.files = ['lib', 'LICENSE', 'NOTICE'];
+    await copyFile(join(sourceDirectory, 'NOTICE'), join(packageContents, 'NOTICE'));
+  }
   await writeFile(join(packageContents, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   await copyFile(join(sourceDirectory, 'LICENSE'), join(packageContents, 'LICENSE'));
-  await copyFile(join(sourceDirectory, 'NOTICE'), join(packageContents, 'NOTICE'));
 
   const filename = await archive(packageDirectory, `dsh-llsa-${label}-${manifest.version}.tgz`);
   const integrity = `sha512-${createHash('sha512')
@@ -182,7 +190,7 @@ const kitManifest = {
 
 await writeFile(join(kitDirectory, 'package.json'), `${JSON.stringify(kitManifest, null, 2)}\n`);
 
-for (const filename of ['LICENSE', 'NOTICE', 'README.md', 'CHANGELOG.md']) {
+for (const filename of ['LICENSE', 'NOTICE', 'README.md', 'README.en.md', 'CHANGELOG.md']) {
   await copyFile(join(repositoryRoot, filename), join(kitDirectory, filename));
 }
 await cp(join(repositoryRoot, 'assets'), join(kitDirectory, 'assets'), { recursive: true });
@@ -247,7 +255,7 @@ function buildKitLock(sourceLock, manifest, packageArtifacts) {
     lockedPackages[packagePath] = entry;
   }
 
-  // These three packages intentionally use exact direct and peer versions. A new
+  // Release packages intentionally use exact direct and peer versions. A new
   // dependency must be added to the reviewed root graph, never resolved at pack time.
   for (const artifact of packageArtifacts) {
     const dependencies = {

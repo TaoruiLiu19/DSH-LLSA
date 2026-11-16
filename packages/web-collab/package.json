@@ -1,0 +1,19 @@
+{
+  "name": "@dsh-llsa/web-collab",
+  "version": "0.2.0",
+  "description": "Standalone DeepSeek Harness plugin for browser-assisted tasks",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.js",
+  "files": ["src", "cordis.patch.yml", "README.md", "LICENSE"],
+  "scripts": { "test": "node --test test/*.test.js" },
+  "engines": { "node": ">=24.11.0", "dsh": "0.2.2-rc.1" },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": { "patch": "./cordis.patch.yml" }
+  }
+}
