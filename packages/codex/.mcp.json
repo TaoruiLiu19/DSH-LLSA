@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "leanlink": {
+      "command": "node",
+      "cwd": ".",
+      "args": ["./leanlink/server.mjs"]
+    }
+  }
+}

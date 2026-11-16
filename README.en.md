@@ -6,6 +6,8 @@ DSH-LLSA is a local workspace for multi-agent tasks on DeepSeek Harness. The mai
 
 The combined kit is for one user on a local machine. It includes the launcher, Super-agent, the collaboration workspace with a local CSV executor, and optional web collaboration. You supply the model API configuration in Harness. Start with tasks that have clear inputs and acceptance criteria, such as field extraction, document comparison, or applying a known rule to several CSV files.
 
+[Codex split-view HUD](#codex-split-view-hud)
+
 ## Install and start
 
 Use **Node.js 24.11+** and **npm 11+**. The first dependency installation requires an internet connection. Local CSV workflows also require **Python 3.10+**.
@@ -119,6 +121,10 @@ The optional `@dsh-llsa/hud` is a read-only overlay for Harness sessions. It sho
 HUD snapshots keep schema version 1 and select the alias table for the tools they show. Ordinary tool activity uses `aliasVersion: 1`, CSV activity uses version 2, and activity involving `collab_consult_web` uses version 3. Native tool IDs stay the same. [Alias table v1](contracts/tool-aliases-v1.json) · [v2](contracts/tool-aliases-v2.json) · [v3](contracts/tool-aliases-v3.json)
 
 Use `/collab` for model usage. It separates provider-reported usage, estimates, and missing data. The cost controls in the collaboration graph are for comparing scenarios. Real savings depend on the task, model, cached input, output length, and retries.
+
+### Codex split-view HUD
+
+Install the separate **LeanLink for Codex** plugin from the repository source to archive subagent results and evidence references. Start the local HUD. In Codex desktop on Windows, press `Ctrl+T`, paste the address printed in the terminal, and use `Ctrl+Shift+B` to cycle to split view. The same address opens in a regular browser on your machine. Once you review and trust the plugin's hooks, the HUD shows agent relationships, work states, and requests for attention reported by Codex. [Codex installation and permissions](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/codex/README.en.md)
 
 ### Set an optional cost budget
 
