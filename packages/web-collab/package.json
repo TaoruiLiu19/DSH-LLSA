@@ -1,6 +1,6 @@
 {
   "name": "@dsh-llsa/web-collab",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Standalone DeepSeek Harness plugin for browser-assisted tasks: paste the material, get a second opinion, and keep verifying it yourself.",
   "license": "MIT",
   "author": "Taorui Liu <liu_taorui@foxmail.com>",
