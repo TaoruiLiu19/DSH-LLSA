@@ -2,6 +2,12 @@
 
 把 DSH 版 HUD 搬到 WorkBuddy 的**本地网页形态**：hook → 本地服务 → 浏览器窗口。只读、零运行时依赖、不打包成插件。
 
+> **当前源码状态 · Source preview**
+>
+> 干净检出缺少 `lib/adapter.js` 和 `lib/tool-map.js`。启动服务和运行适配器测试都会失败。补齐文件后，请先在仓库根目录运行 `npm --prefix packages/hud-workbuddy run check`，通过后再继续下面的本机配置。
+>
+> A clean checkout is missing `lib/adapter.js` and `lib/tool-map.js`. The service and adapter tests need these files. Once restored, run `npm --prefix packages/hud-workbuddy run check` before configuring hooks.
+
 ## 它是什么
 
 "单核双壳"里的 WorkBuddy 壳，只保留网页这一层：

@@ -1,18 +1,40 @@
-# DSH-LLSA
+<p align="center">
+  <img src="assets/product-poster.png" alt="DSH-LLSA. Multi-agent delegation, compact LeanLink handoffs, and evidence on demand." width="100%">
+</p>
 
-[中文](README.md) · English · [Build and Test](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml) · [Changelog](CHANGELOG.md)
+<h1 align="center">DSH-LLSA</h1>
+<p align="center"><a href="README.md">简体中文</a> · English</p>
+<p align="center">Delegate work to local agents, review their results, and trace each handoff back to the original evidence.</p>
 
-DSH-LLSA is a local workspace for multi-agent tasks on DeepSeek Harness. The main agent delegates work, checks the results, and delivers the final answer. LeanLink exchanges compact structured results and keeps the underlying evidence available for review.
+<p align="center">
+  <a href="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml"><img src="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml/badge.svg?branch=main" alt="Build and test"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-80cbc4" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/Node.js-24.11%2B-89b4fa" alt="Node.js 24.11+">
+</p>
 
-The combined kit is for one user on a local machine. It includes the launcher, Super-agent, the collaboration workspace with a local CSV executor, and optional web collaboration. You supply the model API configuration in Harness. Start with tasks that have clear inputs and acceptance criteria, such as field extraction, document comparison, or applying a known rule to several CSV files.
+<p align="center">
+  <a href="#quick-start">Quick start</a> · <a href="#your-first-handoff">First handoff</a> · <a href="#optional-features">Optional features</a> · <a href="#usage-and-cost">Usage and cost</a> · <a href="#development-and-verification">Development</a>
+</p>
 
-[Codex split-view HUD](#codex-split-view-hud)
+DSH-LLSA helps with evidence review, code checks, and data work on a single machine. A coordinator assigns work and reviews results. Workers carry out their assignments and use **LeanLink** to send concise results with evidence references. Corrections create a new input version, and earlier results remain available for inspection.
 
-## Install and start
+## Choose an entry point
 
-Use **Node.js 24.11+** and **npm 11+**. The first dependency installation requires an internet connection. Local CSV workflows also require **Python 3.10+**.
+| Your host | What you can do | Start here |
+| --- | --- | --- |
+| **DeepSeek Harness** | Submit work items, delegate, review results, and inspect evidence and model usage | [Install the combined kit](#quick-start) |
+| **Harness HUD** | Follow tool activity, child-agent state, and requests for attention in a Harness chat | [HUD installation guide](https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/packages/hud#readme) |
+| **Codex** | Archive subagent results with LeanLink and view activity beside your chat in the built-in browser | [Codex installation and split view](#codex-split-view-hud) |
+| **WorkBuddy** | Preview source for a local browser HUD | [Preview status and startup limits](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud-workbuddy/README.md) |
 
-### Build from source
+**Main branch update (2026-11-17)**
+
+- **Web Collab** source is now `0.2.2`. Pages, assets, and API requests first pass through the Harness connection check. Use the terminal link to authenticate and keep the Harness tab open while you use Web Collab. [Change](https://github.com/TaoruiLiu19/DSH-LLSA/commit/5b1cd2b38b8fae146c0546f1a2c6c9085b2aecd0)
+- **WorkBuddy HUD** adds a local browser view, a hook relay, and maintenance scripts. The current checkout is missing `lib/adapter.js` and `lib/tool-map.js`, so startup and standalone tests fail to resolve those modules. The adapter files are required before following the setup guide. [WorkBuddy source guide](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud-workbuddy/README.md)
+
+## Quick start
+
+Use **Node.js 24.11+** and **npm 11+**. The first dependency installation requires internet access. Clone the repository, or use **Code → Download ZIP** on GitHub and start at `npm ci` in the extracted source directory.
 
 ```sh
 git clone https://github.com/TaoruiLiu19/DSH-LLSA.git
@@ -22,13 +44,18 @@ npm run build
 npm start
 ```
 
-You can also download the source from **Code → Download ZIP** on GitHub. Extract it, open the directory containing `package.json`, and start with `npm ci`. Keep npm's installation scripts enabled so the component dependencies are installed.
+Open the Harness authentication link printed in your terminal. The default address is `127.0.0.1:3095`. Keep the terminal running and open these paths on the same address.
 
-### Start from a CI build
+| Page | What it does |
+| --- | --- |
+| `/orchestrator/local` | Submit work items and see progress and final replies |
+| `/collab` | Run local exact calculations or inspect the agent tree, evidence, and model usage |
+| `/web-collab` | Submit first-pass advice or paste consultation replies after enabling Web Collab |
 
-There is currently no formal GitHub Release for the combined kit. Sign in to GitHub, open a successful **Validate and package** run for `main`, and download `dsh-llsa-review-windows-latest` or `dsh-llsa-review-ubuntu-latest` from its **Artifacts** section. Choose a run that includes the features you want. [Workflow runs](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml)
+<details>
+<summary><strong>Start from a CI build and skip the source build</strong></summary>
 
-Extract the artifact ZIP. Compare the SHA-256 of `dsh-llsa-0.4.2.tgz` with its entry in `SHA256SUMS`. Use `Get-FileHash .\dsh-llsa-0.4.2.tgz -Algorithm SHA256` in PowerShell or `sha256sum dsh-llsa-0.4.2.tgz` on Ubuntu. Then run:
+Sign in to GitHub, choose a successful `main` run, and download a Windows or Ubuntu archive from **Artifacts**. Extract the outer ZIP and compare the SHA-256 for `dsh-llsa-0.4.2.tgz` against its entry in `SHA256SUMS`. [Workflow runs](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml?query=branch%3Amain)
 
 ```sh
 tar -xzf dsh-llsa-0.4.2.tgz
@@ -37,26 +64,24 @@ npm ci
 npm start
 ```
 
-Keep the `vendor/` directory with all four component archives. `npm ci` installs runtime dependencies from the included lockfile. The kit contains the built launcher and plugins, so it skips the source build.
+Keep `vendor/`, `package.json`, and `package-lock.json` from the archive. The installer uses the bundled component files and the recorded dependency versions. Use `Get-FileHash .\dsh-llsa-0.4.2.tgz -Algorithm SHA256` in PowerShell or `sha256sum dsh-llsa-0.4.2.tgz` on Ubuntu. The entry-point table links to separate setup for Codex and the HUDs.
 
-### Open the workspace
+</details>
 
-1. Open the Harness authentication link printed in the terminal. The default host and port are `127.0.0.1:3095`.
-2. Configure your model and API credentials in the native Harness model settings.
-3. Open `/orchestrator/local` on the same address to submit a task. Open `/collab` to view work items, results, evidence, and model usage.
+### Try an example without a model API
 
-If port 3095 is busy, use `npm start -- 3096` and open the new authentication link. The launcher is designed for loopback access. Report failures with your OS, Node/npm versions, and redacted error output.
+In `/collab`, find **Local exact calculation** (`本机精确计算`). Choose **Fill example** (`填入示例`) and then **Preview rule and result** (`预览规则和结果`). The sample sums two matching rows to **171**. Choose **Confirm rule and save result** (`确认规则并保存结果`) to save a local record of the rule and result. This example runs without a model configuration or a model call.
 
-## Try a task
+## Your first handoff
 
-In the task page, submit this prompt with the final JSON option selected:
+Set up your model API in Harness, then visit `/orchestrator/local`. Select **Require a JSON-only final reply** (`最终回复必须为纯 JSON`), paste the work item, and submit it to Super-agent.
 
 ```text
-Ask one child agent to check the facts, then review its result before replying.
-The ID is the exact string "007". No tests have run, the fix is unverified,
-and deployment is not allowed.
+Ask one child agent to check the source, then review its result before replying.
+The exact ID is the string "007". No tests have run, the fix is unverified,
+and deployment is prohibited.
 Return only a JSON object with id, test_status, fix_verified, and deploy_allowed.
-Use "not_run" for test_status and booleans for the last two fields.
+Keep the leading zeros. Use "not_run" for test_status and booleans for the last two fields.
 ```
 
 ```json
@@ -68,11 +93,37 @@ Use "not_run" for test_status and booleans for the last two fields.
 }
 ```
 
-In `/collab`, open the result and the review record. Valid JSON, a finished task, and a correct answer are separate checks.
+Select the work item in `/collab` and follow the collaboration tree through assignment, handoff, and review. Open the saved evidence and check `"007"` and both `false` values. When a user adds or corrects source material, update the same work item and review affected results against its current version.
 
-## Run a local CSV workflow
+For real work, describe the sources you want checked, what can be delegated independently, and the acceptance criteria. A direct question is enough for simple work. The work-item view keeps assignments and evidence together when several branches need review.
 
-Set `DSH_LLSA_CSV_WORKSPACE` to a directory with CSV inputs. The example below works from either the source root after building or the extracted `package/` directory after installing:
+## Optional features
+
+### Harness and Codex HUDs
+
+<p align="center">
+  <img src="assets/hud-harness-example.png" alt="Harness HUD sample showing tool activity" width="42%">
+  <img src="assets/hud-codex-example.png" alt="Codex HUD demo with the parent and child agent tree and event history" width="54%">
+</p>
+
+The Harness HUD on the left is installed separately as `@dsh-llsa/hud` and opens in a Harness chat. The Codex demo on the right shows agent relationships, tool activity, and event history. Both HUDs are read-only. Use work-item records to confirm the coordinator's acceptance decision. [Harness HUD guide](https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/packages/hud#readme)
+
+### Codex split-view HUD
+
+Build and register **LeanLink for Codex** from the **repository source directory**. Use a Codex build that supports local plugins and make the `codex` command available in your terminal.
+
+```sh
+node scripts/build-codex-marketplace.mjs
+codex plugin marketplace add ./artifacts/codex-marketplace
+codex plugin add leanlink-codex@dsh-llsa-codex
+node artifacts/codex-marketplace/plugins/leanlink-codex/hud/serve.mjs
+```
+
+Review and trust the plugin's hooks in Codex. On Windows, press `Ctrl+T` to open the built-in browser, enter the local URL printed in the terminal, and press `Ctrl+Shift+B` to switch to split view. Open a new session, pick **leanlink-codex:leanlink** from the `$` skill menu, and delegate a task. Use references to recover saved evidence. The HUD renders activity reported by Codex. [Full installation, permissions, and retrieval guide](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/codex/README.en.md)
+
+### Local CSV work items
+
+Use **Python 3.10+**. After building from source or installing the extracted `package/` kit, point the launcher at the included sample directory.
 
 ```powershell
 $env:DSH_LLSA_CSV_WORKSPACE = (Resolve-Path '.\examples\csv-workflow').Path
@@ -83,15 +134,13 @@ npm start
 DSH_LLSA_CSV_WORKSPACE="$PWD/examples/csv-workflow" DSH_LLSA_CSV_PYTHON=python3 npm start
 ```
 
-Local CSV is disabled by default for each new run. Select the run in `/collab` and enable **Local CSV** (`本机 CSV`). To enable it before the first planning request for new runs, set `DSH_LLSA_CSV_DEFAULT_ON=1` before starting the app. Use paths relative to the configured workspace, such as `workflow.csv`.
+Select a work item in `/collab` and enable **Local CSV** (`本机 CSV`). Set `DSH_LLSA_CSV_DEFAULT_ON=1` before launch to enable it for new work items from their first planning call. Ask the coordinator to process `workflow.csv` and `workflow-next.csv` as one batch. Keep registered rows (`已报名`), retain the latest registration per email, and count by region. Expect **North 1 and South 2** in the first file and **East 2 and South 1** in the second.
 
-Try asking the coordinator to apply the same steps to `workflow.csv` and `workflow-next.csv` as one batch. Filter `状态` (status) to `已报名` (registered), keep the latest row per `邮箱` (email) using `报名时间` (registration time), and count by `地区` (region). The first file should return `北区` (North) 1 and `南区` (South) 2. The second should return `东区` (East) 2 and `南区` 1. Review the receipts and output references before comparing the batches.
+The local executor applies the filters, deduplication, and counts. Model calls cover planning, interpretation, and review. A batch accepts two to four files, up to 16 MiB each and 32 MiB combined. Downstream agents receive references to accepted outputs. Turning the work-item switch off cancels queued local CSV work. Steps already in progress can finish and receive a review. [Saved rules and column mappings](https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/task-reuse#readme)
 
-The executor can run known filters, deduplication, and group counts locally. A batch accepts two to four CSV files, up to 16 MiB each and 32 MiB combined. The coordinator reviews the produced artifacts and can give an authorized child access to the CSV assigned to that work item. Model planning, analysis, and review still use tokens. For saved workflows, column mappings, and MCP access, see the separately maintained plugin. [Task Reuse guide](https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/task-reuse#readme)
+### Web collaboration
 
-## Use web collaboration
-
-**Disabled by default.** A web model can offer an initial review or check a specific question. Harness agents verify the source material and deliver the result. Build from source or install a CI kit that includes web collaboration. Stop the running instance, open the source root or extracted `package/` directory, and start with the feature enabled.
+Web collaboration is off by default. Stop the running instance and start from the source directory or the extracted `package/` using the commands for your system.
 
 ```powershell
 $env:DSH_LLSA_WEB_COLLAB = '1'
@@ -102,62 +151,44 @@ npm start
 DSH_LLSA_WEB_COLLAB=1 npm start
 ```
 
-Open the Harness authentication link printed in the terminal, then open `/web-collab` on the same address. Select **Web collaboration** (`网页协作`) for the task. For **Multi-agent** (`多智能体`), paste the source material into the task field. LLSA delegates and reviews the work item, and a child agent can consult the web model about its assigned evidence. The single-agent mode also accepts attachments. Open `/orchestrator/local` for multi-agent task progress and replies, or `/collab` for collaboration records and Harness model usage.
+Open the Harness authentication link first, then visit `/web-collab` and enable **Web collaboration** (`网页协作`) for that work item. For manual consultation, copy a question to a chat site such as ChatGPT or DeepSeek and paste back the reply with its consultation ID. With Open WebUI configured, opted-in tasks can receive replies through its API. Harness agents review any advice against the source before delivery. Track web and Harness usage separately and include any upstream Open WebUI charges in the total. [Manual and Open WebUI setup](https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/packages/web-collab#readme)
 
-- **Manual consultation** works with chat sites such as ChatGPT and DeepSeek. Copy the consultation prompt, send it on the site, and paste the reply back. For a child agent's request, keep the consultation ID in the reply or import the corresponding Markdown file.
-- **Automatic consultation** works with Open WebUI. Before starting DSH-LLSA, set `DSH_WEB_COLLAB_OPEN_WEBUI_URL` to the instance address, `DSH_WEB_COLLAB_OPEN_WEBUI_MODEL` to the model ID, and `DSH_WEB_COLLAB_OPEN_WEBUI_KEY` to the API key. Use HTTPS for non-local instances and keep the key in the local launch environment. Select **Consult Open WebUI** (`用 Open WebUI 咨询`) for an initial review. An opted-in child agent can also receive an automatic reply. [Open WebUI API](https://docs.openwebui.com/reference/api-endpoints/#chat-completions)
+## Usage and cost
 
-Each consultation sends the content you provide or an excerpt relevant to the child's assigned check. Check that you can share it with the selected service. Treat replies as advice for the Harness agent to verify. Track web and Harness usage separately. Total cost depends on how much other model work the consultation replaces. The model behind Open WebUI may charge separately, outside the local Harness budget.
+LeanLink gives each branch a reference to current input plus its acceptance criteria. The coordinator receives a concise result and evidence references. Long material can be read in pages, and historical versions remain available. An `input:` reference is scoped to one run, so open it from the corresponding work item. A finished agent turn and the coordinator's acceptance decision are distinct events.
 
-To disable the feature, unset `DSH_LLSA_WEB_COLLAB` or set it to `0`, then restart DSH-LLSA.
-If you previously installed Web Collab through `dsh plugin`, remove that standalone installation from the same Harness profile before using the bundled version.
+Use `/collab` to inspect the agent tree, cache hits and misses, output, retries, and missing usage. Select a connection to inspect recorded dispatch and handoff events. The cost sliders model prices, caching, and compression scenarios. For a comparison against another workflow, hold the task and acceptance criteria fixed and include failures, rework, and any external consultation charges.
 
-## LeanLink, HUD, and model usage
+<details>
+<summary><strong>Configure an optional model-call budget</strong></summary>
 
-LeanLink keeps structured exchanges compact and stores original evidence by reference. A worker can read the input in pages, and changes to source material require review against the new input version. The parent agent still checks the result before accepting it.
+Copy the [sample policy](examples/money-policy.example.json) and enter the provider, model, currency, and prices per million tokens for each route you use. Set `DSH_LLSA_MONEY_POLICY` to the policy's absolute path before launch. `maxCost` applies to one budget period, `maxRunCost` to one run, and `maxBranchCost` to one work item including retries. Keep the same `id` to continue an existing budget period.
 
-The optional `@dsh-llsa/hud` is a read-only overlay for Harness sessions. It shows agent activity, tools, and requests for your attention. Install it separately through the Harness plugin manager. The HUD has its own package and release cycle on npm. The repository currently contains HUD source `0.4.5`, including support for the CSV tool's alias table. [HUD installation guide](https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/packages/hud#readme) · [HUD on npm](https://www.npmjs.com/package/@dsh-llsa/hud)
+Before each managed call, the app reserves an estimate based on input and allowed output. It stops admitting new calls if a price is missing or a budget would be exceeded. Calls already sent may finish. Missing metering leaves reservations open. After updating a budget, restart and manually resume the work. Older usage retains its original rate. Consult the provider's bill for the actual amount charged.
 
-HUD snapshots keep schema version 1 and select the alias table for the tools they show. Ordinary tool activity uses `aliasVersion: 1`, CSV activity uses version 2, and activity involving `collab_consult_web` uses version 3. Native tool IDs stay the same. [Alias table v1](contracts/tool-aliases-v1.json) · [v2](contracts/tool-aliases-v2.json) · [v3](contracts/tool-aliases-v3.json)
+</details>
 
-Use `/collab` for model usage. It separates provider-reported usage, estimates, and missing data. The cost controls in the collaboration graph are for comparing scenarios. Real savings depend on the task, model, cached input, output length, and retries.
+## Troubleshooting
 
-### Codex split-view HUD
-
-Install the separate **LeanLink for Codex** plugin from the repository source to archive subagent results and evidence references. Start the local HUD. In Codex desktop on Windows, press `Ctrl+T`, paste the address printed in the terminal, and use `Ctrl+Shift+B` to cycle to split view. The same address opens in a regular browser on your machine. Once you review and trust the plugin's hooks, the HUD shows agent relationships, work states, and requests for attention reported by Codex. [Codex installation and permissions](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/codex/README.en.md)
-
-### Set an optional cost budget
-
-Copy `examples/money-policy.example.json` to `my-money-policy.json`. Set the currency and supply the actual provider, model, and per-million-token rates for each model in use. Then point the launcher at the file:
-
-```powershell
-$env:DSH_LLSA_MONEY_POLICY = (Resolve-Path '.\my-money-policy.json').Path
-npm start
-```
-
-```sh
-DSH_LLSA_MONEY_POLICY="$PWD/my-money-policy.json" npm start
-```
-
-`maxCost` applies to the budget period identified by `id`, `maxRunCost` applies to one run, and `maxBranchCost` applies to a work item and its retries. The app reserves estimated spend before each managed model request and refuses new requests if there is insufficient budget or a model has no price entry. The budget combines estimated cost and outstanding reservations. Check the provider's billing page for actual charges.
-
-## Compatibility and validation
-
-| Component | Version in this repository |
+| Problem | What to check |
 | --- | --- |
-| Combined kit and `@dsh-llsa/launcher` | `0.4.2` |
-| `@dsh-llsa/collab` and `@dsh-llsa/superagent` | `0.4.2` |
-| `@dsh-llsa/web-collab` (disabled by default) | `0.2.0` |
-| DeepSeek Harness | `0.2.2-rc.1` |
-| Optional `@dsh-llsa/hud` source | `0.4.5` |
+| The local page is blocked or fails authentication | Reopen the authentication link for this startup. Use `npm start -- 3096` if the default port is busy. |
+| Model calls fail or return 401 or 429 | Check model configuration, account balance, and rate limits in Harness. |
+| The CSV work item cannot find a sample | Check Python 3.10+, the work-item switch, and `DSH_LLSA_CSV_WORKSPACE`. Input paths are relative to that directory. |
+| Codex HUD shows no sessions | Confirm the HUD server is running and the hooks are trusted, then run a task in a new session. |
+| How to back up | Stop with `Ctrl+C`, then back up the entire `.dsh-llsa/` directory. Set `DSH_LLSA_STATE` to choose a different location. Harness manages its own credentials. |
 
-The combined kit uses the locked Harness dependency set. Use `npm ci` to restore it. Treat a Harness upgrade as a compatibility change and update the launcher checks, pinned dependencies, and lockfiles together. Validate the new build, collaboration bridge, and independent install kit before making the upgraded kit available.
+When reporting an issue, include the OS, Node/npm versions, launch method, and a redacted error. Keep model keys, authentication links, and local databases private.
 
-The kit uses an adapted version of the DeepSeek Super-agent research prototype at upstream commit `8c32a9d`. The work-item flow relies on that adaptation for versioned inputs, acceptance, and stop and resume controls. Check those interfaces and recovery from existing state when updating the upstream snapshot. [Pinned upstream commit](https://github.com/deepseek-ai/dsh-superagent-prototype/commit/8c32a9dc5d72c033816c6a8110b37f40cf94fba4)
+## Development and verification
 
-The default state directory is `.dsh-llsa/` relative to the launch directory. Set `DSH_LLSA_STATE` to choose another location. Stop the application and back up the entire state directory before upgrading so the database and its referenced artifacts are backed up together. Harness manages model settings and credentials separately.
-
-From a source checkout, after `npm ci` and with Python available, run:
+| Component | Source version and purpose |
+| --- | --- |
+| Combined kit, launcher, Super-agent, and Collab | `0.4.2`. Local startup, work items, LeanLink handoffs, and records |
+| DeepSeek Harness | Pinned to `0.2.2-rc.1` |
+| Web Collab | `0.2.2`. Optional web consultation |
+| Harness HUD | `0.4.5` source. Installed separately |
+| Codex / WorkBuddy HUD | Local marketplace build for Codex, source preview for WorkBuddy |
 
 ```sh
 npm run check
@@ -169,6 +200,15 @@ npm run verify:rebuild
 npm run verify:kit
 ```
 
-CI runs these checks on Windows and Ubuntu. It compares the resulting archive checksums across platforms. Kit verification installs in an empty directory, runs the included CSV engine on a sample, and checks Harness startup and the per-run CSV switch. These checks run without model tasks.
+CI validates builds, isolated installations, and archive SHA-256 on Windows and Ubuntu. Run `node scripts/smoke-codex-plugin.mjs --native-hud` to check MCP installation, exact evidence retrieval, and native parent and child hooks on a local Codex installation. The smoke test uses a local fixture endpoint.
 
-DSH-LLSA is an independent extension based on DeepSeek Harness and the DeepSeek Super-agent prototype. [MIT License](LICENSE) · [Upstream notices](NOTICE)
+<details>
+<summary><strong>HUD v1 snapshots and replay fixtures</strong></summary>
+
+Use `GET /collab/api/runs/:runId?view=hud` for the sanitized read-only snapshot. Track `seq` per run and use the server's `stalled` and attention state. Choose the reported alias table version for tool labels. The schema version stays at 1. A finished turn and an accepted work item have separate meanings. [Schema](contracts/hud-v1.schema.json) · [Replay fixtures](https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/contracts/fixtures) · [Alias table v1](contracts/tool-aliases-v1.json) · [v2](contracts/tool-aliases-v2.json) · [v3](contracts/tool-aliases-v3.json)
+
+</details>
+
+Back up the complete state directory before upgrading. When moving to a different Harness version, verify the lockfiles, versioned inputs, acceptance, stop/resume, and recovery from existing state together. The default workspace uses loopback. Enabled external integrations may use local credentials. `DSH_SUPERAGENT_BLOCKED_COMMANDS` provides advisory command restrictions.
+
+Independent extension built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) and the [DeepSeek Super-agent research prototype](https://github.com/deepseek-ai/dsh-superagent-prototype/commit/8c32a9dc5d72c033816c6a8110b37f40cf94fba4). [MIT License](LICENSE) · [Upstream notices](NOTICE) · [Changelog](CHANGELOG.md)

@@ -1,49 +1,40 @@
 <p align="center">
-  <img src="assets/product-poster.png" alt="DSH-LLSA · 多 Agent 协作 × LeanLink：主 Agent 分派，子 Agent 分工，精简回传，原始记录按需可查" width="100%">
+  <img src="assets/product-poster.png" alt="DSH-LLSA：多 Agent 分工、LeanLink 回传和证据回查" width="100%">
 </p>
 
 <h1 align="center">DSH-LLSA</h1>
-<p align="center"><strong>简体中文</strong> · <a href="https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/README.en.md">English</a></p>
-<p align="center"><strong>让多个 Agent 一起完成任务，让每一次协作更精简。</strong></p>
-<p align="center">DeepSeek Harness 上的本机多智能体工作台<br>由 <strong>LeanLink</strong> 连接任务分工、紧凑通信与可追溯记录。</p>
+<p align="center">简体中文 · <a href="README.en.md">English</a></p>
+<p align="center">在本机分派多 Agent 工单，验收分支结果，并沿引用回查原始证据。</p>
 
 <p align="center">
-  <a href="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml"><img src="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml/badge.svg" alt="Build & Test"></a>
+  <a href="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml"><img src="https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml/badge.svg?branch=main" alt="构建与测试"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-80cbc4" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/Node.js-24.11%2B-89b4fa" alt="Node.js 24.11+">
 </p>
-<p align="center"><a href="#快速开始">快速开始</a> · <a href="#第一次协作">第一次协作</a> · <a href="#认识-leanlink">认识 LeanLink</a> · <a href="#网页协作">网页协作</a> · <a href="#hud-专注视图">Harness HUD</a> · <a href="#codex-分屏-hud">Codex HUD</a> · <a href="#使用帮助">使用帮助</a></p>
 
----
+<p align="center">
+  <a href="#快速开始">快速开始</a> · <a href="#第一次协作">第一次协作</a> · <a href="#可选能力">可选能力</a> · <a href="#用量与费用">用量与费用</a> · <a href="#开发与验证">开发与验证</a>
+</p>
 
-## 一句话交代任务，一处查看协作
+DSH-LLSA 面向用 AI 做材料核对、代码复查和数据整理的人。主 Agent 负责分派与验收，Worker 专注执行，LeanLink 回传结果与证据引用。收到用户更正后，工单会使用新的输入版本，旧结果仍可回查。
 
-把资料和验收要求交给主 Agent，由它组织子 Agent 分工，再汇总交付。你可以在本机工作台查看任务状态、结果与保存的协作记录。
+## 选择你的入口
 
-| 分工更清楚 | 回传更精简 | 过程可核对 |
-|:---|:---|:---|
-| 主 Agent 组织任务，子 Agent 执行具体工作 | LeanLink 为受支持的结构化信息选择紧凑表示 | 按需查看已保存的步骤、原文、产物与用量 |
+| 你用什么 | 可以做什么 | 从哪里开始 |
+| --- | --- | --- |
+| **DeepSeek Harness** | 提交工单、组织子 Agent、检查结果、翻看协作记录和模型用量 | [安装组合包](#快速开始) |
+| **Harness HUD** | 在 Harness 对话里看工具活动、子 Agent 状态和待确认事件 | [HUD 安装指南](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md) |
+| **Codex** | 用 LeanLink 归档分支结果，通过内置浏览器分屏查看协作 HUD | [Codex 安装与分屏](#codex-分屏-hud) |
+| **WorkBuddy** | 本机浏览器 HUD 开发预览 | [预览状态与启动限制](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud-workbuddy/README.md) |
 
-适合从**资料齐全、范围明确、结果可核对**的任务开始：字段提取、规则核验、材料对比，或让多个子任务分别检查同一份输入。
+**主分支更新（2026-11-17）**
 
-> **当前版本：0.4.2。** 快速开始面向本机单用户使用。工作台与记录保存在本机，推理使用你配置的模型 API；调用费用由使用者承担。
-
-## 组合包包含什么
-
-DSH-LLSA 把工单编排、Agent 协作、启动器和可选的网页协作装进同一个安装包，四个组件随 `npm ci` 一起安装。
-
-| 内置组件 | 使用时负责什么 |
-|---|---|
-| `@dsh-llsa/superagent` | 基于 DeepSeek 公开研究原型修改，负责接收本机工单、分派任务和验收交付 |
-| `@dsh-llsa/collab` | 管理子 Agent、紧凑回传、历史与用量记录，并提供可选的本机 CSV 执行器 |
-| `@dsh-llsa/launcher` | 按锁定版本启动 DeepSeek Harness，并加载上述组件 |
-| `@dsh-llsa/web-collab` | 提供网页初审和子 Agent 咨询，默认关闭 |
-
-使用 `/orchestrator/local` 提交工单，使用 `/collab` 查看协作记录。想在 Harness 对话界面实时看 Agent 状态时，可以[单独安装 HUD](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)。
+- **网页协作**源码版本为 `0.2.2`。页面、静态资源和 API 都先经过 Harness 的连接校验。启用后，用终端打印的链接完成认证，并保持 Harness 标签页打开。[变更记录](https://github.com/TaoruiLiu19/DSH-LLSA/commit/5b1cd2b38b8fae146c0546f1a2c6c9085b2aecd0)
+- **WorkBuddy HUD** 新增本机网页、Hook 转发脚本和维护入口。当前检出缺少 `lib/adapter.js` 和 `lib/tool-map.js`，启动和独立测试会报模块缺失。补齐适配器后才能按指南配置 WorkBuddy。[WorkBuddy 源码说明](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud-workbuddy/README.md)
 
 ## 快速开始
 
-准备 **Node.js 24.11+、npm 11+ 和 Git**，然后在终端执行：
+需要 **Node.js 24.11+、npm 11+**。首次安装依赖需要联网。使用 Git 下载，或从 GitHub 的 **Code → Download ZIP** 下载源码，在解压目录从 `npm ci` 开始执行。
 
 ```sh
 git clone https://github.com/TaoruiLiu19/DSH-LLSA.git
@@ -53,20 +44,18 @@ npm run build
 npm start
 ```
 
-没有 Git？使用仓库页面的 **Code → Download ZIP**，解压后进入包含 `package.json` 的目录，从 `npm ci` 开始执行。
+先打开终端打印的 Harness 认证链接。默认监听 `127.0.0.1:3095`。使用同一地址打开以下页面，保留启动终端。
 
-安装完成后只需三步：
-
-1. **打开认证链接** — 点击终端输出的 Harness 链接，完成本机认证。
-2. **配置模型** — 在 Harness 原生模型设置中填写自己的 DeepSeek 官方 API 配置。
-3. **提交任务** — 打开同一地址下的 `/orchestrator/local`；协作记录在 `/collab` 查看。
-
-默认地址为 `127.0.0.1:3095`。先打开认证链接，再进入任务页面。首次安装需要联网，请保留默认安装脚本，不要添加 `--ignore-scripts`。
+| 页面 | 用途 |
+| --- | --- |
+| `/orchestrator/local` | 提交任务，查看工单进度和最终回复 |
+| `/collab` | 运行本机精确计算，或查看协作树、工作项、证据和用量 |
+| `/web-collab` | 启用网页协作后，提交初审建议或回填咨询回复 |
 
 <details>
-<summary><strong>使用构建包：跳过源码构建</strong></summary>
+<summary><strong>使用 CI 构建包，跳过源码构建</strong></summary>
 
-当前组合包构建产物通过 GitHub Actions 提供。登录 GitHub，在 [Actions](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml) 打开 `main` 分支的一次成功运行，然后在 **Artifacts** 中下载 `dsh-llsa-review-windows-latest` 或 `dsh-llsa-review-ubuntu-latest`。两套归档通过字节一致性检查。解压 ZIP，按同目录的 `SHA256SUMS` 核对 `dsh-llsa-0.4.2.tgz`，然后执行：
+登录 GitHub，在 [构建记录](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml?query=branch%3Amain) 中选择 `main` 的成功运行。从 **Artifacts** 下载 Windows 或 Ubuntu 的归档，解开外层 ZIP 后，按同目录的 `SHA256SUMS` 核对 `dsh-llsa-0.4.2.tgz`。
 
 ```sh
 tar -xzf dsh-llsa-0.4.2.tgz
@@ -75,121 +64,24 @@ npm ci
 npm start
 ```
 
-保留解压后目录里的 `vendor/`、`package.json` 和 `package-lock.json`。`vendor/` 已装入四个组件包，安装时还需要联网下载 Harness 等锁定依赖。真实任务使用自己配置的模型 API。
+保留归档中的 `vendor/`、`package.json` 和 `package-lock.json`，安装脚本会使用锁定依赖。Windows 可用 `Get-FileHash .\dsh-llsa-0.4.2.tgz -Algorithm SHA256` 核对文件，Ubuntu 可用 `sha256sum dsh-llsa-0.4.2.tgz`。Codex 和独立 HUD 的安装说明见上面的入口表。
 
 </details>
 
-### HUD 专注视图
+### 不用模型 API，先跑一个例子
 
-**不用盯着滚动日志，也能知道 Agent 正在做什么。** 可选 HUD 为 Harness 会话增加实时浮层：中心显示执行、等待确认与完成状态，外圈以固定位置展示终端、代码、检索、文档、网页等活动，多 Agent 时显示子 Agent 状态。
-
-- 按 **Esc** 返回对话，点击状态胶囊重新查看；`Ctrl/Cmd+Shift+H` 临时隐藏。
-- **HUD 自身不调用模型**；LeanLink 优化协作通信，HUD 帮你看清运行状态。准确用量仍在 `/collab` 查看。
-- 在 Harness 插件页单独安装并启用 `@dsh-llsa/hud`。开发时也可以使用源码目录 `packages/hud`。浮层显示在 Harness 会话页。
-
-→ **[HUD 安装、使用与常见问题](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)**
-
-### Codex 分屏 HUD
-
-从仓库源码安装独立的 **LeanLink for Codex** 插件，可保存分支结果和证据引用。启动本机 HUD 后，在 Windows 的 Codex 桌面端按 `Ctrl+T`，粘贴终端打印的地址，再按 `Ctrl+Shift+B` 循环切换至分屏。也可以在本机浏览器打开该地址。审核并信任插件 Hook 后，HUD 会显示宿主上报的父子 Agent、工作状态和待确认事件。 [Codex 安装及权限说明](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/codex/README.md)
-
-### 工单内置 CSV 工作流
-
-工单可在本机执行已明确规则的 CSV 筛选、去重和统计。协调者可以把多份输入交给同一个工作项，验收后将产物交给下游。执行器随 DSH-LLSA 源码构建和安装包提供。
-
-要在协作工单中启用本机 CSV 步骤，可在仓库根目录用 PowerShell 指定一个专门存放输入 CSV 的目录。需要 Python 3.10+。以下命令用附带的合成样例启动。
-
-```powershell
-$env:DSH_LLSA_CSV_WORKSPACE = (Resolve-Path '.\examples\csv-workflow').Path
-npm start
-```
-
-在 `/collab` 选中工单后，可随时切换「本机 CSV」，默认关闭。关闭后，新模型请求的工具列表会移除此能力，排队中的本机 CSV 工作项会取消，已经开始的步骤仍可完成并验收。要让新工单从第一次执行规划起就可以使用，可在启动前另设 `$env:DSH_LLSA_CSV_DEFAULT_ON = '1'`。工单一旦开始，开关状态独立保存。
-
-- **分派时**，工单协调者知道确切规则时，可在一个本机工作项内合并筛选、去重和分组计数。
-- **处理多批数据时**，可对 2–4 份带批次名的 CSV 一次提交同一套步骤。每份最多 16 MiB，整批最多 32 MiB。整批成功才提交验收，验收后下游直接收到带批次名的产物引用。出现错误时，回执会标出批次和步骤。停止本机任务时会结束正在执行的 CSV 工作项。
-- **子 Agent 执行时**，协调者在分派时绑定 CSV 引用，只给需要确定性处理的工作项开启转换权限。子 Agent 一次处理这份 CSV 后继续分析和提交。只读取和解读产物的子 Agent 不加载转换工具。
-- **回传时**，本机执行只返回行数、检查结果和产物引用。需要理解文本、判断业务规则或处理没有 CSV 的任务时，沿用普通流程。
-
-在任务页试用「用本机 CSV 工作项处理 `workflow.csv`，筛选已报名记录，按邮箱和报名时间保留最新一条，再按地区计数。验收后让子 Agent 根据产物给出一句结论」。
-
-也可以试「对 `workflow.csv` 和 `workflow-next.csv` 使用同一个批量工作项，分别统计已报名人数。按邮箱保留报名时间最新的一条，再按地区计数。给两份产物标上第一批和第二批，验收后对比地区变化」。第一批应为北区 1、南区 2，第二批应为东区 2、南区 1。
-
-无需 API 的回归测试覆盖批次执行、产物验收和子 Agent 授权。按以上方式处理 CSV 时，确定性步骤在本机执行，模型规划、分析和验收仍会使用 token。含 CSV 工具事件的快照使用别名表 v2，识别该工具类别可使用本仓库 `packages/hud`。
-
-已保存规则、表头映射和 MCP 等用法见 [独立 Task Reuse 使用说明](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/task-reuse/README.md)。
-
-### 网页协作
-
-**默认关闭。** 网页可为本机任务提供初审或核对建议，由 Harness Agent 核对原始资料并交付结果。完成源码构建或安装包含网页协作的 CI 构建包后，先退出正在运行的实例。进入源码根目录或解压后的 `package/`，按操作系统选择启动命令。
-
-```powershell
-$env:DSH_LLSA_WEB_COLLAB = '1'
-npm start
-```
-
-```sh
-DSH_LLSA_WEB_COLLAB=1 npm start
-```
-
-先打开终端打印的 Harness 认证链接，再访问同一地址的 `/web-collab`。每个任务在页面勾选 **网页协作** 后才会使用建议。打开 **多智能体** 后，在任务框粘贴资料，LLSA 会分派并验收工单，子 Agent 可按需咨询本分支的疑点。单 Agent 模式支持附件。多智能体工单的进度和回复可在 `/orchestrator/local` 查看，协作记录和 Harness 模型用量在 `/collab` 查看。
-
-- **手动咨询**适用于 ChatGPT、DeepSeek 等聊天网页。复制咨询提示，在网页发送，再把回复粘贴回来。为子 Agent 回填时，保留回复里的咨询编号，也可导入对应的 Markdown 文件。
-- **自动咨询**适用于已配置的 Open WebUI。在启动前设置 `DSH_WEB_COLLAB_OPEN_WEBUI_URL`（实例地址）、`DSH_WEB_COLLAB_OPEN_WEBUI_MODEL`（模型 ID）和 `DSH_WEB_COLLAB_OPEN_WEBUI_KEY`（API 密钥）。非本机地址使用 HTTPS，密钥保留在本机启动环境。配置后可用页面的 **用 Open WebUI 咨询** 获取初审建议，启用网页协作的子 Agent 也可自动获取回复。[Open WebUI 官方接口](https://docs.openwebui.com/reference/api-endpoints/#chat-completions)
-
-咨询只发送你提供的内容或当前分支用于核对的片段。发送前确认这些资料允许交给所选服务。网页回复是参考意见，最终核对和交付仍由 Harness Agent 完成。网页侧用量与 Harness 侧用量应分别记录，整单费用取决于咨询是否替代了其他模型请求。Open WebUI 所连接的模型可能单独收费，这笔费用由其模型服务计收，超出本机 Harness 预算的统计范围。
-
-要关闭功能，将 `DSH_LLSA_WEB_COLLAB` 清除或设为 `0`，再重启 DSH-LLSA。
-此前使用 `dsh plugin` 单独安装过网页协作时，先从同一 Harness 配置中移除独立安装，再使用组合包内置版本。
+在 `/collab` 找到 **本机精确计算**。点击 **填入示例 → 预览规则和结果**，可以看到两条匹配记录的金额合计 **171**。点击 **确认规则并保存结果**，查看本机保存的规则、结果和执行记录。这个示例不需要模型配置，也不发出模型调用。
 
 ## 第一次协作
 
-<details>
-<summary><strong>可选：为真实调用启用金额预算</strong></summary>
-
-复制 `examples/money-policy.example.json` 为自己的配置文件，填写 Harness 实际使用的 provider、model、币种及每百万 token 的费率。示例中的名称和费率只是占位，不能直接用来估算账单；每个会用到的模型都需要配置。`cacheWrite` 是否单独计费取决于供应商，按其用量口径填写，不能重复计算。
-
-Windows PowerShell：
-
-```powershell
-$env:DSH_LLSA_MONEY_POLICY = (Resolve-Path './my-money-policy.json').Path
-npm start
-```
-
-macOS / Linux：
-
-```sh
-DSH_LLSA_MONEY_POLICY="$PWD/my-money-policy.json" npm start
-```
-
-`maxCost` 限制同一 `id` 预算周期内**所有已接入的受管调用**，包含主模型和子模型；`maxRunCost` 限制一个工单执行批次，`maxBranchCost` 限制一个工作项及其重试（根协调调用单独计为 `root` 分支）。主模型跨工单调用仍归主模型会话，不强行分摊到单个工单。周期不会按日期自动重置；修改 `id` 明确开启新周期。
-
-每次调用前按本地输入 token 估计、输出额度和较高的输入费率预留，再乘 `reserveMultiplier`。达到 80% 留下提示事件，预留后将超限则拒绝新调用并暂停该 run。缺少模型价格同样拒绝调用；未知用量持续占用预留，重启和点击继续均不会清空。已有调用可能继续完成，外部操作不会自动回滚。
-
-在 `/collab` 的模型用量区查看周期、工单与分支额度及最近阻止原因。需要续额时，先停止程序，保持 `id` 和币种不变，修改额度后重启，再人工恢复或重试任务。旧调用仍使用当时记录的费率，不被新费率重算。不要把重试当成清空历史。
-
-金额是**用量估算加未结清预留，不是供应商账单硬上限**：本地 tokenizer、输出上限执行情况、供应商计费及未接入的请求都可能造成偏差；实际回传高于预留会计入后续准入。未配置本选项时保留原有 token 限制，预测滑块不控制真实花费。启用前的调用不追溯扣入新预算周期。
-
-</details>
-
-打开任务页，粘贴以下内容。这个小例子便于直接核对结果，并观察一次委托与回传。
+在 Harness 的模型设置中配置自己的模型 API，再到 `/orchestrator/local`。勾选 **最终回复必须为纯 JSON**，粘贴下面的工单并点击 **提交给 Super-agent**。
 
 ```text
-请交给一个子 Agent 核对以下资料，再由主 Agent 检查结果。
-
-原始编号是字符串 "007"，必须保留前导零。
-测试尚未执行，修复效果尚未验证，当前不允许部署。
-
-只返回一个 JSON 对象：
-- id：原始编号，字符串。
-- test_status：只能是 "passed"、"failed" 或 "not_run"。
-- fix_verified：修复是否已验证，布尔值。
-- deploy_allowed：是否允许部署，布尔值。
-
-不得补造测试结果，不添加说明或 Markdown 代码围栏。
+请委派一个子 Agent 核对资料，并在主 Agent 验收后交付。
+原始编号是字符串 "007"。测试尚未执行，修复尚未验证，当前禁止部署。
+只返回一个 JSON 对象，字段为 id、test_status、fix_verified、deploy_allowed。
+保留编号前导零。test_status 用 "not_run"，后两个字段用布尔值。
 ```
-
-勾选 **“最终回复必须为纯 JSON”**，点击 **“提交给 Super-agent”**。检查结果是否符合：
 
 ```json
 {
@@ -200,88 +92,117 @@ DSH_LLSA_MONEY_POLICY="$PWD/my-money-policy.json" npm start
 }
 ```
 
-接着打开 `/collab`，查看本次保存的协作记录。这里的 JSON 是验收标准；任务结束、格式合法和内容正确，需要分别核对。
+在 `/collab` 选中工单，沿协作树查看分派、结果回传和验收记录。点开保存的证据，核对 `"007"` 和两个 `false`。如果用户追加或修正资料，继续在同一工单里更新，按当前输入版本重验受影响的结果。
 
-## 认识 LeanLink
+**接到真实任务时**，写清要核对哪些来源、哪些项可以独立分派、最后怎样算通过。简单问题可以直接问模型。材料多、分支独立、需要逐项验收时，工单能把分工和证据保存在一起。
 
-**LeanLink 关注多 Agent 之间的通信成本。** 对受支持的结构化字段采用紧凑表示，自由文本保留原文；需要检查某一步时，回到保存的原文、结构化结果和产物记录。
+## 可选能力
 
-| 你能得到 | 使用边界 |
-|---|---|
-| 主 Agent 调度与子 Agent 分工 | 并非所有小任务都值得多 Agent 协作 |
-| 紧凑表示与结构化交付 | 不保证任意自然语言都能压缩，也不是保密加密 |
-| 可查询的步骤与原始记录 | 不提供模型内部隐藏推理的完整回放 |
-| 原生工单的输入引用与历史版本 | 子任务按引用读取完整资料；追加要求后，旧结果需要重新核对 |
-| 子任务提交后自动结束该轮 | 保留父 Agent 验收，失败或未完成的结果不能自动算作通过 |
-| 区分供应商回传、估算和未知的 token 记录 | 未知不等于零；统计不是账单 |
-| 纯 JSON 输出约束与关键值检查 | 格式校验不能替代事实与业务正确性验证 |
+### HUD 专注视图
 
-实际节省程度取决于任务、模型、重试和输出长度，应使用相同任务的真实用量对比。本项目不承诺固定 token 降幅或正确率。
+<p align="center">
+  <img src="assets/hud-harness-example.png" alt="Harness HUD 示例，展示 Agent 的工具活动" width="42%">
+  <img src="assets/hud-codex-example.png" alt="Codex HUD 演示会话，右侧为父子 Agent 树，下方为事件记录" width="54%">
+</p>
 
-**资料很长时怎么用？** 在任务里写清目标、约束和验收标准即可。接入原生工单的 worker 会获得可用的输入引用，无需反复把整段资料抄进委托参数。读取结果带有分页位置，长资料可以继续读取；查询过去的结果时，历史版本仍保留原文。`input:` 引用属于当前工单执行批次，不能复制到另一个任务使用。
+**左图**为 Harness HUD，独立安装 `@dsh-llsa/hud` 后在对话里打开。**右图**为 Codex HUD 的演示会话，显示父子关系、工具活动和事件记录。HUD 只读，主 Agent 是否通过验收仍看工单结果。[Harness HUD 指南](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)
 
-## 使用帮助
+### Codex 分屏 HUD
 
-<details>
-<summary><strong>启动、认证与 API 常见问题</strong></summary>
+从**仓库源码根目录**构建并注册 **LeanLink for Codex**。需要本机 `codex` 命令和支持本地插件的 Codex 版本。
 
-| 现象 | 处理方式 |
-|---|---|
-| Node/npm 版本不匹配 | 运行 `node --version`、`npm --version`；要求 Node ≥ 24.11、npm ≥ 11 |
-| 依赖安装失败 | 检查网络与 registry，在源码根目录重新执行 `npm ci` |
-| 3095 端口被占用 | 使用 `npm start -- 3096`，打开新认证链接 |
-| 页面未认证或拒绝访问 | 先打开当前终端中的 Harness 认证链接 |
-| Harness 版本不匹配 | 重新执行 `npm ci` 恢复锁定依赖，避免混用旧包 |
-| 模型调用失败 | 检查 Harness 设置中的 API 地址、模型名称与额度 |
+```sh
+node scripts/build-codex-marketplace.mjs
+codex plugin marketplace add ./artifacts/codex-marketplace
+codex plugin add leanlink-codex@dsh-llsa-codex
+node artifacts/codex-marketplace/plugins/leanlink-codex/hud/serve.mjs
+```
 
-反馈问题时请提供系统、Node/npm 版本和脱敏错误信息。不要上传 API 密钥、认证链接或私人数据库。
+在 Codex 审核并信任插件的 Hook。Windows 按 `Ctrl+T` 打开内置浏览器并粘贴终端打印的地址，再用 `Ctrl+Shift+B` 切换到分屏。开一个新会话，在 `$` 技能菜单选择 **leanlink-codex:leanlink**，然后委派任务。分支结果可用引用取回原文，HUD 会显示 Codex 提供的活动信息。[完整安装、权限和回查说明](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/codex/README.md)
 
-</details>
+### 本机 CSV 工单
 
-<details>
-<summary><strong>数据位置、停止与备份</strong></summary>
-
-状态默认保存在启动目录的 `.dsh-llsa/`。按 **Ctrl+C** 并等待进程退出，再复制整个目录进行备份；不要只复制正在使用的 SQLite 文件，WAL/SHM 与关联产物也可能参与持久化。恢复时先停止服务，再恢复完整目录。
-
-在线数据库快照可使用 SQLite `VACUUM INTO 'backup.db'`，但它不能替代关联产物的完整备份。Harness 的模型配置和凭据由 Harness 单独管理。
-
-指定数据位置，Windows PowerShell：
+需要 **Python 3.10+**。在源码根目录构建完成后，或在构建包的 `package/` 中安装完成后，指定随附的样例目录。
 
 ```powershell
-$env:DSH_LLSA_STATE = "D:\DSH-LLSA-data"
+$env:DSH_LLSA_CSV_WORKSPACE = (Resolve-Path '.\examples\csv-workflow').Path
 npm start
 ```
 
-macOS / Linux：
-
 ```sh
-DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
+DSH_LLSA_CSV_WORKSPACE="$PWD/examples/csv-workflow" DSH_LLSA_CSV_PYTHON=python3 npm start
 ```
 
-</details>
+在 `/collab` 选中工单，开启 **本机 CSV**。要给新工单从首次规划起启用，启动前设置 `DSH_LLSA_CSV_DEFAULT_ON=1`。试着让主 Agent 对 `workflow.csv` 和 `workflow-next.csv` 提交同一批工作，筛选「已报名」，按邮箱保留报名时间最新的一行，再按地区计数。第一批预期 **北区 1、南区 2**，第二批预期 **东区 2、南区 1**。
+
+筛选、去重和计数由本机执行器完成，模型负责规划、解读和验收。每批 2–4 份输入，单份最多 16 MiB，合计最多 32 MiB。通过验收后，下游按引用读取产物。工单关闭该选项后，排队中的本机 CSV 工作项会取消，已运行的步骤可继续完成并验收。[规则复用与字段映射](https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/task-reuse#readme)
+
+### 网页协作
+
+默认关闭。停止正在运行的实例，在源码根目录或解压的 `package/` 选择对应系统的启动方式。
+
+```powershell
+$env:DSH_LLSA_WEB_COLLAB = '1'
+npm start
+```
+
+```sh
+DSH_LLSA_WEB_COLLAB=1 npm start
+```
+
+先打开 Harness 认证链接，再访问 `/web-collab`，在当前任务勾选 **网页协作**。手动模式可以复制问题到 ChatGPT、DeepSeek 等网页，再按咨询编号回填。配置 Open WebUI 后，已启用的任务也可以通过其 API 收取回复。网页模型提供初审或核对意见，Harness 的 Agent 负责核对资料和交付。网页端与 Harness 分开计量，Open WebUI 上游如有收费，会另行计入。[手动与 Open WebUI 配置](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/web-collab/README.zh.md)
+
+## 用量与费用
+
+LeanLink 给分支发送可用的输入引用和验收要求，给主 Agent 回传紧凑结果和证据。长资料可分页读取，原文和历史版本在已保存记录里可查。工单的 `input:` 引用按执行批次授权，回查时从对应工单进入。主 Agent 完成验收前，分支结束只说明该轮执行已结束。
+
+在 `/collab` 查看协作树、分支用量、缓存命中与未命中、输出、重试和缺失用量。点击连接查看已记录的派发和回传。费用滑块用于推演费率、缓存和压缩情景。实际费用要看供应商回执，也应把失败、返工和外部咨询纳入同题对照。
 
 <details>
-<summary><strong>兼容版本与执行边界</strong></summary>
+<summary><strong>为调用配置金额预算</strong></summary>
 
-| 组件 | 版本 |
-|---|---|
-| DSH-LLSA 组合发行 / 启动器 | 0.4.2 |
-| `@dsh-llsa/collab` | 0.4.2 |
-| `@dsh-llsa/superagent` | 0.4.2 |
-| `@dsh-llsa/web-collab`（默认关闭） | 0.2.0 |
-| DeepSeek Harness | 0.2.2-rc.1 |
+复制 [金额策略示例](examples/money-policy.example.json)，填写实际供应商、模型、币种和每百万 token 的费率。启动前设置 `DSH_LLSA_MONEY_POLICY` 指向配置文件的绝对路径。`maxCost` 用于一个预算周期，`maxRunCost` 用于单工单，`maxBranchCost` 用于工作项及其重试。保持相同的 `id` 可续用已有预算记录。
 
-四个内置组件通过组合包安装。启动器按锁文件使用指定版本的 Harness。HUD 的 npm 包单独发行，[安装与版本信息见 HUD 文档](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)。
-
-组合包使用基于 [DeepSeek Super-agent 研究原型](https://github.com/deepseek-ai/dsh-superagent-prototype/commit/8c32a9dc5d72c033816c6a8110b37f40cf94fba4) 的修改版。完整工单流程依赖这份修改版提供的输入版本、验收和停止恢复接口。上游发布新版后，先验证兼容性及旧状态的恢复，再随组合包更新。现有安装可继续按原锁文件运行。[上游署名与派生说明](NOTICE)
-
-默认本机入口不自动操作外部仓库或发布部署。源码保留上游外部集成能力；另行启用时可能使用本机 git、gh、lark 凭据并执行命令。`DSH_SUPERAGENT_BLOCKED_COMMANDS` 是建议性限制，不构成强制沙箱。服务仅供本机使用，不要直接暴露到公网。
+调用前会根据估算用量和输出额度预留费用。超限或价格缺失时，系统暂停新的受管调用，已发出的调用可能继续。未知用量持续占用预留。更改额度后重启并人工恢复；旧记录沿用当时费率。预算面板显示本机估算和预留，最终金额请以供应商账单为准。
 
 </details>
+
+## 使用帮助
+
+| 问题 | 从哪里查 |
+| --- | --- |
+| 无法打开本机页面或显示鉴权失败 | 从终端重新打开本次启动的 Harness 认证链接。端口冲突时用 `npm start -- 3096`。 |
+| 模型返回 401、429 或无法调用 | 检查 Harness 模型配置、账户额度和限流。 |
+| CSV 工单找不到样例 | 确认 Python 3.10+、工单开关和 `DSH_LLSA_CSV_WORKSPACE`。输入路径以该目录为基准。 |
+| Codex HUD 没有会话 | 确认服务已启动、Hook 已受信任，再开启新会话运行任务。 |
+| 如何备份 | 用 `Ctrl+C` 停止服务后复制启动目录下的 `.dsh-llsa/`。可用 `DSH_LLSA_STATE` 指定其他路径。Harness 凭据由宿主单独管理。 |
+
+提交问题时附上操作系统、Node/npm 版本、启动方式和脱敏报错。保管好模型密钥、Harness 认证链接和本地数据库。
 
 ## 开发与验证
 
-### 可视化浮窗接口（只读）
+| 组件 | 源码版本与职责 |
+| --- | --- |
+| 组合包、启动器、Super-agent、Collab | `0.4.2`。本机启动、工单编排、LeanLink 交接和记录 |
+| DeepSeek Harness | 锁定 `0.2.2-rc.1` |
+| Web Collab | `0.2.2`。可选网页咨询 |
+| Harness HUD | `0.4.5` 源码，单独安装 |
+| Codex / WorkBuddy HUD | Codex 由源码注册本机市场，WorkBuddy 的源码入口处于预览检查状态 |
+
+```sh
+npm run check
+npm run typecheck
+npm test
+npm run check --prefix packages/hud
+npm run pack:release
+npm run verify:rebuild
+npm run verify:kit
+```
+
+CI 在 Windows 和 Ubuntu 上验证构建、隔离安装和包的 SHA-256。可另用 `node scripts/smoke-codex-plugin.mjs --native-hud` 在本机验证 Codex 的 MCP 安装、原文回查和原生父子 Agent Hook。它使用本地模拟端点。
+
+<details>
+<summary><strong>HUD v1 只读快照与兼容契约</strong></summary>
 
 编排层已预留多智能体工作状态投影，不依赖 HUD 包，也不实现浮窗布局或动画。
 
@@ -301,41 +222,8 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 
 兼容约定：本次保持 `v: 1`。加字段、kind 或状态属于约定的非破坏性扩展；既有字段语义保持不变。未来破坏性变更必须在同一个 PR 更新 schema、投影、夹具与回放测试；v1 继续默认，v2 由客户端显式选择，两个版本短期并存。只有可视化端明确确认迁移完成后才可弃用 v1。本版尚未发布 v2。独立安装、单智能体降级和视觉材料映射由 HUD 实现方负责。
 
-```text
-packages/dsh-collab/   协作通信与记录
-packages/superagent/   上游派生的执行插件
-packages/launcher/     本机启动器
-packages/web-collab/   可选的网页协作入口
-scripts/               构建、打包与安装验证
-assets/                产品海报
-```
+</details>
 
-在完成 `npm ci` 后运行：
+终止服务后备份全部状态目录再升级。升级 Harness 时应同时检查锁定依赖、输入版本、验收和停止恢复，验证旧数据能继续读取。默认本机入口使用回环地址。外部集成启用后可使用本机凭据，`DSH_SUPERAGENT_BLOCKED_COMMANDS` 只提供命令限制建议。
 
-```sh
-npm run check
-npm run typecheck
-npm test
-npm run pack:release
-npm run verify:rebuild
-npm run verify:kit
-```
-
-`pack:release` 先检查并构建，再生成五个归档与 `SHA256SUMS`。后两条命令分别检查重复构建一致性，以及全新目录中的安装、认证、页面与协作桥。已构建源码还可运行 `npm run smoke`。
-
-这些验证使用隔离配置，不提交模型任务；真实任务质量需要另行验收。Windows / Ubuntu 各自验证通过后，CI 还会下载两套产物、核对实际归档哈希并比较 SHA256SUMS；文件名或内容不一致会让整个流程失败。远端状态见页首 CI 标记。构建产物通过 Actions 分发，不提交进源码树。
-
----
-
-<p align="center"><strong>Built on DeepSeek Harness · Connected by LeanLink</strong></p>
-
-基于 [DeepSeek Super-agent prototype](https://github.com/deepseek-ai/dsh-superagent-prototype) 与 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。采用 [MIT](LICENSE)，上游署名与派生说明见 [NOTICE](NOTICE)，版本变化见 [CHANGELOG](CHANGELOG.md)。本项目是独立扩展，不代表 DeepSeek 官方发布或背书。
-
-
-### 协作树与费用推演
-
-工作台新增父子 Agent 调用树，展示已记录的任务下发、结果回传和公开消息。点击连接可查看历史，并按连接调整压缩情景、费率、缓存命中及额外开销。已有阶段实验与情景预测分开展示。
-
-滑块只做预测，不修改实际压缩策略；默认费率是示例。未知用量不补零，减少 token 也可能增加费用。当前不保证任意任务的固定降幅，后续完整验证尚未完成。
-
-模型用量区可查看调用归属与返工统计，按 Agent、工作项、尝试和用途分组。用量覆盖率仅针对已记录的受管调用；缺少回传的请求仍计入未知。缓存命中率只在分项完整的调用上计算。输入变更造成的作废与实际重试分开统计，不能相加当作模型错误；未回传的费用不会被显示成免费。
+基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 和 [DeepSeek Super-agent 研究原型](https://github.com/deepseek-ai/dsh-superagent-prototype/commit/8c32a9dc5d72c033816c6a8110b37f40cf94fba4) 的独立扩展。 [MIT 许可](LICENSE) · [上游署名](NOTICE) · [Changelog](CHANGELOG.md)
