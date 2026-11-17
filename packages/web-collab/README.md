@@ -46,7 +46,7 @@ A non-loopback instance must use HTTPS.
 ## What leaves the machine
 
 - **Only what you paste or attach.** The panel does not read your repository, and the plugin does not sample your session.
-- **A loopback web server is required.** `apply()` refuses to mount on a non-loopback host.
+- **Every route asks the Harness connection fence first.** `ctx.connection.requestRejection()` applies the Host/Origin fence and requires an authenticated live Peer, so a page that never sends `Origin` — or a local process — is refused before any plugin code runs. `apply()` also refuses to mount on a non-loopback host.
 - **Requests are JSON, capped, and cached by nobody.** `Content-Type: application/json` is enforced, bodies are limited to 128 KiB, responses carry `no-store` and a strict CSP, and the panel is framed by `frame-ancestors 'none'`.
 - **Cost sits with the consulted provider.** An Open WebUI model bills its own service; whether the whole job gets cheaper depends on whether the advice replaces other model calls. This plugin does not claim a saving.
 

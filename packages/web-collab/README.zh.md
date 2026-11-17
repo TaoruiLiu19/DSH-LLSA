@@ -46,7 +46,7 @@ DSH_WEB_COLLAB_OPEN_WEBUI_KEY=…
 ## 什么会离开这台机器
 
 - **只有你贴进去的内容。** 面板不读你的仓库，插件也不采样你的会话。
-- **必须挂在回环地址上。** `apply()` 在非回环 host 上直接拒绝挂载。
+- **每个请求先过 Harness 的连接栅栏。** `ctx.connection.requestRejection()` 应用 Host/Origin 准入并要求已认证的活动 Peer，所以不发 `Origin` 的页面、以及本机进程，都会在任何插件代码运行之前被拒绝。`apply()` 同时拒绝挂载在非回环 host 上。
 - **请求是 JSON、有上限、不缓存。** 强制 `Content-Type: application/json`，请求体上限 128 KiB，响应带 `no-store` 与严格 CSP，面板由 `frame-ancestors 'none'` 约束。
 - **费用算在被咨询方的账上。** Open WebUI 所接模型的费用由其服务方另计；整单是否更省，取决于这次咨询能否替代其他模型请求——本插件不承诺任何降幅。
 

@@ -6,11 +6,26 @@ import { SingleAgentJobs } from './single-agent.js'
 import { TASK_BODY_LIMIT } from './task-evidence.js'
 
 export const name = 'dsh-web-collab'
-export const inject = ['webServer', 'agents', 'llm', 'sessionTitle']
+export const inject = ['webServer', 'agents', 'llm', 'sessionTitle', 'connection']
 
 const BASE = '/web-collab'
 const loopback = address => address === '::1' || address === '127.0.0.1' || address === '::ffff:127.0.0.1'
 const fail = (status, code) => Object.assign(new Error(code), { status, code })
+
+/**
+ * The composition's Host/Origin fence, as a status code or `undefined`.
+ *
+ * Every route asks the `connection` service before doing anything: its fence
+ * defeats DNS rebinding and cross-site calls, and it requires an authenticated
+ * live Peer. The plugin's own host/origin/header checks below stay as a second
+ * line of defence, but they cannot stand in for this one — a local process, or
+ * a page that never sends `Origin`, is only fenced here.
+ */
+export function rejectionOf(connection, request) {
+  if (typeof connection?.requestRejection !== 'function') return undefined
+  const rejection = connection.requestRejection(request)
+  return Number.isInteger(rejection) && rejection >= 400 && rejection <= 599 ? rejection : undefined
+}
 
 class WebChildConsultationService extends Service {
   constructor(ctx, consultations) {
@@ -53,6 +68,9 @@ async function readBody(req, limit = 128 * 1024) {
 
 export function apply(ctx) {
   if (!loopback(ctx.webServer.host)) throw new Error('Web collaboration requires a loopback Harness web server')
+  if (typeof ctx.connection?.requestRejection !== 'function') {
+    throw new Error('Web collaboration requires the Harness connection fence')
+  }
   const assets = new Map([
     ['', ['panel.html', 'text/html; charset=utf-8']],
     ['/', ['panel.html', 'text/html; charset=utf-8']],
@@ -66,6 +84,8 @@ export function apply(ctx) {
   const jobs = new SingleAgentJobs(ctx)
   const dispose = ctx.webServer.register({ kind: 'prefix', path: BASE, handler: async (req, res) => {
     try {
+      const rejection = rejectionOf(ctx.connection, req)
+      if (rejection !== undefined) throw fail(rejection, 'ACCESS_REJECTED')
       const host = req.headers.host
       const port = ctx.webServer.port
       if (!port || !loopback(req.socket.remoteAddress) ||
