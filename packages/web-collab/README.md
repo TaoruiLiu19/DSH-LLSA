@@ -4,6 +4,10 @@
 
 Use a web model for a first review in DeepSeek Harness, or let a child agent ask one focused question. The Harness agent checks the source before delivering the result. Use Web Collab when a second opinion can help check exact identifiers, units, negative conditions, or conflicting records.
 
+![Web Collab’s first-review form, a sample web reply, and the copy, paste and verify steps](https://raw.githubusercontent.com/TaoruiLiu19/DSH-LLSA/main/packages/web-collab/docs/images/web-collab-overview.png)
+
+*The screenshots use the Web Collab panel with sample data. The web and Harness replies shown are simulated.*
+
 [Enable in the kit](#enable-web-collab) · [Standalone install](#install-in-an-existing-harness-profile) · [Try an example](#try-an-example) · [Child consultations](#how-child-agents-consult) · [Open WebUI](#connect-open-webui) · [Troubleshooting](#troubleshooting)
 
 | What you want to do | Choose this workflow | Where to find results |
@@ -61,6 +65,8 @@ not_run for test_status, and use a boolean for deploy_allowed.
    {"id":"007","test_status":"not_run","deploy_allowed":false}
    ```
 
+![Completed sample task showing the string ID 007, the test status not_run, and deployment disabled](https://raw.githubusercontent.com/TaoruiLiu19/DSH-LLSA/main/packages/web-collab/docs/images/web-collab-verified-result.png)
+
 A single-agent task with Web Collab enabled needs a nonempty initial suggestion. You can also attach UTF-8 text such as Markdown, CSV, JSON, or logs. Use at most eight nonempty files with distinct names, up to 64 KiB each and 256 KiB in total. Choose **Stop task** (`停止任务`) to stop an active task. If you change the task or the consultation content, request a fresh review or clear the old advice before submitting.
 
 ## How child agents consult
@@ -69,6 +75,8 @@ A single-agent task with Web Collab enabled needs a nonempty initial suggestion.
 2. The child agent checks the source and can ask about a specific doubt. With no Open WebUI configured, its question appears under **Child-agent consultations** (`子 Agent 咨询`). Choose **Copy consultation** (`复制咨询`) and review the text before sending it.
 3. Paste the raw Markdown reply into the same card or import a UTF-8 `.md` file. Keep the generated `<!-- web-consultation:… -->` on the first line and place the body below it. Remove any enclosing Markdown fence. Choose **Return to child agent** (`回传给子 Agent`).
 4. Open `/orchestrator/local` to follow, review, or stop the work item. Open `/collab` to see the saved consultation evidence. The child receives a short reply and the original Markdown remains available with the collaboration records.
+
+![Child-agent consultation card showing a focused question, the Markdown reply field, and the return button](https://raw.githubusercontent.com/TaoruiLiu19/DSH-LLSA/main/packages/web-collab/docs/images/web-collab-child-consultation.png)
 
 Each work-item attempt can consult once. The question is limited to **1,024 UTF-8 bytes** and the answer body to **2,048 UTF-8 bytes**. A manual card waits **60 seconds** by default. The old ID expires after a timeout, cancellation, or input revision. Use the current card if the task asks again.
 

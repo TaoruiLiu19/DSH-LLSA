@@ -4,6 +4,10 @@
 
 在 DeepSeek Harness 中使用网页模型做初审，或让子 Agent 针对一个疑点请求第二意见。Harness Agent 在交付前核对原始资料。适合检查容易误读的编号、单位、否定条件和相互矛盾的记录。
 
+![网页协作初审面板与示例网页回复，展示复制提示、回填建议和核对资料三步](https://raw.githubusercontent.com/TaoruiLiu19/DSH-LLSA/main/packages/web-collab/docs/images/web-collab-overview.png)
+
+*图片截取自 Web Collab 面板，使用合成资料。网页建议与 Harness 回复均为离线演示数据。*
+
 [组合包启用](#开启网页协作) · [单独安装](#单独安装到-harness) · [跟做一个例子](#跟做一个例子) · [多智能体咨询](#子-agent-如何咨询) · [Open WebUI](#连接-open-webui) · [常见问题](#常见问题)
 
 | 你想做什么 | 选择哪条路径 | 在哪里看结果 |
@@ -59,6 +63,8 @@ DSH_LLSA_WEB_COLLAB=1 npm start
    {"id":"007","test_status":"not_run","deploy_allowed":false}
    ```
 
+![单 Agent 任务的示例结果保留字符串编号 007，测试尚未运行，禁止部署](https://raw.githubusercontent.com/TaoruiLiu19/DSH-LLSA/main/packages/web-collab/docs/images/web-collab-verified-result.png)
+
 启用网页协作时，单 Agent 需要一条非空的初审建议。单 Agent 也能处理可选的 UTF-8 附件，例如 Markdown、CSV、JSON 和日志文本。最多 8 份，文件名各不相同，单份 64 KiB，合计 256 KiB。已运行的任务可点 **停止任务**。修改任务或咨询内容后，重新咨询或清空旧建议再填，确保建议对应当前任务。
 
 ## 子 Agent 如何咨询
@@ -67,6 +73,8 @@ DSH_LLSA_WEB_COLLAB=1 npm start
 2. 子 Agent 先检查资料，再判断是否有具体疑点需要请网页核对。没有配置 Open WebUI 时，出现疑点才会在 **子 Agent 咨询** 中生成卡片。点 **复制咨询**，核对即将发给网页的内容。
 3. 在网页取得回复后，将**原始 Markdown** 粘贴回该卡片，或导入 UTF-8 `.md`。第一行必须保留卡片生成的 `<!-- web-consultation:… -->`，第二行起放正文。点击 **回传给子 Agent**。若网页把回复包进代码围栏，复制其中的原始内容，确保咨询编号前没有围栏或空行。
 4. 在 `/orchestrator/local` 跟进工单、查看最终回复或停止工单。在 `/collab` 查看当前工作项留下的咨询证据。工作项会收到简短回复，原始 Markdown 作为协作记录可查。
+
+![子 Agent 咨询卡展示具体问题、带咨询编号的 Markdown 回复及回传按钮](https://raw.githubusercontent.com/TaoruiLiu19/DSH-LLSA/main/packages/web-collab/docs/images/web-collab-child-consultation.png)
 
 每次工作项尝试最多咨询一次。问题最多 **1,024 UTF-8 字节**，回答正文最多 **2,048 UTF-8 字节**。手动卡片默认等待 **60 秒**。超时、取消或原输入更新后，旧编号会失效。以后需要补充信息时，用当前任务的咨询卡片。
 
