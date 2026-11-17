@@ -1,6 +1,6 @@
 # DSH-LLSA 网页协作
 
-[English](README.md) · [npm](https://www.npmjs.com/package/@dsh-llsa/web-collab) · [DSH-LLSA 组合包](https://github.com/TaoruiLiu19/DSH-LLSA)
+[English](README.md) · [npm](https://www.npmjs.com/package/@dsh-llsa/web-collab) · [下载 DSH-LLSA 组合包](https://github.com/TaoruiLiu19/DSH-LLSA/releases/latest)
 
 在 DeepSeek Harness 中使用网页模型做初审，或让子 Agent 针对一个疑点请求第二意见。Harness Agent 在交付前核对原始资料。适合检查容易误读的编号、单位、否定条件和相互矛盾的记录。
 

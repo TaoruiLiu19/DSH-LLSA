@@ -1,6 +1,6 @@
 # DSH-LLSA Web Collab
 
-[简体中文](README.zh.md) · [npm](https://www.npmjs.com/package/@dsh-llsa/web-collab) · [DSH-LLSA combined kit](https://github.com/TaoruiLiu19/DSH-LLSA)
+[简体中文](README.zh.md) · [npm](https://www.npmjs.com/package/@dsh-llsa/web-collab) · [Download the DSH-LLSA combined kit](https://github.com/TaoruiLiu19/DSH-LLSA/releases/latest)
 
 Use a web model for a first review in DeepSeek Harness, or let a child agent ask one focused question. The Harness agent checks the source before delivering the result. Use Web Collab when a second opinion can help check exact identifiers, units, negative conditions, or conflicting records.
 

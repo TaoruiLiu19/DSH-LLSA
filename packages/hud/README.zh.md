@@ -2,7 +2,7 @@
 
 **Agent 在忙什么，抬眼就能看懂。**
 
-[English](README.md) · [更新记录](CHANGELOG.md) · [它是怎么工作的](#它是怎么工作的) · [配置选项](#配置选项) · [常见问题](#常见问题)
+[English](README.md) · [更新记录](CHANGELOG.md) · [它是怎么工作的](#它是怎么工作的) · [配置选项](#配置选项) · [常见问题](#常见问题) · [下载 DSH-LLSA 组合包](https://github.com/TaoruiLiu19/DSH-LLSA/releases/latest)
 
 [![npm](https://img.shields.io/npm/v/@dsh-llsa/hud.svg)](https://www.npmjs.com/package/@dsh-llsa/hud)
 [![downloads](https://img.shields.io/npm/dm/@dsh-llsa/hud.svg)](https://www.npmjs.com/package/@dsh-llsa/hud)

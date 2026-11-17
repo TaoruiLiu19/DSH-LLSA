@@ -2,7 +2,7 @@
 
 **Know what your agent is doing, at a glance.**
 
-[中文](README.zh.md) · [Changelog](CHANGELOG.md) · [How it works](#how-it-works) · [Settings](#settings) · [Troubleshooting](#troubleshooting)
+[中文](README.zh.md) · [Changelog](CHANGELOG.md) · [How it works](#how-it-works) · [Settings](#settings) · [Troubleshooting](#troubleshooting) · [Download the DSH-LLSA combined kit](https://github.com/TaoruiLiu19/DSH-LLSA/releases/latest)
 
 [![npm](https://img.shields.io/npm/v/@dsh-llsa/hud.svg)](https://www.npmjs.com/package/@dsh-llsa/hud)
 [![downloads](https://img.shields.io/npm/dm/@dsh-llsa/hud.svg)](https://www.npmjs.com/package/@dsh-llsa/hud)
