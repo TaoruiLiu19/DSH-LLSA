@@ -36,6 +36,7 @@ export const inject = [
   "sessionPersistence",
   "subagents",
   "webServer",
+  "connection",
   "sessionProjections",
   "userQuestions",
 ];

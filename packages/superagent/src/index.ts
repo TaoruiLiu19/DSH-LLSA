@@ -6,7 +6,7 @@ import { Config, machineOf, type DeploymentConfig } from './deployment.ts'
 import { assertHarnessCompatibility } from './runtime-compatibility.ts'
 
 export const name = 'dsh-superagent'
-export const inject = ['agents', 'sessionController', 'sessionPersistence', 'workspaceRegistry', 'permissionPresets', 'tools', 'systemPrompt', 'skills', 'webServer', 'llm', 'subprocess']
+export const inject = ['agents', 'sessionController', 'sessionPersistence', 'workspaceRegistry', 'permissionPresets', 'tools', 'systemPrompt', 'skills', 'webServer', 'connection', 'llm', 'subprocess']
 export { Config }
 export async function apply(ctx: Context, config: DeploymentConfig): Promise<void> {
   assertHarnessCompatibility()

@@ -15,6 +15,7 @@ test('changing the root version updates kit filename and tag together', async ()
     const release = await readReleaseInfo(path);
     assert.equal(release.version, version);
     assert.equal(release.kitFilename, `dsh-llsa-${version}.tgz`);
+    assert.equal(release.harnessBundleFilename, `dsh-llsa-harness-bundle-${version}.tgz`);
     assert.equal(release.plannedTag, `v${version}`);
   }
   await writeFile(path, JSON.stringify({ version: '../bad' }));

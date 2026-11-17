@@ -64,9 +64,9 @@ npm start
 默认地址为 `127.0.0.1:3095`。先打开认证链接，再进入任务页面。首次安装需要联网，请保留默认安装脚本，不要添加 `--ignore-scripts`。
 
 <details>
-<summary><strong>使用构建包：跳过源码构建</strong></summary>
+<summary><strong>从 GitHub Releases 下载组合包</strong></summary>
 
-当前组合包构建产物通过 GitHub Actions 提供。登录 GitHub，在 [Actions](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml) 打开 `main` 分支的一次成功运行，然后在 **Artifacts** 中下载 `dsh-llsa-review-windows-latest` 或 `dsh-llsa-review-ubuntu-latest`。两套归档通过字节一致性检查。解压 ZIP，按同目录的 `SHA256SUMS` 核对 `dsh-llsa-0.4.2.tgz`，然后执行：
+从 [GitHub Releases](https://github.com/TaoruiLiu19/DSH-LLSA/releases) 下载 `dsh-llsa-0.4.2.tgz` 和 `SHA256SUMS`，核对 SHA-256 后解包安装。这个包包含启动器和 Harness 的锁定依赖。
 
 ```sh
 tar -xzf dsh-llsa-0.4.2.tgz
@@ -78,6 +78,8 @@ npm start
 保留解压后目录里的 `vendor/`、`package.json` 和 `package-lock.json`。`vendor/` 已装入四个组件包，安装时还需要联网下载 Harness 等锁定依赖。真实任务使用自己配置的模型 API。
 
 </details>
+
+已经安装了 Harness Web？从同一个 Release 下载 `dsh-llsa-harness-bundle-0.4.2.tgz`，用 `dsh plugin add` 装到专用 Web 配置。[插件安装指南](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/harness-bundle/README.zh.md)
 
 ### HUD 专注视图
 
@@ -268,7 +270,7 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 | DSH-LLSA 组合发行 / 启动器 | 0.4.2 |
 | `@dsh-llsa/collab` | 0.4.2 |
 | `@dsh-llsa/superagent` | 0.4.2 |
-| `@dsh-llsa/web-collab`（默认关闭） | 0.2.0 |
+| `@dsh-llsa/web-collab`（默认关闭） | 0.2.2 |
 | DeepSeek Harness | 0.2.2-rc.1 |
 
 四个内置组件通过组合包安装。启动器按锁文件使用指定版本的 Harness。HUD 的 npm 包单独发行，[安装与版本信息见 HUD 文档](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/hud/README.zh.md)。
@@ -286,6 +288,7 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 编排层已预留多智能体工作状态投影，不依赖 HUD 包，也不实现浮窗布局或动画。
 
 - 读取现有 `GET /collab/api/runs/:runId?view=hud`，获得符合 [HUD v1 Schema](contracts/hud-v1.schema.json) 的脱敏快照；不新增端点。
+- 此端点需要 Harness 鉴权。同源页面可使用登录会话，独立客户端需携带本实例认可的凭据。HUD 默认使用本机会话事件。
 - 原有完整任务快照保留兼容字段，新增 `hud`，以及与其一致的顶层 `v`、`seq`、`now`。浮窗应使用 `view=hud`，不要读取原始 `events` 或自行推导状态。
 - `agents` 提供稳定 ID、父子关系、工单、五态、状态起始时间、静默标记和最小活动事件。`label` 是最多 12 个 Unicode 字符的短名：任务标题优先，其次会话标题；移除路径、URL、邮箱、纯数字 ID、代码与换行，过滤后为空则使用角色或“智能体”。原生 Assignment 无独立标题字段，适配器取关联任务的 `execution.name` / `ticket.title`；托管子任务使用分配时的 objective。每次 assignment 的短名持久化固定，变更经带 `label` 的 `agent.register` 发布。父节点可能属于另一个工单快照，不能据此猜测其活动状态。
 - `seq` 在每个 run 内单调递增，重启不清零；客户端按 `(runId, seq)` 维护游标，跨 run 不可比较。轮询时间与 `stalled` 变化不会增加序号。`stalledAfterMs` 默认为 20000；只有 `running` 可以静默。`stalled` 由服务端计算，客户端只展示服务端值，不自行判断失败或静默。

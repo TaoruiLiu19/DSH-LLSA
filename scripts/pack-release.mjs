@@ -290,7 +290,24 @@ const kitLock = buildKitLock(sourceLock, kitManifest, packages);
 await writeFile(join(kitDirectory, 'package-lock.json'), `${JSON.stringify(kitLock, null, 2)}\n`);
 
 const kitFilename = await archive(join(stagingDirectory, 'kit'), release.kitFilename);
-const artifactFilenames = [...packages.map(packageArtifact => packageArtifact.filename), kitFilename].sort();
+
+const bundleStage = join(stagingDirectory, 'harness-bundle');
+const bundlePackage = join(bundleStage, 'package');
+const bundleSource = join(repositoryRoot, 'packages/harness-bundle');
+const bundleManifest = JSON.parse(await readFile(join(bundleSource, 'package.json'), 'utf8'));
+if (bundleManifest.version !== release.version) throw new Error('Harness bundle version must match the root package version');
+await mkdir(join(bundlePackage, 'lib'), { recursive: true });
+for (const filename of ['package.json', 'cordis.patch.yml', 'README.md', 'README.zh.md']) {
+  await copyFile(join(bundleSource, filename), join(bundlePackage, filename));
+}
+for (const filename of ['collab.js', 'superagent.js']) {
+  await copyFile(join(repositoryRoot, 'dist', filename), join(bundlePackage, 'lib', filename));
+}
+for (const filename of ['LICENSE', 'NOTICE']) {
+  await copyFile(join(repositoryRoot, filename), join(bundlePackage, filename));
+}
+const bundleFilename = await archive(bundleStage, release.harnessBundleFilename);
+const artifactFilenames = [...packages.map(packageArtifact => packageArtifact.filename), kitFilename, bundleFilename].sort();
 const checksums = [];
 
 for (const filename of artifactFilenames) {

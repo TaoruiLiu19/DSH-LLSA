@@ -19,7 +19,7 @@ import { parseExactJson } from './protocol.js';
  * @property {(command: {runId: string, action: string, idempotencyKey: string}) => unknown} operatorControl
  * @property {{status: () => unknown, getTask: (id: string) => unknown, startTask: (body: JsonObject) => unknown, previewCalculation: (body: JsonObject) => unknown, commitCalculation: (body: JsonObject) => unknown, interruptTask: (id: string) => unknown}} [localWorkspace]
  */
-/** @typedef {{webServer: {register: (route: {kind: 'prefix', path: string, handler: (req: Request, res: Response) => Promise<void>}) => void|(() => void)|{dispose: () => void}}}} HttpContext */
+/** @typedef {{connection: {requestRejection: (req: Request) => 401|403|undefined}, webServer: {register: (route: {kind: 'prefix', path: string, handler: (req: Request, res: Response) => Promise<void>}) => void|(() => void)|{dispose: () => void}}}} HttpContext */
 
 const BASE = '/collab';
 const MAX_BODY = 64 * 1024;
@@ -120,14 +120,17 @@ function mapError(caught) {
   return { status: 500, code: 'INTERNAL_ERROR' };
 }
 
-/** Plugin routes enforce loopback/Host/origin themselves; native index login is a separate boundary.
+/** Require Harness authentication and keep the existing local-access checks.
  * @param {HttpContext} ctx @param {HttpService} service @returns {() => void}
  */
 export function registerHttp(ctx, service) {
   if (!ctx?.webServer?.register) throw new Error('DSH webServer.register is required');
+  if (typeof ctx.connection?.requestRejection !== 'function') throw new Error('Harness connection service is required');
   /** @param {Request} req @param {Response} res */
   const handler = async (req, res) => {
     try {
+      const rejection = ctx.connection.requestRejection(req);
+      if (rejection !== undefined) throw httpError(rejection, 'ACCESS_REJECTED');
       if (!loopback(req.socket.remoteAddress) || !allowedHost(req.headers.host)) throw httpError(403, 'LOCAL_ACCESS_REQUIRED');
       const url = new URL(req.url, `http://${req.headers.host}`);
       if (url.origin !== `http://${req.headers.host}`) throw httpError(400, 'INVALID_URL');

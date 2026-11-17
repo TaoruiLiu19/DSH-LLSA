@@ -6,7 +6,7 @@ import { LocalTaskSchema } from '../src/app/local-tasks.ts'
 function serve(host = '127.0.0.1', port = 3082) {
   let handler
   const accepted = []
-  registerHttp({ webServer: { host, port, register(route) { handler = route.handler; return () => {} } } }, {
+  registerHttp({ get: () => ({ requestRejection: () => undefined }), webServer: { host, port, register(route) { handler = route.handler; return () => {} } } }, {
     ready: Promise.resolve(), machine: { localOnly: true }, store: {},
     submitLocal(input) { accepted.push(LocalTaskSchema.parse(input)); return { triggerId: 'fixture-trigger', reused: false } },
   })

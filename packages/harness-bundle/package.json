@@ -1,0 +1,56 @@
+{
+  "name": "@dsh-llsa/harness-bundle",
+  "version": "0.4.2",
+  "description": "DeepSeek Harness bundle for local multi-agent work orders with LeanLink handoffs and collaboration history.",
+  "type": "module",
+  "license": "MIT",
+  "author": "DSH-LLSA contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TaoruiLiu19/DSH-LLSA.git",
+    "directory": "packages/harness-bundle"
+  },
+  "homepage": "https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/packages/harness-bundle#readme",
+  "bugs": {
+    "url": "https://github.com/TaoruiLiu19/DSH-LLSA/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "leanlink",
+    "multi-agent",
+    "collaboration"
+  ],
+  "engines": {
+    "node": ">=24.11.0",
+    "dsh": "0.2.2-rc.1"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "lib/collab.js",
+    "lib/superagent.js",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "dependencies": {
+    "js-tiktoken": "1.0.21",
+    "proper-lockfile": "4.1.2",
+    "zod": "4.4.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-agent-preset": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-app-boot": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-scope": "0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "3.19.0"
+  }
+}

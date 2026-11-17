@@ -24,11 +24,9 @@ npm start
 
 You can also download the source from **Code → Download ZIP** on GitHub. Extract it, open the directory containing `package.json`, and start with `npm ci`. Keep npm's installation scripts enabled so the component dependencies are installed.
 
-### Start from a CI build
+### Start from a GitHub Release
 
-There is currently no formal GitHub Release for the combined kit. Sign in to GitHub, open a successful **Validate and package** run for `main`, and download `dsh-llsa-review-windows-latest` or `dsh-llsa-review-ubuntu-latest` from its **Artifacts** section. Choose a run that includes the features you want. [Workflow runs](https://github.com/TaoruiLiu19/DSH-LLSA/actions/workflows/ci.yml)
-
-Extract the artifact ZIP. Compare the SHA-256 of `dsh-llsa-0.4.2.tgz` with its entry in `SHA256SUMS`. Use `Get-FileHash .\dsh-llsa-0.4.2.tgz -Algorithm SHA256` in PowerShell or `sha256sum dsh-llsa-0.4.2.tgz` on Ubuntu. Then run:
+Download `dsh-llsa-0.4.2.tgz` and `SHA256SUMS` from [GitHub Releases](https://github.com/TaoruiLiu19/DSH-LLSA/releases). Check the SHA-256 with `Get-FileHash .\dsh-llsa-0.4.2.tgz -Algorithm SHA256` in PowerShell or `sha256sum dsh-llsa-0.4.2.tgz` on Ubuntu, then extract and start the kit.
 
 ```sh
 tar -xzf dsh-llsa-0.4.2.tgz
@@ -38,6 +36,8 @@ npm start
 ```
 
 Keep the `vendor/` directory with all four component archives. `npm ci` installs runtime dependencies from the included lockfile. The kit contains the built launcher and plugins, so it skips the source build.
+
+If you already run Harness Web, download `dsh-llsa-harness-bundle-0.4.2.tgz` from the same Release and use `dsh plugin add` in a dedicated Web profile. [Plugin installation guide](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/harness-bundle/README.md)
 
 ### Open the workspace
 
@@ -147,7 +147,7 @@ DSH_LLSA_MONEY_POLICY="$PWD/my-money-policy.json" npm start
 | --- | --- |
 | Combined kit and `@dsh-llsa/launcher` | `0.4.2` |
 | `@dsh-llsa/collab` and `@dsh-llsa/superagent` | `0.4.2` |
-| `@dsh-llsa/web-collab` (disabled by default) | `0.2.0` |
+| `@dsh-llsa/web-collab` (disabled by default) | `0.2.2` |
 | DeepSeek Harness | `0.2.2-rc.1` |
 | Optional `@dsh-llsa/hud` source | `0.4.5` |
 

@@ -6,5 +6,7 @@ export async function readReleaseInfo(url = new URL('../package.json', import.me
   if (typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(manifest.version)) {
     throw new Error('Root package.json must contain a valid release version');
   }
-  return { manifest, version: manifest.version, kitFilename: `dsh-llsa-${manifest.version}.tgz`, plannedTag: `v${manifest.version}` };
+  const { version } = manifest;
+  return { manifest, version, kitFilename: `dsh-llsa-${version}.tgz`,
+    harnessBundleFilename: `dsh-llsa-harness-bundle-${version}.tgz`, plannedTag: `v${version}` };
 }

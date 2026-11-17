@@ -1,0 +1,27 @@
+- insert:
+    - id: llsa
+      name: ./lib/collab.js
+      config:
+        stateDir: !!js "process.getBuiltinModule('node:path').join(ctx.get('profileContext').dir, 'dsh-llsa', 'collab')"
+        bridgeProjection: true
+        explicitEvidenceRefs: true
+        encodingEvidenceFile: ''
+        moneyPolicyFile: ''
+        maxRunTokens: 300000
+        maxOutputTokens: 1536
+    - id: llsa-worker
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: dsh-superagent-worker
+        plugins: []
+    - id: llsa-router
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: dsh-superagent-router
+        plugins: []
+    - id: llsa-superagent
+      name: ./lib/superagent.js
+      config:
+        stateDir: !!js "process.getBuiltinModule('node:path').join(ctx.get('profileContext').dir, 'dsh-llsa', 'superagent')"
+        localOnly: true
+        requireCollaboration: true

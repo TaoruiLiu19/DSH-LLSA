@@ -24,7 +24,7 @@ async function fixture(t, overrides = {}) {
     operatorControl: async command => { calls.push(['control', command]); throw Object.assign(new Error('bridge unavailable'), { code: 'NO_BRIDGE' }); },
     ...overrides,
   };
-  const dispose = registerHttp({ webServer: { register: route => {
+  const dispose = registerHttp({ connection: { requestRejection: () => undefined }, webServer: { register: route => {
     assert.equal(route.kind, 'prefix'); assert.equal(route.path, '/collab'); handler = route.handler;
     return () => { disposed = true; };
   } } }, service);

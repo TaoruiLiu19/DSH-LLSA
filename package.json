@@ -19,6 +19,7 @@
     "pack:release": "node scripts/pack-release.mjs",
     "verify:rebuild": "node scripts/verify-rebuild.mjs",
     "verify:kit": "node scripts/verify-kit.mjs",
+    "verify:harness-bundle": "node scripts/verify-harness-bundle.mjs",
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {

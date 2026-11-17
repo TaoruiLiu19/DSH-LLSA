@@ -1,4 +1,4 @@
-/** Loopback-only management HTTP routes with same-origin enforcement for the web panel. */
+/** Authenticated loopback-only management routes for the Web panel. */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -239,9 +239,13 @@ function match(table: Routes, method: string, segments: string[]) {
 }
 export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
   if (!['127.0.0.1', '::1'].includes(ctx.webServer.host)) throw new Error('Orchestrator management requires a loopback Web server')
+  const connection: { requestRejection(request: IncomingMessage): 401 | 403 | undefined } | undefined = ctx.get('connection')
+  if (typeof connection?.requestRejection !== 'function') throw new Error('Harness connection service is required')
   const table = routes(runtime)
   const disposers = [
     ctx.webServer.register({ kind: 'prefix', path: '/orchestrator', handler: async (req, res) => {
+      const rejection = connection.requestRejection(req)
+      if (rejection !== undefined) { json(res, rejection, { error: 'Access rejected' }); return }
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (req.method==='GET' && url.pathname==='/orchestrator/local' && runtime.machine.localOnly) {
         const port = ctx.webServer.port
