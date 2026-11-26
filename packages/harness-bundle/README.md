@@ -21,7 +21,7 @@ dsh --profile llsa --host 127.0.0.1 --port 3095 --no-open
 3. Open `http://127.0.0.1:3095/orchestrator/local` to submit a task using material you paste there. To check that the original text is preserved, try giving the agent an ID of `"007"` and ask it to return a JSON object with the ID as a string.
 4. Open `http://127.0.0.1:3095/collab` to inspect the work, source material, and model usage.
 
-The bundle provides the local pasted-content workflow. The Web Collab and HUD packages have separate install guides in the repository.
+The bundle supports text replies and file delivery. Select **File delivery** on the local task page to upload UTF-8 source files or editable drafts, then use the task card to download the reviewed result. If an execution reaches its budget, the same card lets you download saved drafts or start a new assignment in the existing workspace. The Web Collab and HUD packages have separate install guides in the repository.
 
 ## Stop or remove
 

@@ -16,7 +16,7 @@ export class ToolEventIndex {
   }
 
   /** Feed the same session/event pair received by the runtime event listener. */
-  observe(session, event) {
+  observe(session, event, scope = undefined) {
     if (event?.type !== 'tool/call' || !natural(event.seq)) return;
     const { callId, name, turn, step } = event.data ?? {};
     if (!nonempty(callId) || !nonempty(name)) return;
@@ -26,8 +26,9 @@ export class ToolEventIndex {
     if (!calls) { calls = new Map(); state.calls.set(callId, calls); }
     // Replaying an immutable event is idempotent; a conflicting replay is unknown.
     const previous = calls.get(event.seq);
-    calls.set(event.seq, { seq: event.seq, name, turn, step,
-      conflict: !!previous && (previous.conflict || previous.name !== name || previous.turn !== turn || previous.step !== step) });
+    calls.set(event.seq, { seq: event.seq, name, turn, step, scope: previous?.scope ?? scope,
+      conflict: !!previous && (previous.conflict || previous.name !== name || previous.turn !== turn || previous.step !== step ||
+        (scope && previous.scope && (previous.scope.runId !== scope.runId || previous.scope.inputVersion !== scope.inputVersion))) });
   }
 
   /** Can prime from persisted events without relying on a live Session reader. */
@@ -63,6 +64,7 @@ export class ToolEventIndex {
       return unknown(callId, 'AMBIGUOUS_CALL');
     }
     const call = candidates.reduce((latest, current) => current.seq > latest.seq ? current : latest);
-    return { name: call.name, callId, source: 'session_tool_call', callSeq: call.seq, reason: null };
+    return { name: call.name, callId, source: 'session_tool_call', callSeq: call.seq, reason: null,
+      ...(candidates.length === 1 && call.scope ? { scope: call.scope, resultSeq: resultEvent.seq } : {}) };
   }
 }

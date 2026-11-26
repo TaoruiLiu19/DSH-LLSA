@@ -58,7 +58,7 @@ function fixture(t, wrapExecutor = execute => execute) {
     python,
     scratchDir: join(stateDir, 'engine'),
   });
-  const manager = new CollaborationManager({ store, backend, csvExecutor: wrapExecutor(executor) });
+  const manager = new CollaborationManager({ store, backend, allowPaidManagedChildren: true, csvExecutor: wrapExecutor(executor) });
   const root = { id: 'coordinator' };
   manager.bindRoot(root.id, { runId, ticketId: 'csv-ticket', assignmentId: 'csv-assignment' });
   manager.setCsvWorkflowEnabled(root.id, true);

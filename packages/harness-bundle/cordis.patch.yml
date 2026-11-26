@@ -5,6 +5,8 @@
         stateDir: !!js "process.getBuiltinModule('node:path').join(ctx.get('profileContext').dir, 'dsh-llsa', 'collab')"
         bridgeProjection: true
         explicitEvidenceRefs: true
+        groupSectionResults: true
+        allowPaidManagedChildren: false
         encodingEvidenceFile: ''
         moneyPolicyFile: ''
         maxRunTokens: 300000
@@ -25,3 +27,4 @@
         stateDir: !!js "process.getBuiltinModule('node:path').join(ctx.get('profileContext').dir, 'dsh-llsa', 'superagent')"
         localOnly: true
         requireCollaboration: true
+        inlineLocalWorkerNotices: true

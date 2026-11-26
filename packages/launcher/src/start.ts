@@ -18,12 +18,12 @@ export function makePatch(state: string, collab: string, superagent: string, mon
   const modulePath = (file: string) => file.replaceAll('\\', '/');
   return [{ insert: [
     { id: 'llsa', name: modulePath(collab), config: { stateDir: join(state, 'collab'), bridgeProjection: true,
-      explicitEvidenceRefs: true, encodingEvidenceFile: '', moneyPolicyFile, maxRunTokens: 300000, maxOutputTokens: 1536, ...csv,
+      explicitEvidenceRefs: true, groupSectionResults: true, encodingEvidenceFile: '', moneyPolicyFile, maxRunTokens: 300000, maxOutputTokens: 1536, ...csv,
       ...(webCollab ? { webCollaboration: true } : {}) } },
     { id: 'llsa-worker', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'dsh-superagent-worker', plugins: [] } },
     { id: 'llsa-router', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'dsh-superagent-router', plugins: [] } },
     { id: 'llsa-superagent', name: modulePath(superagent), config: { stateDir: join(state, 'superagent'), localOnly: true,
-      requireCollaboration: true, ...(webCollab ? { webCollaboration: true } : {}) } },
+      requireCollaboration: true, inlineLocalWorkerNotices: true, ...(webCollab ? { webCollaboration: true } : {}) } },
     ...(webCollab ? [{ id: 'llsa-web-collab', name: modulePath(webCollab) }] : []),
   ] }];
 }

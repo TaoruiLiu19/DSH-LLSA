@@ -8,10 +8,12 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { CollaborationStore } from "./store.js";
-import { CollaborationManager, COMPACT_GUIDANCE } from "./manager.js";
+import { CollaborationManager, SECTION_DELEGATION_LIMITS } from "./manager.js";
+import { publishSchema } from "./publish-schema.js";
 import { createDshBackend, normalizeDshUsage } from "./dsh-adapter.js";
 import { registerHttp } from "./http.js";
 import { StreamUsageLifecycle } from "./stream-lifecycle.js";
+import { requestAccountingContext, requestTokenAdmission, withSharedCoordinatorAccounting } from "./accounting.js";
 import { loadRegistry } from "./load-registry.js";
 import { projectBridgeReport } from "./bridge-projection.js";
 import { computationSchema } from "./computation-schema.js";
@@ -23,6 +25,9 @@ import { connectSuperagent } from "./superagent-integration.js";
 import { InputDelivery } from "./input-delivery.js";
 import { concludeSubmitted } from "./turn-completion.js";
 import { readTaskEvidence } from "./evidence-page.js";
+import { statusView } from "./status-view.js";
+import { projectEvidenceRead } from "./evidence-reuse.js";
+import { issuedObservationRun, readToolObservation } from "./tool-observation.js";
 import { syncHostQuestions, installBlockingAttention } from './hud-host.js';
 import { createTaskReuseCsvExecutor } from './task-reuse-csv.js';
 import { csvWorkflowSchema, csvWorkflowToolDefinition, csvChildWorkflowSchema, csvChildWorkflowToolDefinition, createCsvWorkflowHandler } from './csv-workflow-tool.js';
@@ -48,6 +53,16 @@ export const Config = Schema.object({
   childPreset: Schema.string().default("standard"),
   bridgeProjection: Schema.boolean().default(true),
   explicitEvidenceRefs: Schema.boolean().default(false),
+  groupSectionResults: Schema.boolean().default(false),
+  allowPaidManagedChildren: Schema.boolean().default(false),
+  localChildModel: Schema.union([
+    Schema.object({
+      baseURL: Schema.string().required(),
+      model: Schema.string().required(),
+      apiKey: Schema.string(),
+    }),
+    Schema.const(null),
+  ]).default(null),
   protocolFile: Schema.string().default(""),
   encodingEvidenceFile: Schema.string().default(""),
   moneyPolicyFile: Schema.string().default(""),
@@ -79,6 +94,7 @@ export async function apply(ctx, rawConfig = {}) {
     maxOutputTokens: 4096,
     childPreset: "standard",
     bridgeProjection: true,
+    allowPaidManagedChildren: false,
     encodingEvidenceFile: "",
     minEvidenceSamples: 5,
     ...rawConfig,
@@ -116,12 +132,16 @@ export async function apply(ctx, rawConfig = {}) {
     qualityEvidence,
     minEvidenceSamples: config.minEvidenceSamples,
     explicitEvidenceRefs: config.explicitEvidenceRefs ?? false,
+    groupSectionResults: config.groupSectionResults ?? false,
+    allowPaidManagedChildren: config.allowPaidManagedChildren === true,
     moneyPolicy,
     csvExecutor,
     csvDefaultEnabled: config.csvDefaultEnabled,
     webCollaboration: config.webCollaboration,
   }); } catch (error) { store.close(); throw error; }
-  const backend = createDshBackend(ctx, manager, config);
+  let backend;
+  try { backend = createDshBackend(ctx, manager, config); }
+  catch (error) { store.close(); throw error; }
   manager.backend = backend;
   const localWorkspace = new LocalWorkspace({ manager, ctx });
   manager.localWorkspace = localWorkspace;
@@ -151,11 +171,14 @@ export async function apply(ctx, rawConfig = {}) {
     const bridge = manager.bridge;
     if (bridge) {
       const snapshot = bridge.snapshot();
-      if (snapshot.masterSessionId === agent.id)
+      if (snapshot.masterSessionId === agent.id) {
+        if (superagentIntegration?.bindCoordinator)
+          return superagentIntegration.bindCoordinator(agent.id) ?? manager.bindRoot(agent.id, { threadTitle });
         return manager.bindRoot(agent.id, {
           runId: `super-master-${agent.id}`,
           title: "Superagent orchestrator",
         });
+      }
       const row = snapshot.tickets.find((x) => x.workerSessionId === agent.id);
       if (row?.assignmentId)
         return manager.bindRoot(agent.id, {
@@ -174,6 +197,7 @@ export async function apply(ctx, rawConfig = {}) {
   const install = (agent) => {
     if (registrations.has(agent) || closed) return;
     const disposers = [];
+    if (manager.hasAssignedEvidence(agent.id)) agent.ctx.tools.restrict({ allow: [] });
     const register = (toolName, description, schema, execute) =>
       disposers.push(
         agent.ctx.tools.register(
@@ -198,46 +222,13 @@ export async function apply(ctx, rawConfig = {}) {
     register(
       "collab_status",
       TOOL_DESCRIPTIONS.collab_status,
-      z.object({}).strict(),
-      () => {
-        const native = manager.bridge?.snapshot();
-        if (native?.masterSessionId === agent.id)
-          return {
-            tickets: native.tickets.map((row) => ({
-              ticketId: row.ticket.id,
-              assignmentId: row.assignmentId,
-              ended: row.ticket.ended ?? null,
-              workItems: row.assignmentId
-                ? store
-                    .getWorkItems(`super-${row.ticket.id}-${row.assignmentId}`)
-                    .map((w) => ({ id: w.id, state: w.state }))
-                : [],
-            })),
-            scope: "native_ticket_assignments",
-            note: "Acceptance states are coordinator assessments, not independent factual verification.",
-          };
-        const view = manager.describeRun(ensureRun(agent).runId);
-        return {
-          runId: view.run.id,
-          agents: view.agents.map((a) => ({
-            id: a.id,
-            role: a.role,
-            state: a.state,
-          })),
-          workItems: view.workItems.map((w) => ({
-            id: w.id,
-            state: w.state,
-            dependsOn: w.dependsOn ?? [],
-          })),
-          requiredAssessments: view.workItems.filter(w=>w.state==='submitted').map(w=>({workItemId:w.id,eventId:w.resultEventId,action:'Inspect the result, then collab_accept with an explicit acceptance or rejection. Polling will not perform this assessment.'})),
-          usage: {
-            calls: view.usage.calls,
-            totalTokens: view.usage.totalTokens,
-            unknownCalls: view.usage.unknownCalls,
-          },
-          history: "Use collab_history for a specific step.",
-        };
-      },
+      z.object({
+        ticketId: z.string().min(1).max(100).optional()
+          .describe("Request the status of this specific authorized native ticket."),
+        ifRevision: z.string().regex(/^[a-f0-9]{24}$/u).optional()
+          .describe("Use a revision returned for the same scope only if you have the prior status. A matching revision can return unchanged. Omit this to read usage and full status."),
+      }).strict(),
+      (args) => statusView(manager, agent.id, ensureRun(agent).runId, args),
     );
     register(
       "collab_delegate",
@@ -257,6 +248,8 @@ export async function apply(ctx, rawConfig = {}) {
           dependsOn: z.array(z.string()).default([]).describe('These work items must be parent-accepted before this child starts. A reviewer needed to decide acceptance must instead read result inputRefs without that acceptance dependency.'),
           acceptance: z.array(z.string()).default([]),
           inputRefs: z.array(z.string()).default([]),
+          evidenceScope: z.enum(['run', 'assigned']).optional()
+            .describe('Use assigned for independent branches. Give each child only the explicit source artifact refs it needs and include the shared task rules in its objective.'),
           workItemId: z.string().optional(),
           retryOf: z.string().optional(),
           computation: computationSchema.optional(),
@@ -264,6 +257,42 @@ export async function apply(ctx, rawConfig = {}) {
         })
         .strict(),
       (args) => manager.delegate(agent, args),
+    );
+    const sectionLimits = SECTION_DELEGATION_LIMITS;
+    register(
+      "collab_delegate_sections",
+      "Apply a shared objective to independent Markdown sections. For exact structured row selection, provide a lookup so the host computes each result without a model. Otherwise use the configured local child model. Paid children require explicit host opt-in. Supply the current input handle and section IDs instead of pasting evidence.",
+      z.object({
+        input: z.string().regex(/^input:[a-f0-9]{16,64}$/u).describe("Current complete input handle from the section list."),
+        sections: z.array(z.string().min(1).max(sectionLimits.selector)).min(1).max(sectionLimits.sections)
+          .describe("Section IDs from the current list, such as s1 and s2, or unique exact titles."),
+        objective: z.string().min(1).max(sectionLimits.objective)
+          .describe(`One shared task for every section, up to ${sectionLimits.objective} characters.`),
+        rules: z.array(z.string().min(1).max(sectionLimits.rule)).max(sectionLimits.rules).default([])
+          .describe(`Up to ${sectionLimits.rules} shared requirements, each at most ${sectionLimits.rule} characters. Include exact match conditions or output fields once.`),
+        lookup: z.object({
+          filters: z.array(z.object({
+            field: z.string().min(1).max(96),
+            equals: z.string().max(256),
+          }).strict()).min(1).max(12).describe("Exact cell equality conditions, applied together."),
+          fields: z.array(z.object({
+            field: z.string().min(1).max(96),
+            as: z.string().min(1).max(96).optional(),
+            type: z.enum(["text", "integer"]),
+          }).strict()).min(1).max(24).describe("Result columns; use text for identifiers with leading zeros."),
+          sectionField: z.string().min(1).max(96).optional().describe("Result key for the exact section title when requested."),
+        }).strict().optional().describe("Select exactly one matching row in every section from tables sharing a header. Provide only when the user's rule fits this operation."),
+        retries: z.array(z.object({
+          section: z.string().min(1).max(sectionLimits.selector),
+          workItemId: z.string().min(1).max(100),
+        }).strict()).max(sectionLimits.sections).optional()
+          .describe("For failed or outdated section work, pair each affected current section with its old work item ID."),
+      }).strict(),
+      async (args, execution) => {
+        const result = await manager.delegateSections(agent, args, { signal: execution.signal });
+        if (result.waiting === true) execution.concludeTurn?.();
+        return result;
+      },
     );
     const childCsv = Boolean(manager.binding(agent.id)?.parentId);
     if (csvExecutor) register(
@@ -274,7 +303,7 @@ export async function apply(ctx, rawConfig = {}) {
     );
     register(
       "collab_delegate_task",
-      "Default child delegation for executing OR independently checking the currently requested result. Use reviewer for checking, implementer for file changes, researcher for extraction/analysis. Only the execution/checking portion is delegated; coordination and acceptance stay with the parent. All sources, corrections, constraints and output requirements are supplied by the host. No copied objective or acceptance checklist is needed. Use collab_delegate only for a distinct subset or different objective.",
+      "Delegate execution or independent verification of the current versioned task once. Choose reviewer for checking, implementer for changes, researcher for analysis. The host delivers the result automatically. Inspect and assess it, then report your verified result. Use retryOf only after failure or updated inputs, and collab_delegate only for a genuinely distinct subtask.",
       z.object({
         role: z.enum(["researcher", "reviewer", "implementer", "tester"]).default("researcher"),
         retryOf: z.string().optional(),
@@ -299,15 +328,7 @@ export async function apply(ctx, rawConfig = {}) {
         (config.explicitEvidenceRefs
           ? " parents contains existing eventId values only, never stepId, workItemId or artifact refs; omit if no causal event is needed."
           : ""),
-      z
-        .object({
-          stepId: z.string().min(1),
-          result: jsonValue,
-          final: z.boolean().default(false),
-          parents: z.array(z.string()).default([]),
-          receiptId: z.string().optional(),
-        })
-        .strict(),
+      publishSchema,
       (args, execution) => concludeSubmitted(manager.publish(agent.id, args), args.final, execution, !!manager.binding(agent.id)?.parentId),
     );
     register(
@@ -347,7 +368,7 @@ export async function apply(ctx, rawConfig = {}) {
         ensureRun(agent);
         const { runId, stepId } = historyScope(manager, agent.id, args);
         const { ticketId, assignmentId, stepId: unused, ...opts } = args;
-        return manager.inspect(runId, stepId, opts);
+        return manager.inspect(runId, stepId, opts, agent.id);
       },
     );
     register(
@@ -362,16 +383,29 @@ export async function apply(ctx, rawConfig = {}) {
           bytes: z.number().int().min(1).max(64000).default(8000),
           contains: z.string().trim().min(1).max(160).optional(),
           mode: z.enum(['auto', 'page']).default('auto'),
+          ifNoneMatch: z.string().regex(/^ev1:[a-f0-9]{64}$/).optional(),
+          jsonPointer: z.string().max(512).optional().describe('For obs: only. Select a JSON string field before paging or matching lines.'),
+          historical: z.literal(true).optional().describe('For a coordinator historical source hint only: read archived document text with its original ticketId and assignmentId. It is not current verification.'),
         })
         .strict(),
       (args, exec) => {
-        const { runId } = historyScope(manager, agent.id, args);
+        const observation = args.ref.startsWith("obs:");
+        const implicitRun = observation && !args.historical && args.ticketId === undefined && args.assignmentId === undefined
+          ? issuedObservationRun(manager, args.ref) : undefined;
+        const runId = implicitRun ?? historyScope(manager, agent.id, args).runId;
+        if (observation) {
+          const result = readToolObservation(manager, runId, agent.id, args);
+          return projectEvidenceRead(result, { runId, args, countTokens });
+        }
+        if (args.jsonPointer !== undefined) throw new Error("jsonPointer requires an obs: reference.");
+        if (args.historical !== undefined) throw new Error("historical requires an obs: reference.");
         if (manager.isWebAdviceArtifact(runId, args.ref)) markAdvisoryCall(agent.session, exec.callId);
+        let result;
         if (args.contains) {
           const meta = manager.readArtifact(runId, args.ref, { start: 0, end: 0 }, agent.id);
-          return readTaskEvidence(manager, runId, { label: args.ref, bytes: meta.totalBytes }, args, agent.id);
-        }
-        return readTaskEvidence(manager, runId, null, args, agent.id);
+          result = readTaskEvidence(manager, runId, { label: args.ref, bytes: meta.totalBytes }, args, agent.id);
+        } else result = readTaskEvidence(manager, runId, null, args, agent.id);
+        return projectEvidenceRead(result, { runId, args, countTokens });
       },
     );
     if (config.webCollaboration) register(
@@ -395,12 +429,28 @@ export async function apply(ctx, rawConfig = {}) {
       z
         .object({
           workItemId: z.string(),
-          accepted: z.boolean(),
-          reason: z.string().min(1),
+          accepted: z.boolean().describe('True only if the submitted result passes your checks. False if you found an error, even if the work finished.'),
+          reason: z.string().min(1).describe('State the checks performed or the specific error requiring correction.'),
           evidenceRefs: z.array(z.string()).default([]),
+          discard: z.boolean().default(false).describe('With accepted=false, set only to close an unused supplemental review after accepting the whole-task result. Do not use a discarded result as evidence.'),
         })
         .strict(),
       (args) => manager.accept(agent.id, args),
+    );
+    register(
+      "collab_accept_sections",
+      "Review each result from a delivered batch. Use its batchId and short section names (s1, s2) or each result's workItemId and eventId. Give each decision a reason.",
+      z.object({
+        batchId: z.string().min(1).max(100),
+        reviews: z.array(z.object({
+          section: z.string().max(sectionLimits.selector).regex(/^s[1-9]\d*$/u).optional(),
+          workItemId: z.string().min(1).max(100).optional(),
+          eventId: z.string().min(1).max(100).optional(),
+          accepted: z.boolean(),
+          reason: z.string().trim().min(1).max(400),
+        }).strict()).min(1).max(SECTION_DELEGATION_LIMITS.sections),
+      }).strict(),
+      (args) => manager.acceptSections(agent.id, args),
     );
     register(
       "collab_project_log",
@@ -419,8 +469,18 @@ export async function apply(ctx, rawConfig = {}) {
         name: "dsh-collab",
         order: 9998,
         interpolate: false,
-        text: () =>
-          `When collab_delegate_task is available, use it for the complete native user task; it binds full inputs without copying them. Use collab_delegate for a narrower subtask, collab_send for necessary messages, and collab_publish for recorded results. ${COMPACT_GUIDANCE}`,
+        text: () => {
+          if (manager.binding(agent.id)?.parentId) return '';
+          const instructions = [];
+          if (manager.isToolAvailable(agent.id, 'collab_delegate_task')) {
+            instructions.push('Use collab_delegate_task once when a complete native task needs independent verification.');
+          }
+          if (manager.isToolAvailable(agent.id, 'collab_delegate')) {
+            instructions.push('For independent branches, use only the needed source refs with evidenceScope=assigned. Wait for delivery and assess results before delegating again.');
+          }
+          if (manager.isToolAvailable(agent.id, 'collab_publish')) instructions.push(manager.compactGuidance(agent.id));
+          return instructions.join(' ');
+        },
       }),
     );
     disposers.push(
@@ -477,8 +537,11 @@ export async function apply(ctx, rawConfig = {}) {
     if (storeClosed) return;
     inputDelivery.observe(session, event);
     backend.observeMessage(session, event);
-    toolIndex.observe(session, event);
     const binding = manager.binding(session.id);
+    manager.observeCoordinatorTurn(session.id, event);
+    const inputVersion = event.type === "tool/call" && binding && !binding.parentId && manager.nativeInputs.current(binding.runId)?.version;
+    toolIndex.observe(session, event, inputVersion && inputDelivery.hasCurrent(session, binding.runId, inputVersion)
+      ? { runId: binding.runId, inputVersion } : undefined);
     if (!binding) return;
     manager.hud.observe(binding,event);
     syncHostQuestions(ctx,manager.hud,binding,session,Number.isFinite(event.time)?new Date(event.time).toISOString():undefined,event);
@@ -497,6 +560,18 @@ export async function apply(ctx, rawConfig = {}) {
     }
   });
   ctx.on("llm/stream", (options, next) => {
+    const child = options.sessionId && manager.binding(options.sessionId);
+    if (child?.parentId) {
+      const item = store.getWorkItems(child.runId).find(work =>
+        work.id === child.workItemId && work.attemptId === child.attemptId);
+      const hostOnly = item?.executionKind === "host-section-lookup" || Boolean(item?.csvWorkflow);
+      const requiresLocal = item?.executionKind === "free-local-model" || config.allowPaidManagedChildren !== true;
+      if (!item || hostOnly || (requiresLocal && !backend.isFreeRoute(options.provider, options.model))) {
+        throw Object.assign(new Error("This managed work item cannot use the selected model. Use its configured local execution path or an explicitly approved paid plan."), {
+          code: "PAID_CHILD_MODEL_DISABLED",
+        });
+      }
+    }
     localWorkspace.admit(options);
     return (async function* () {
       if (closed) {
@@ -514,7 +589,14 @@ export async function apply(ctx, rawConfig = {}) {
         return;
       }
       const callId = `call-${randomUUID()}`;
+      const run = store.getRun(binding.runId);
+      const masterId = manager.bridge?.snapshot().masterSessionId;
+      const accountingContext = requestAccountingContext(options, binding, run, config.maxOutputTokens, masterId);
+      const tokenAdmission = requestTokenAdmission(options, agent?.session, binding, run, masterId,
+        session => manager.coordinatorBoundaries.get(session.id) ?? ctx.agents.turnBoundaryOf?.(session), store);
       const attribution = {
+        ...accountingContext,
+        tokenAdmission,
         agentId: options.sessionId, attemptId: binding.attemptId ?? "root",
         workItemId: binding.workItemId ?? "root", parentAgentId: binding.parentId ?? null,
         role: binding.role ?? "unknown", provider: options.provider, model: options.model,
@@ -534,11 +616,14 @@ export async function apply(ctx, rawConfig = {}) {
           })),
           tools: options.tools ?? [],
           purpose: options.purpose ?? "agent",
+          requestLimits: accountingContext.requestLimits,
         }),
       );
-      const estimate =
-        countTokens(JSON.stringify(manifest)) +
-        (options.maxTokens ?? config.maxOutputTokens);
+      // Accounting metadata is not sent to the model and must not inflate its input estimate.
+      const { requestLimits: _limits, ...estimatedManifest } = manifest;
+      const estimatedInputTokens = countTokens(JSON.stringify(estimatedManifest));
+      const reservationMaxOutputTokens = accountingContext.requestLimits.reservationMaxOutputTokens;
+      const estimate = estimatedInputTokens + reservationMaxOutputTokens;
       const calls = agent && advisoryCalls.get(agent.session);
       let redactedAdvisory = false;
       if (calls?.size) for (const message of manifest.messages) {
@@ -553,57 +638,66 @@ export async function apply(ctx, rawConfig = {}) {
           }
         }
       }
-      manager.reserveCall(options.sessionId, callId, estimate, {
-        provider: options.provider, model: options.model,
-        estimatedInputTokens: estimate - (options.maxTokens ?? config.maxOutputTokens),
-        maxOutputTokens: options.maxTokens ?? config.maxOutputTokens,
-      });
       const artifact = store.putArtifact(JSON.stringify(manifest), {
         mediaType: "application/json",
       });
-      store.recordRequest({
-        ...attribution,
-        callId,
-        runId: binding.runId,
-        agentId: options.sessionId,
-        attemptId: binding.attemptId ?? "root",
-        artifactRef: artifact.id,
-        estimate,
-        counter: manager.counterName,
-        observableScope: redactedAdvisory ? "host-visible-request-minus-reasoning-and-web-advice" : "host-visible-request-minus-reasoning",
-      });
-      store.appendEvent({
-        runId: binding.runId,
-        stepId: binding.workItemId ?? "model-calls",
-        attemptId: binding.attemptId ?? "root",
-        kind: "model_request",
-        payload: {
+      manager.reserveCall(options.sessionId, callId, estimate, {
+        provider: options.provider, model: options.model,
+        estimatedInputTokens,
+        maxOutputTokens: reservationMaxOutputTokens,
+      }, tokenAdmission);
+      let stream;
+      try {
+        store.recordRequest({
+          ...attribution,
           callId,
-          actorId: options.sessionId,
+          runId: binding.runId,
+          agentId: options.sessionId,
+          attemptId: binding.attemptId ?? "root",
           artifactRef: artifact.id,
-        },
-      });
-      for (const m of options.messages)
-        if (m.id?.startsWith("dsh-collab:")) {
-          const id = m.id.slice("dsh-collab:".length);
-          const message = store.getMessage(id);
-          if (message && message.status !== "included_in_request")
-            store.markDelivery(id, "included_in_request", { callId });
-        }
-      const stream = streams.begin({
-        ...attribution,
-        callId,
-        runId: binding.runId,
-        agentId: options.sessionId,
-        attemptId: binding.attemptId ?? "root",
-        provider: options.provider,
-        model: options.model,
-        purpose: options.purpose ?? "agent",
-        measurement:
-          options.provider === "collab-test"
-            ? "synthetic_fixture"
-            : "provider_reported",
-      });
+          estimate,
+          counter: manager.counterName,
+          observableScope: redactedAdvisory ? "host-visible-request-minus-reasoning-and-web-advice" : "host-visible-request-minus-reasoning",
+        });
+        store.appendEvent({
+          runId: binding.runId,
+          stepId: binding.workItemId ?? "model-calls",
+          attemptId: binding.attemptId ?? "root",
+          kind: "model_request",
+          payload: {
+            callId,
+            actorId: options.sessionId,
+            artifactRef: artifact.id,
+          },
+        });
+        for (const m of options.messages)
+          if (m.id?.startsWith("dsh-collab:")) {
+            const id = m.id.slice("dsh-collab:".length);
+            const message = store.getMessage(id);
+            if (message && message.status !== "included_in_request")
+              store.markDelivery(id, "included_in_request", { callId });
+          }
+        stream = streams.begin({
+          ...attribution,
+          callId,
+          runId: binding.runId,
+          agentId: options.sessionId,
+          attemptId: binding.attemptId ?? "root",
+          provider: options.provider,
+          model: options.model,
+          purpose: options.purpose ?? "agent",
+          measurement:
+            options.provider === "collab-test"
+              ? "synthetic_fixture"
+              : "provider_reported",
+        });
+        if (!stream) throw new Error("Collaboration plugin is draining");
+      } catch (error) {
+        // next() has not run. Keep retries and monetary reconciliation tied to this call only.
+        try { manager.cancelBeforeDispatch(callId, attribution); }
+        catch (auditError) { manager.lastError = String(auditError); }
+        throw error;
+      }
       try {
         for await (const chunk of next()) {
           stream.observe(chunk);
@@ -681,7 +775,7 @@ export async function apply(ctx, rawConfig = {}) {
       manager.attachBridge(null);
     });
   });
-  const disposeHttp = registerHttp(ctx, manager);
+  const disposeHttp = registerHttp(ctx, withSharedCoordinatorAccounting(manager, store));
   ctx.effect(() => async () => {
     closed = true;
     disposeHttp();

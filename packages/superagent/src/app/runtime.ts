@@ -1,6 +1,7 @@
 /** Application composition root and lifecycle manager for dsh-superagent. */
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-session-persistence'
@@ -11,7 +12,7 @@ import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
 import { allowedSender, settingsPolicy } from '../policy.ts'
@@ -20,7 +21,7 @@ import { Commands } from '../infra/commands.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
 import type { SetupProblem } from '../setup.ts'
-import { DshExecutor, sourceTrigger, triggerMessage, workerSessionId } from '../executor/dsh.ts'
+import { DshExecutor, sourceTrigger, ticketOfSession, triggerMessage, workerSessionId } from '../executor/dsh.ts'
 import { ticketCard } from './cards.ts'
 import { MasterAssessor } from './assessment.ts'
 import { KV } from '../kv.ts'
@@ -37,6 +38,7 @@ import { pullEndNotices } from '../sources/github-pull.ts'
 import { HealthBoard } from '../infra/health.ts'
 import { Outbox } from './outbox.ts'
 import { Passes } from './passes.ts'
+import { installReviewRecovery } from './review-recovery.ts'
 import { Setup } from './setup.ts'
 import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
@@ -47,11 +49,38 @@ import type { ResourceHost } from './resources.ts'
 import { mainTools, type MainToolsHost } from './tools/main.ts'
 import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
 import { CollabBridge } from './collab-bridge.ts'
-import { installLocalSource, localTrigger, WEB_CONSULTATION_PROTOCOL } from './local-tasks.ts'
+import { artifactRecovery } from './artifact-recovery.ts'
+import { downloadLocalArtifact, localArtifactDownloadView } from './local-artifact-download.ts'
+import { installLocalSource, localAppendTrigger, localTaskSubmission, LocalTaskConflict, queueLocalWorkspaceFiles,
+  stageLocalWorkspaceFiles, WEB_CONSULTATION_PROTOCOL } from './local-tasks.ts'
 
 // Source plugins interact with dsh-superagent exclusively through the `SourceHost` service interface.
 declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceHost } }
 const now = (): string => new Date().toISOString()
+const artifactWorkerMaxOutputTokens = 8192
+const localCoordinatorMaxOutputTokens = 16384
+
+function limitOutputTokens(config: LlmCallConfig, ceiling: number): LlmCallConfig {
+  const maxTokens = Math.min(config.maxTokens ?? ceiling, ceiling)
+  return config.maxTokens === maxTokens ? config : { ...config, maxTokens }
+}
+
+/** Bound native coordinator and scoped worker output before Harness prepares and reserves the provider call. */
+export function localArtifactRequestOptions(host: Pick<Runtime, 'store' | 'masterId' | 'collabBridge' | 'machine'>,
+  agent: Pick<Agent, 'id' | 'session'>, config: LlmCallConfig): LlmCallConfig {
+  const cwd = agent.session.header.cwd
+  if (!host.machine.localOnly || agent.session.id !== agent.id || typeof cwd !== 'string') return config
+  if (agent.id === host.masterId) {
+    return relative(host.machine.stateDir, cwd) ? config : limitOutputTokens(config, localCoordinatorMaxOutputTokens)
+  }
+  const ticketId = ticketOfSession(agent.id)
+  if (!ticketId) return config
+  const ticket = host.store.tickets.get(ticketId)
+  if (!ticket || ticket.ended || ticket.assignments.at(-1)?.state !== 'running') return config
+  const scope = host.collabBridge.localArtifactWorkspace(ticketId)
+  if (!scope || relative(scope.directory, cwd)) return config
+  return limitOutputTokens(config, artifactWorkerMaxOutputTokens)
+}
 
 /**
  * Composition root of dsh-superagent that connects `Store`, `Setup`, `Engine`, `SourceRegistry`, `Effects`, `Outbox`, `Passes`, `Sessions`, `Settings`, `Prompts`, `DshExecutor`, and `MasterAssessor`.
@@ -119,11 +148,13 @@ export class Runtime extends Service implements SourceHost {
       const links: LinkHost = { store, links: this.sourceLinks, commands, sources, lifetime: this.lifetime }
       const link = (trigger: Trigger, signal?: AbortSignal) => sourceLink(links, trigger, signal)
       const environment = (ticket: Ticket) => this.ticketEnvironment(ticket)
+      const readySubmissionHint = (ticketId: string) => this.collabBridge.readySubmissionHint(ticketId)
       const resources: ResourceHost = { store, pages: new TextCache(4_000_000), prompts, commands, masterId, context: ctx,
         promptVersion: id => this.sessions.promptVersion(id), mayRead: (id, revision) => this.sessions.mayRead(id, revision),
-        feishuPageSize: () => feishuSettings(sources).readPageSize, sourceLink: link }
+        feishuPageSize: () => feishuSettings(sources).readPageSize, sourceLink: link, readySubmissionHint }
       const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'), masterId,
         localOnly: machine.localOnly ?? false, beforeRequest: id => this.collabBridge.prepareWorker(id),
+        sentOriginalAcknowledgement: (ticketId, assignmentId) => this.collabBridge.sentOriginalAcknowledgement(ticketId, assignmentId),
         lifetime: this.lifetime,
         closing: () => this.closing(), environment,
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
@@ -132,9 +163,22 @@ export class Runtime extends Service implements SourceHost {
         sourceHost: this, setup, requestPass: () => { this.passes.request() } })
       this.executor = new DshExecutor({ context: ctx, get engine() { return runtime.engine }, store, effects, health: board.claim('worker'), machine,
         lifetime: this.lifetime, sessions, closing: () => this.closing(), paused: () => this.paused(), environment, sourceLink: link,
+        awaitingSectionBatch: (ticket, sessionId) => this.collabBridge.isAwaitingSectionBatch(ticket, sessionId),
+        ...(machine.localOnly ? {
+          stageWorkspace: (trigger, ticketId, directory) => stageLocalWorkspaceFiles(store, trigger, ticketId, directory),
+          readySubmissionHint,
+          recordIdleStatus: (ticket, assignmentId, endSeq) => this.collabBridge.recordIdleStatus(ticket, assignmentId, endSeq),
+          recoverReviewFeedback: (ticketId: string, assignmentId: string, inputId: string) =>
+            this.collabBridge.recoverReviewFeedback(ticketId, assignmentId, inputId),
+          discardSupersededReminder: (ticketId: string, assignmentId: string, inputId: string, reportId: string) =>
+            this.collabBridge.discardSupersededReminder(ticketId, assignmentId, inputId, reportId),
+          recoverDraftSubmission: (ticketId, assignmentId, draft) => this.collabBridge.recoverDraftSubmission(ticketId, assignmentId, draft),
+          discardSupersededSubmission: (ticketId, assignmentId, inputId) => this.collabBridge.discardSupersededSubmission(ticketId, assignmentId, inputId),
+        } : {}),
         repliedTo: trigger => repliedTo({ store, sources }, trigger) })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
-        settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
+        localOnly: machine.localOnly ?? false, settings: () => store.settings(), paused: () => this.paused(),
+        threadContext: trigger => sources.threadContext(trigger),
         deliver: (id, text) => sessions.prompt(masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
       const outbox = this.outbox = new Outbox({ store, effects, sources, commands, paused: () => this.paused() })
       const { assessor, executor } = this
@@ -161,7 +205,22 @@ export class Runtime extends Service implements SourceHost {
       // Update the `evals` health entry on every pass if an evaluation failed as unavailable within the last hour.
       const evals = board.claim('evals', { state: 'ready', detail: 'No unavailable Eval in the last hour' })
       const evaluateDue = () => { engine.evaluateDue(); evals.set(evalsHealth(store)) }
-      this.collabBridge = new CollabBridge(ctx, { store, engine, sessions, masterId, requireCollaboration: machine.requireCollaboration ?? false })
+      this.collabBridge = new CollabBridge(ctx, { store, engine, sessions, masterId, requireCollaboration: machine.requireCollaboration ?? false,
+        ...(machine.localOnly ? { workerHistory: (id: string) => ctx.agents.get(id as SessionId)?.session.snapshotEvents() } : {}) })
+      if (machine.localOnly) this.disposers.push(
+        ctx.on('agent/request', async ({ agent }, next) => localArtifactRequestOptions(this, agent, await next()), { prepend: true }),
+        ctx.on('agent/pre-step', async ({ agent }, next) => {
+          const decision = await next()
+          if (decision.kind !== 'enter' || !agent.id.startsWith('worker-')) return decision
+          const guidance = this.collabBridge.checkedEditGuidance(agent.id, agent.session.snapshotEvents(), decision.messages)
+          return guidance ? { ...decision, messages: [...decision.messages, guidance] } : decision
+        }, { prepend: true }),
+        ctx.on('llm/stream', (options, next) => {
+          // The Harness has committed this step's inbox by stream dispatch, including a first reminder request.
+          if (options.sessionId) this.collabBridge.assertReminderRoute(options.sessionId, options.provider, options.model)
+          return next()
+        }),
+      )
       const passes = this.passes = new Passes({ engine: { receive: trigger => engine.receive(trigger), evaluateDue }, effects,
         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing() })
       this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
@@ -205,14 +264,46 @@ export class Runtime extends Service implements SourceHost {
   }
   submitLocal(input: unknown) {
     if (!this.machine.localOnly || !this.configured() || this.closing()) throw new Error('Local task mode unavailable')
-    const trigger = localTrigger(input, this.store, this.machine.webCollaboration === true)
-    const prior = this.store.triggers.get(trigger.id)
-    if (!prior) this.receive(trigger)
-    return { triggerId: trigger.id, reused: !!prior }
+    const { trigger, reused, workspaceFiles } = localTaskSubmission(input, this.store, this.machine.webCollaboration === true)
+    const result = { triggerId: trigger.id, reused }
+    if (reused) return result
+    if (!workspaceFiles) {
+      this.receive(trigger)
+      return result
+    }
+    return this.store.atomic(() => {
+      if (this.engine.receive(trigger) !== 'stored') throw new LocalTaskConflict('The file task was refused by source policy')
+      queueLocalWorkspaceFiles(this.store, trigger.id, workspaceFiles)
+      this.store.afterCommit(() => this.passes.request())
+      return result
+    })
+  }
+  appendLocal(ticketId: string, input: unknown) {
+    if (!this.machine.localOnly || !this.configured() || this.closing()) throw new Error('Local task mode unavailable')
+    const appended = this.store.atomic(() => {
+      const trigger = localAppendTrigger(ticketId, input, this.store,
+        (ticket, replyId) => this.collabBridge.isCurrentIssuedLocalReply(ticket, replyId))
+      const prior = this.store.triggers.get(trigger.id)
+      if (prior && this.store.triggers.disposition(prior.id)?.filtered ||
+          !prior && this.engine.receive(trigger) !== 'stored') return
+      return { triggerId: trigger.id, reused: !!prior }
+    })
+    if (!appended) throw new LocalTaskConflict('Local follow-up was refused by source policy')
+    if (!appended.reused) this.passes.request()
+    return appended
   }
   localTasks() {
     if (!this.machine.localOnly) throw new Error('Local task mode unavailable')
-    return { masterSessionId: this.masterId, tickets: this.collabBridge.snapshot().tickets,
+    const tickets = this.collabBridge.snapshot().tickets.map(row => {
+      const artifact = localArtifactDownloadView(this.collabBridge, row.ticket.id)
+      const issuedReplyId = artifact ? artifact.issuedReplyId : this.collabBridge.currentIssuedLocalReplyId(row.ticket)
+      const projected = issuedReplyId ? { ...row, issuedReplyId } : row
+      if (!artifact) return projected
+      const recovery = artifactRecovery(row.ticket)
+      return { ...projected, artifactWorkspace: artifact.artifactWorkspace,
+        ...(recovery ? { artifactRecovery: recovery } : {}) }
+    })
+    return { masterSessionId: this.masterId, tickets,
       ...(this.machine.webCollaboration === true ? { webConsultationProtocol: WEB_CONSULTATION_PROTOCOL } : {}),
       replies: this.store.db.prepare('SELECT value FROM collab_local_replies ORDER BY rowid DESC LIMIT 100').all().map(row => {
         const reply=JSON.parse(String(row.value)) as {id:string};return {...reply,status:this.store.replyStatus(reply.id)??'unknown'}
@@ -233,6 +324,10 @@ export class Runtime extends Service implements SourceHost {
     }
     this.sessions.install()
     this.executor.install()
+    if (this.machine.localOnly) this.disposers.push(installReviewRecovery(this.ctx, {
+      masterId: this.masterId, store: this.store, bridge: this.collabBridge, effects: this.effects, sessions: this.sessions,
+      closing: () => this.closing(), paused: () => this.paused(),
+    }))
     await this.sessions.ensure(this.masterId, this.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
     for (const id of this.settings.syncable()) await this.settings.sync(id).catch(() => { /* sync() records its failure in health. */ })
     // If stop() was called while awaiting setup, session creation, or policy sync, do not start background loops.
@@ -246,7 +341,8 @@ export class Runtime extends Service implements SourceHost {
     const runtime = this
     const { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks, setup, passes } = this
     return { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks,
-      submitLocal: input => this.submitLocal(input), localTasks: () => this.localTasks(),
+      submitLocal: input => this.submitLocal(input), appendLocal: (id, input) => this.appendLocal(id, input), localTasks: () => this.localTasks(),
+      downloadLocalArtifact: (id, path, allowDraft, sha256) => downloadLocalArtifact(this.collabBridge, id, path, allowDraft, sha256),
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),

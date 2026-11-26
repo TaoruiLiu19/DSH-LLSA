@@ -28,4 +28,5 @@ export async function apply(ctx: Context, config: DeploymentConfig): Promise<voi
 export type { Deployment, DeploymentConfig } from './deployment.ts'
 export * from './core/index.ts'
 export type { CollabBridge, CollabReportEvent, CollabProjectionInput, CollabProjector, CollabCommand, CollabOperator, CollabLifecycle } from './app/collab-bridge.ts'
+export type { ReadyReviewEvidenceScope, ReadyReviewEvidenceProjector, VerifiedReadyArtifact } from './app/collab-bridge.ts'
 export { readSessionEvents } from './app/session-events.ts'

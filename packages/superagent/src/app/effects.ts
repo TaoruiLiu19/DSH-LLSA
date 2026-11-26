@@ -17,6 +17,8 @@ export interface EffectPayloads {
   delivery: { ticketId: string }
   /** Steer a report or a candidate into the main Session; the key is the request ID. */
   relay: { text: string }
+  /** Retry one interrupted review of the same immutable local ready report. */
+  reviewRecovery: { ticketId: string; reportId: string; attempt: number; afterTurn?: number }
   /** Inject a notice into the main Session without waking it; the key names what it reports, such as `prompts`. */
   notice: { value: Record<string, unknown>; summary: string }
   /** Send a message for a Channel through its Source; the key is the message ID, whose receipt the Outbox keeps. */
@@ -58,10 +60,10 @@ export class Effects {
     this.seq = Number(store.db.prepare('SELECT IFNULL(MAX(seq), 0) AS seq FROM effect').get()?.seq ?? 0)
   }
   /** Upserts an effect in the caller's transaction, coalescing with any waiting row of the same kind and key while keeping its queue position. */
-  enqueue<K extends EffectKind>(kind: K, key: string, payload: EffectPayloads[K]): void {
+  enqueue<K extends EffectKind>(kind: K, key: string, payload: EffectPayloads[K], delayMs = 0): void {
     this.store.db.prepare(`INSERT INTO effect (kind, key, value, seq, due, since) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(kind, key) DO UPDATE
       SET value = excluded.value, generation = generation + 1, attempts = 0, error = '', due = excluded.due`)
-      .run(kind, key, JSON.stringify(payload), ++this.seq, this.now(), new Date(this.now()).toISOString())
+      .run(kind, key, JSON.stringify(payload), ++this.seq, this.now() + delayMs, new Date(this.now()).toISOString())
     this.kick()
   }
   handle<K extends EffectKind>(kind: K, run: Handler<K>['run'], options: Options<K> = {}): void {

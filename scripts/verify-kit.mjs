@@ -55,6 +55,6 @@ const sampleSummary = await readFile(join(csvStage, csvResult.output_ref), 'utf8
 assert.equal(sampleSummary.replaceAll('\r\n', '\n'), '地区,count\n北区,14\n南区,14\n');
 run(process.execPath, [join(root, 'scripts/check-versions.mjs'), kit]);
 run(process.execPath, [npm, 'ls', '@deepseek-ai/cordis', '@deepseek-ai/schemastery', '--depth=0']);
-await smoke(kit, 'node_modules/@dsh-llsa/launcher/lib/start.js');
+await smoke(kit, 'node_modules/@dsh-llsa/launcher/lib/start.js', { delivery: true });
 await smoke(kit, 'node_modules/@dsh-llsa/launcher/lib/start.js', { csvWorkspace: 'examples/csv-workflow', webCollab: true });
-console.log('PASS: clean install kit and startup with optional CSV and Web Collab disabled and enabled');
+console.log('PASS: clean install kit, verified local delivery and startup with optional CSV and Web Collab disabled and enabled');

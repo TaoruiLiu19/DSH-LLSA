@@ -149,6 +149,7 @@ test('an existing manager child follows the run switch and finishes admitted CSV
   });
   const manager = new CollaborationManager({
     store,
+    allowPaidManagedChildren: true,
     backend: {
       async start(request) {
         starts.push(request);

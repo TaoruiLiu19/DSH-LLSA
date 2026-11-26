@@ -1,4 +1,4 @@
-Persist a public step or final result.
-For a computation task supply the collab_compute receiptId and its exact result fields; a mismatch is retained as a failed claim and is not submitted.
-Only contracted fields receive host verification.
-After final submission finish briefly.
+Record a public result. Native Superagent ticket workers use final=false only for requested checkpoints or distinct evidence; orchestrator_report is their formal delivery channel. If a check failed, preserve its result, fix the work and rerun the relevant check before delivery.
+Managed children publish their complete result with final=true; the host delivers it and ends the child turn. Standalone sessions may also publish a final result. These final semantics do not apply to native ticket workers.
+Use final=false for a requested checkpoint or a distinct result needed as evidence. Record its actual value and omit routine progress.
+For a computation task supply the collab_compute receiptId and its exact result fields. A mismatch is recorded and withheld. Only contracted fields receive host verification.

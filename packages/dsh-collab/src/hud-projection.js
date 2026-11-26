@@ -1,7 +1,11 @@
 import { hudLabel } from './hud-label.js';
 /** Server-owned HUD projection. Internal correlation keys never enter the public snapshot. */
-export const HUD_ALIAS_VERSION = 3;
-const toolAliasVersion = new Map([['collab_csv_workflow', 2], ['collab_consult_web', HUD_ALIAS_VERSION]]);
+export const HUD_ALIAS_VERSION = 6;
+const toolAliasVersion = new Map([
+  ['collab_csv_workflow', 2], ['collab_consult_web', 3], ['collab_delegate_sections', 4],
+  ['collab_accept_sections', 5], ['artifact_check', HUD_ALIAS_VERSION], ['artifact_list', HUD_ALIAS_VERSION],
+  ['artifact_read', HUD_ALIAS_VERSION], ['artifact_write', HUD_ALIAS_VERSION],
+]);
 const states = new Set(['idle','running','waiting-human','done','failed']);
 const safeTool = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value) ? value : null;
 export function emptyHud() { return { seq:0, agents:{}, events:[] }; }

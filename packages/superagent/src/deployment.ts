@@ -17,6 +17,8 @@ const absolute = (description: string) => s.transform(s.string(), value => {
 /** Plugin configuration of the dsh-superagent entry. Volatile fields apply without a restart because dsh-superagent reads them on each use; changing `stateDir` remounts the plugin. */
 export const Config = s.object({
   localOnly: s.boolean().default(false).description('Local pasted-content tasks only; no GitHub/Feishu setup, external channels or shell/file tools.'),
+  inlineLocalWorkerNotices: s.boolean().default(false)
+    .description('Deliver small authenticated local owner requests in full to their native worker when localOnly is enabled.'),
   webCollaboration: s.boolean().default(false).description('Allow per-task opt-in to the separately enabled web collaboration plugin.'),
   requireCollaboration: s.boolean().default(false).description('Refuse worker model requests until the collaboration lifecycle adapter is attached.'),
   stateDir: absolute('Directory for the database, locks, worker shims, the agent\'s git configuration and, by default, the ticket directories.').required(),
@@ -30,6 +32,7 @@ export const Config = s.object({
 export type DeploymentConfig = ReturnType<typeof Config>
 export interface Machine {
   localOnly?: boolean
+  inlineLocalWorkerNotices?: boolean
   webCollaboration?: boolean
   requireCollaboration?: boolean
   stateDir: string
@@ -49,6 +52,7 @@ export function machineOf(config: DeploymentConfig): Machine {
   if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; supported keys: ${Object.keys(Config.dict ?? {}).join(', ')}`)
   const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs } = config
   return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, localOnly: config.localOnly,
+    inlineLocalWorkerNotices: config.inlineLocalWorkerNotices,
     webCollaboration: config.webCollaboration, requireCollaboration: config.requireCollaboration }
 }
 

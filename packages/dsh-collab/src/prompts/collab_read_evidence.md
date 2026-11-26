@@ -1,4 +1,4 @@
-Read a bounded immutable artifact.
-Use contains to look up specific text without loading the complete source. If more=true, pass nextStart as start with the same query. Clipped lines and partial matches are not complete evidence. Omit contains to read original pages (mode=page); do not delegate merely to read a file.
-Use an existing input: handle or sha256: artifact reference. Native trigger/ and ticket/ resource paths belong to orchestrator_read, not this tool.
-Native coordinators may specify ticketId and assignmentId; other sessions remain confined to their own run.
+Read a bounded page of immutable evidence. Reuse pages already in context. Use nextStart as start for the next page. null means the read has reached the end.
+Use contains for matching text and keep that query when following nextStart. Clipped lines and partial matches omit context. Omit contains to read original pages.
+Use a supplied evidence handle or artifact reference. An obs: reference reads the original tool output at that step. Use orchestrator_read for trigger/ and ticket/ paths. Native coordinators may select a ticketId and assignmentId.
+Reuse a full result still in context by passing its etag as ifNoneMatch; notModified omits unchanged content. Omit ifNoneMatch after context loss or to reread the original. Tags check content equality, not factual correctness.

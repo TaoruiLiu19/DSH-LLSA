@@ -57,7 +57,7 @@ function fixture(t, execute = async () => {}) {
     return { output, receipt };
   };
   let store = new CollaborationStore({ stateDir });
-  let manager = new CollaborationManager({ store, backend, csvExecutor });
+  let manager = new CollaborationManager({ store, backend, allowPaidManagedChildren: true, csvExecutor });
   manager.bindRoot(root.id, { runId, ticketId: 'switch-ticket', assignmentId: 'switch-assignment' });
   t.after(async () => {
     await manager.close();
@@ -89,7 +89,7 @@ function fixture(t, execute = async () => {}) {
       await manager.close();
       store.close();
       store = new CollaborationStore({ stateDir });
-      manager = new CollaborationManager({ store, backend, csvExecutor });
+      manager = new CollaborationManager({ store, backend, allowPaidManagedChildren: true, csvExecutor });
       return manager;
     },
   };

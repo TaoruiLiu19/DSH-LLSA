@@ -63,6 +63,16 @@ npm start
 
 默认地址为 `127.0.0.1:3095`。先打开认证链接，再进入任务页面。首次安装需要联网，请保留默认安装脚本，不要添加 `--ignore-scripts`。
 
+### 交付文件
+
+1. 在本机任务页选择 **文件交付**，写清任务要求和验收条件。需要新建文件时，填写 `index.html, styles.css` 等工作区相对路径。
+2. 添加已有 UTF-8 文件。文件默认作为只读资料。要修订某个文件时，勾选 **作为可修改文件**。可以给每个文件填写相对路径，例如 `docs/说明.md`。单次最多添加 12 个文件，单个最多 180 KiB，合计最多 512 KiB。
+3. 在 **工单与成品** 查看进度、下载文件，或追加要求。验收通过的版本标为 **已交付**。已经写到本机的工作文件可以 **下载草稿**。追加要求沿用同一工作区和文件范围。
+
+执行到达预算上限时，工单会显示原因并保留已写文件。点击 **从已保存文件继续** 会在同一工作区启动新的执行轮次，使用所配置模型的额度，后续仍需主 Agent 验收。只想取走当前文件时，可直接下载草稿。
+
+协调者验收时复核文件大小和 SHA-256，功能要求按任务证据判断。通过本机任务 API，可用 `artifactFiles` 声明输出，`artifactInputs` 声明只读路径，`workspaceFiles: [{path, text}]` 提供这些路径的初始内容。输出路径和只读路径各可声明最多 12 项。文件工单使用文本回复。
+
 <details>
 <summary><strong>从 GitHub Releases 下载组合包</strong></summary>
 
@@ -292,7 +302,7 @@ DSH_LLSA_STATE="$HOME/dsh-llsa-data" npm start
 - 原有完整任务快照保留兼容字段，新增 `hud`，以及与其一致的顶层 `v`、`seq`、`now`。浮窗应使用 `view=hud`，不要读取原始 `events` 或自行推导状态。
 - `agents` 提供稳定 ID、父子关系、工单、五态、状态起始时间、静默标记和最小活动事件。`label` 是最多 12 个 Unicode 字符的短名：任务标题优先，其次会话标题；移除路径、URL、邮箱、纯数字 ID、代码与换行，过滤后为空则使用角色或“智能体”。原生 Assignment 无独立标题字段，适配器取关联任务的 `execution.name` / `ticket.title`；托管子任务使用分配时的 objective。每次 assignment 的短名持久化固定，变更经带 `label` 的 `agent.register` 发布。父节点可能属于另一个工单快照，不能据此猜测其活动状态。
 - `seq` 在每个 run 内单调递增，重启不清零；客户端按 `(runId, seq)` 维护游标，跨 run 不可比较。轮询时间与 `stalled` 变化不会增加序号。`stalledAfterMs` 默认为 20000；只有 `running` 可以静默。`stalled` 由服务端计算，客户端只展示服务端值，不自行判断失败或静默。
-- `tool` 保留原生工具 ID。快照按可见工具活动选择 `aliasVersion`。普通活动用 1，CSV 工具用 2，涉及 `collab_consult_web` 时用 3。HUD 快照的 `v` 仍为 1。旧映射保留，自定义名称或第三方工具可落“其它”。[别名表 v1](contracts/tool-aliases-v1.json) · [v2](contracts/tool-aliases-v2.json) · [v3](contracts/tool-aliases-v3.json)
+- `tool` 保留原生工具 ID。快照按可见工具活动选择 `aliasVersion`。普通活动用 1，CSV 工具用 2，网页协作用 3，批量章节分派用 4，批量章节验收用 5，工作区文件工具用 6。HUD 快照的 `v` 仍为 1。旧映射保留，自定义名称或第三方工具可落“其它”。[别名表 v1](contracts/tool-aliases-v1.json) · [v2](contracts/tool-aliases-v2.json) · [v3](contracts/tool-aliases-v3.json) · [v4](contracts/tool-aliases-v4.json) · [v5](contracts/tool-aliases-v5.json) · [v6](contracts/tool-aliases-v6.json)
 - `events` 是最近 256 条最小事件，`eventsFromSeq` 给出窗口起点。若客户端游标落后于窗口，直接采用最新状态并跳过丢失的动画，不回放猜测事件。事件的 `seq`、`agentId` 用于寻址；`state.changed` 额外提供 `from/to/reason`。
 - turn 正常结束的 `done` 只表示本轮结束，不代表工单验收通过。取消或输入作废为 `idle`；进程重启后未闭合 turn 清理为 `idle`。缺失的工具/turn 结束以 `synthetic: true` 和原因显式补齐，绝不冒充成功。工具 id 不含参数、路径、命令或输出。
 - 实际状态接入 `turn/start/end`、`tool/call/result`、审批对象与用户问题回复。等待确认不会因工具等待超时自动消失；收到用户回复后按是否有打开的 turn 恢复。历史上尚未接入的活动不补造。
@@ -326,7 +336,7 @@ npm run verify:kit
 
 `pack:release` 先检查并构建，再生成五个归档与 `SHA256SUMS`。后两条命令分别检查重复构建一致性，以及全新目录中的安装、认证、页面与协作桥。已构建源码还可运行 `npm run smoke`。
 
-这些验证使用隔离配置，不提交模型任务；真实任务质量需要另行验收。Windows / Ubuntu 各自验证通过后，CI 还会下载两套产物、核对实际归档哈希并比较 SHA256SUMS；文件名或内容不一致会让整个流程失败。远端状态见页首 CI 标记。构建产物通过 Actions 分发，不提交进源码树。
+这些验证使用隔离配置。`node scripts/smoke.mjs --delivery` 和组合包验收使用本机模拟模型，检查上传、下载、预算停止及恢复交付。真实复杂任务的完成率和费用需要单独实测。Windows / Ubuntu 各自验证通过后，CI 还会下载两套产物、核对实际归档哈希并比较 SHA256SUMS；文件名或内容不一致会让整个流程失败。远端状态见页首 CI 标记。构建产物通过 Actions 分发，不提交进源码树。
 
 ---
 

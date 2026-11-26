@@ -435,7 +435,9 @@ async function loadRun() {
     csvSwitch.setAttribute("aria-pressed", String(csvEnabled));
     csvSwitch.textContent = csvEnabled ? "本机 CSV 已开启" : "本机 CSV 已关闭";
     renderUsage(data.usage);
-    show("accounting", data.accounting ?? {status:"unknown"});
+    show("accounting", data.accounting
+      ? { selectedRun: data.accounting, sharedCoordinatorHistory: data.sharedCoordinatorAccounting ?? {status:"unknown"} }
+      : {status:"unknown"});
     const money = data.moneyBudget;
     show("money-budget", money ?? { enabled:false });
     $("money-note").textContent = money?.enabled
@@ -443,7 +445,9 @@ async function loadRun() {
       : "未启用金额预算。可在启动时设置 DSH_LLSA_MONEY_POLICY；预测滑块不控制真实调用。";
     const accounting = data.accounting;
     $("accounting-note").textContent = accounting
-      ? `已记录调用 ${accounting.calls} 次；分项齐全 ${accounting.completeUsageCalls} 次；用量覆盖率 ${accounting.usageCoverage == null ? "未测" : (accounting.usageCoverage * 100).toFixed(1) + "%"}。重试 ${accounting.rework.retries} 次，输入作废 ${accounting.rework.invalidatedAttempts} 次。`
+      ? `当前运行已记录调用 ${accounting.calls} 次；分项齐全 ${accounting.completeUsageCalls} 次；用量覆盖率 ${accounting.usageCoverage == null ? "未测" : (accounting.usageCoverage * 100).toFixed(1) + "%"}。重试 ${accounting.rework.retries} 次，输入作废 ${accounting.rework.invalidatedAttempts} 次。` +
+        (accounting.requestLimits ? ` 已观测明确请求输出上限 ${accounting.requestLimits.explicitRequestLimitCalls} 次；其余未设置或未观测，预算预留不等于供应商硬上限。` : "") +
+        (data.sharedCoordinatorAccounting ? ` 另列其他共享协调运行的保留历史 ${data.sharedCoordinatorAccounting.calls} 次调用；可能服务多个工单，未分摊、未加入当前运行用量，不代表本工单完整费用。` : "")
       : "计量覆盖率未测。";
     LeanLinkFlow.render(data);
     renderCurrentJob();

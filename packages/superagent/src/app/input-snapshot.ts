@@ -4,7 +4,9 @@ import { browserAdviceOf } from './local-tasks.ts'
 
 /** Only task semantics participate in the version; delivery cursors are transport state. */
 export function captureTaskInput(ticket: Ticket, readTrigger: (id: string) => Trigger | undefined) {
-  const inputs = ticket.inputs.map(input => {
+  // Review feedback tells the worker how to revise a report based on the same task input.
+  // The ticket keeps and delivers it, but including it here would invalidate accepted child evidence.
+  const inputs = ticket.inputs.filter(input => !(input.kind === 'note' && (input.reviewOf || input.submissionFor))).map(input => {
     if (input.kind !== 'trigger') return { ...input }
     const { readAt: _read, deliveredAt: _at, deliveredTo: _to, ...semantic } = input
     return semantic

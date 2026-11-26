@@ -9,8 +9,11 @@ test('patch is local-only, requires managed lifecycle and carries no credential'
   const patch=makePatch('/tmp/state','/plugin.js','/superagent.js');
   assert.equal(patch[0].insert.at(-1).config.localOnly,true);
   assert.equal(patch[0].insert.at(-1).config.requireCollaboration,true);
+  assert.equal(patch[0].insert.at(-1).config.inlineLocalWorkerNotices,true);
+  assert.equal(patch[0].insert[0].config.maxRunTokens,300000);
   assert.doesNotMatch(JSON.stringify(patch),/apiKey|password|Bearer/);
   assert.equal(patch[0].insert[0].config.moneyPolicyFile,'');
+  assert.equal(patch[0].insert[0].config.groupSectionResults,true);
   assert.equal(makePatch('/tmp/state','/plugin.js','/superagent.js','/local/prices.json')[0].insert[0].config.moneyPolicyFile,'/local/prices.json');
 });
 test('web collaboration is mounted only on opt-in', () => {

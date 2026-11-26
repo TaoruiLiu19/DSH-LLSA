@@ -1,14 +1,63 @@
-/** Small local entry for the existing native orchestration API; content is always rendered as text. */
-export const LOCAL_PANEL = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Super-agent 本机任务</title>
-<style>body{font:16px/1.6 system-ui,sans-serif;background:#f5f6f8;color:#172033;max-width:960px;margin:36px auto;padding:0 20px}section{background:white;border:1px solid #dbe1e8;border-radius:12px;padding:22px;margin:18px 0}textarea{box-sizing:border-box;width:100%;min-height:140px;padding:12px;font:inherit;border:1px solid #aeb8c7;border-radius:7px}button{font:inherit;padding:9px 15px;margin:10px 10px 0 0;border:1px solid #bac4d3;border-radius:7px;cursor:pointer}button.primary{background:#1748bc;color:white;border-color:#1748bc}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f6fa;padding:12px}small{color:#52617b}a{color:#1748bc}#error{color:#a11923}</style>
-<h1>Super-agent 本机任务</h1><p>主协调者分派工单，worker 执行，主协调者审阅结果。任务与回复保存在本机。</p>
-<section><label for="prompt">任务内容</label><textarea id="prompt" maxlength="20000" placeholder="粘贴需要核对或分析的资料，并说明期望结果。"></textarea><small>当前模式只处理提供的内容和已有证据，不操作外部仓库、文件或终端。提交将调用已配置的模型。</small><br><label><input id="json-output" type="checkbox">最终回复必须为纯 JSON</label><br><button id="submit" class="primary">提交给 Super-agent</button><button id="refresh">刷新记录</button><p id="notice" role="status"></p><p id="error" role="alert"></p></section>
-<section><h2>工单与结果</h2><div id="tasks">正在读取…</div><h3>本机回复</h3><div id="replies"></div></section><p><a href="/collab">查看步骤、原件与模型用量</a> · <a href="/">打开 Harness</a></p>
-<script>
-const $=id=>document.getElementById(id);let pending=null,busy=false;
-async function api(path,body){const r=await fetch('/orchestrator/api/'+path,{method:body===undefined?'GET':'POST',headers:{'x-orchestrator-request':'1',...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});const v=await r.json();if(!r.ok)throw Error(v.error||('HTTP '+r.status));return v;}
-function line(parent,text,tag='p'){const e=document.createElement(tag);e.textContent=text;parent.append(e);return e;}
-async function refresh(){try{const v=await api('local/tasks');$('tasks').replaceChildren();for(const row of v.tickets){const t=row.ticket,box=document.createElement('article');$('tasks').append(box);line(box,t.title+' · '+(t.ended?'已结束：'+t.ended.outcome:t.assignments.at(-1)?.report?.state==='ready'?'等待主模型验收':'处理中'),'strong');line(box,'工单 '+t.id,'small');if(t.assignments.at(-1)?.report)line(box,t.assignments.at(-1).report.summary,'pre');if(!t.ended){const stop=line(box,'停止此工单','button');stop.onclick=async()=>{try{await api('tickets/'+encodeURIComponent(t.id)+'/stop',{});await refresh();}catch(e){$('error').textContent=e.message;}};}}if(!v.tickets.length)line($('tasks'),'尚无工单');$('replies').replaceChildren();for(const r of v.replies)line($('replies'),r.text||JSON.stringify(r),'pre');}catch(e){$('error').textContent=e.message;}}
-$('submit').onclick=async()=>{if(busy)return;const prompt=$('prompt').value.trim();if(!prompt){$('error').textContent='请先填写任务内容';return;}const outputFormat=$('json-output').checked?'json':'text';if(!pending||pending.prompt!==prompt||pending.outputFormat!==outputFormat)pending={requestId:crypto.randomUUID(),prompt,outputFormat};busy=true;$('submit').disabled=true;$('error').textContent='';try{const r=await api('local/tasks',pending);$('notice').textContent='已提交：'+r.triggerId;$('prompt').value='';pending=null;await refresh();}catch(e){$('error').textContent=e.message;}finally{busy=false;$('submit').disabled=false;}};
-$('refresh').onclick=refresh;refresh();setInterval(refresh,3000);
-</script></html>`
+import { LOCAL_PANEL_SCRIPT } from './local-panel-client.ts'
+import { LOCAL_PANEL_STYLE } from './local-panel-style.ts'
+
+export const LOCAL_PANEL = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>本机任务 · DSH LLSA</title>
+<style>${LOCAL_PANEL_STYLE}</style>
+</head>
+<body>
+<header class="top"><div class="top-inner">
+  <span class="brand">DSH LLSA</span>
+  <nav aria-label="相关页面"><a href="/collab">协作记录与用量</a><a href="/">Harness</a></nav>
+</div></header>
+<main class="layout">
+  <h1>本机任务</h1>
+  <p class="lead">提交需求与文件，在同一工单查看结果或继续修订。</p>
+  <div class="columns">
+    <section class="card" aria-labelledby="form-title">
+      <div class="card-heading">
+        <h2 id="form-title">新工单</h2>
+        <button id="new-task" type="button" class="subtle" hidden>返回新工单</button>
+      </div>
+      <div id="new-only">
+        <fieldset>
+          <legend>想收到什么</legend>
+          <div class="modes">
+            <button id="mode-text" type="button" aria-pressed="true">文字答复</button>
+            <button id="mode-files" type="button" aria-pressed="false">文件交付</button>
+          </div>
+        </fieldset>
+      </div>
+      <label id="prompt-label" class="field-label" for="prompt">任务要求</label>
+      <textarea id="prompt" maxlength="20000" placeholder="说明目标、希望收到的结果和验收条件。"></textarea>
+      <div id="file-fields" class="file-fields" hidden>
+        <label class="field-label" for="artifact-files">新建文件</label>
+        <input id="artifact-files" type="text" maxlength="1600" placeholder="例如 index.html, styles.css" aria-describedby="output-help">
+        <small id="output-help">多个相对路径用逗号或换行分隔。只修改已有文件时可留空。</small>
+        <label class="field-label" for="file-picker">已有文件</label>
+        <input id="file-picker" type="file" multiple aria-describedby="file-help">
+        <small id="file-help">最多 12 个 UTF-8 文件，单个 180 KiB，总计 512 KiB。添加后可改工作区路径，或标为可修改文件。</small>
+        <ul id="uploads" class="uploads" aria-label="已添加的文件"></ul>
+      </div>
+      <div id="text-fields" class="options">
+        <label class="check"><input id="json-output" type="checkbox">使用 JSON 作为最终答复</label>
+      </div>
+      <div class="actions"><button id="submit" class="primary" type="button">创建工单</button></div>
+      <p class="muted">提交时使用已配置的模型，可能产生模型费用。</p>
+      <p id="notice" role="status"></p>
+      <p id="error" role="alert"></p>
+    </section>
+    <section class="card" aria-labelledby="tasks-title">
+      <div class="card-heading"><h2 id="tasks-title">工单与成品</h2><button id="refresh" class="subtle" type="button">刷新</button></div>
+      <div id="tasks"><p class="empty">正在读取工单…</p></div>
+      <details id="replies" hidden><summary>其他消息</summary><ul id="reply-list" class="reply-list"></ul></details>
+      <p id="task-error" role="alert"></p>
+    </section>
+  </div>
+</main>
+<script>${LOCAL_PANEL_SCRIPT}</script>
+</body></html>`

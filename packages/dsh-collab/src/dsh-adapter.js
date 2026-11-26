@@ -1,7 +1,10 @@
 import { freezeMessage } from '@deepseek-ai/dsh-llm';
+import { LocalChildModel, LOCAL_CHILD_PROVIDER } from './local-child-model.js';
 
-export function createDshBackend(ctx, manager, { childPreset = 'standard' } = {}) {
+export function createDshBackend(ctx, manager, { childPreset = 'standard', localChildModel } = {}) {
   const history = new WeakMap();
+  const localRoute = localChildModel && Object.freeze({ provider: LOCAL_CHILD_PROVIDER, model: localChildModel.model });
+  if (localRoute) ctx.llm.registerAdapter([localRoute.provider], new LocalChildModel(localChildModel));
   async function seen(agent) {
     if (history.has(agent.session)) return history.get(agent.session);
     await ctx.sessionPersistence.flush();
@@ -19,6 +22,22 @@ export function createDshBackend(ctx, manager, { childPreset = 'standard' } = {}
   }
   return {
     getAgent: id => ctx.agents.get(id),
+    canStartFree: () => Boolean(localRoute),
+    isFreeRoute: (provider, model) => Boolean(localRoute && provider === localRoute.provider && model === localRoute.model),
+    isLiveFreeRoute: (id, provider, model) => {
+      if (!localRoute) return false;
+      try {
+        const agent = ctx.agents.get(id);
+        // Initial options cannot authorize an automatic request after a model switch.
+        if (typeof agent?.model?.current !== 'function') return false;
+        const selection = agent.model.current();
+        if (!selection || typeof selection.then === 'function' ||
+            selection.provider !== localRoute.provider || selection.model !== localRoute.model) return false;
+        // The bridge supplies actual request options for its dispatch-time check.
+        return provider === undefined && model === undefined ||
+          provider === localRoute.provider && model === localRoute.model;
+      } catch { return false; }
+    },
     modelProfile: id => {
       try {
         const agent = ctx.agents.get(id);
@@ -31,10 +50,15 @@ export function createDshBackend(ctx, manager, { childPreset = 'standard' } = {}
           ? `${selection.provider}/${selection.model}` : 'unverified';
       } catch { return 'unverified'; }
     },
-    async start({ parent, childId, prompt, label, maxOutputTokens }) {
+    async start({ parent, childId, prompt, label, maxOutputTokens, paid }) {
+      if (paid !== true && !localRoute) {
+        throw Object.assign(new Error('No loopback model is configured for free child execution.'), { code: 'FREE_CHILD_MODEL_REQUIRED' });
+      }
       const subagents = parent.ctx.get('subagents') ?? ctx.subagents;
       return subagents.startActivation({ provider: 'spawn', label, childId,
-        request: { parent, prompt: [{ type: 'text', text: prompt }], agentPreset: childPreset, maxDepth: 1, agentOptions: { maxTokens: maxOutputTokens } },
+        request: { parent, prompt: [{ type: 'text', text: prompt }], agentPreset: childPreset, maxDepth: 1,
+          agentOptions: { maxTokens: maxOutputTokens, ...(paid === true ? {} :
+            { ...localRoute, reasoningEffort: 'off', temperature: 0 }) } },
         signal: new AbortController().signal, delivery: 'caller' });
     },
     async deliver({ recipientId, senderId, runId, messageId, text }) {

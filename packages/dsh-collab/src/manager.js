@@ -4,12 +4,15 @@ import { ProtocolRegistry, selectEncoding, decodePacket, renderChinese, projectI
 import { VERIFICATION_SCOPE, normalizeContract, canonicalHash, executeComputation, resultMismatches } from './computation.js';
 import { normalizeQualityEvidence, MIN_EVIDENCE_SAMPLES, TASK_TYPES } from './encoding-policy.js';
 import { NativeInputs } from './native-inputs.js';
-import { summarizeAccounting } from './accounting.js';
+import { isSharedCoordinatorRun, summarizeAccounting } from './accounting.js';
 import { MoneyBudget } from './money-budget.js';
 import { HudProjection } from './hud-projection.js';
 import { hudLabel } from './hud-label.js';
 import { runAgentCsvStep } from './csv-agent-step.js';
 import { runCsvBatch, validateCsvBatch } from './csv-workflow-batch.js';
+import { executeSectionLookup, normalizeSectionLookup } from './section-lookup.js';
+import { MANAGED_CHILD_GUIDANCE } from './text-assets.js';
+import { eligibleObservation } from './tool-observation.js';
 
 /** @typedef {import('./types.js').JsonValue} JsonValue */
 /**
@@ -26,6 +29,8 @@ import { runCsvBatch, validateCsvBatch } from './csv-workflow-batch.js';
  * @property {ReadonlyArray<Readonly<Record<string, unknown>>>} [qualityEvidence]
  * @property {number} [minEvidenceSamples]
  * @property {boolean} [explicitEvidenceRefs]
+ * @property {boolean} [groupSectionResults]
+ * @property {boolean} [allowPaidManagedChildren]
  * @property {object|null} [moneyPolicy]
  * @property {(job: {input: Buffer, steps: JsonValue[], signal?: AbortSignal}) => Promise<{output: Buffer, receipt: object}>} [csvExecutor]
  * @property {boolean} [csvDefaultEnabled]
@@ -38,14 +43,23 @@ const fail = (code, message) => { throw Object.assign(new Error(message), { code
 const copy = value => JSON.parse(JSON.stringify(value));
 const ACTIVE = new Set(['starting', 'running', 'stopping']);
 const WRITERS = new Set(['implementer', 'tester']);
+const RETRYABLE = new Set(['failed', 'cancelled', 'unknown', 'rejected']);
+const INLINE_EVIDENCE_LIMIT = 4096;
+export const SECTION_DELEGATION_LIMITS = Object.freeze({ sections: 12, selector: 160, objective: 480, rules: 4, rule: 240 });
+const WHOLE_TASK_OBJECTIVE = 'Execute or check the requested result using the bound complete input snapshot, including later corrections and constraints. You are the execution child: coordination, acknowledgements and acceptance belong to the parent; do not create agents. Preserve the exact requested output format. For a specified JSON object, publish that object itself as the final result, without wrappers, repeated field checklists or extra metadata. Record separately any intermediate checkpoint explicitly requested and evidence needed to support actual actions; do not invent test success. The parent independently verifies and accepts the result.';
+const isWholeTask = item => item.wholeTask === true || item.objective === WHOLE_TASK_OBJECTIVE;
+const evidenceDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 export const COMPACT_GUIDANCE = 'Use collab_publish for public steps and final results. Preserve numbers, negations, errors, constraints and evidence. Use collab_send for necessary managed communication. Send concise structured facts, not encrypted text. Query collab_history for a prior step. A successful final submission ends the child turn; do not send the same result again. Parent acceptance is still required. Published facts are claims unless backed by tool evidence.';
+export const NATIVE_WORKER_GUIDANCE = 'This is a native Superagent ticket worker. Use collab_publish with final=false only for requested checkpoints or distinct evidence. Keep failed checks and their actual results visible, fix the work, and rerun the relevant checks before delivery. Use orchestrator_report for formal ticket delivery; collab_publish is not ticket completion. Preserve numbers, negations, errors, constraints and evidence. Query collab_history for prior recorded steps; published facts remain claims unless backed by tool evidence.';
 
 /** Host orchestration; backend owns actual DSH handles. No model reasoning is fabricated. */
 export class CollaborationManager {
   /** @param {ManagerOptions} options */
-  constructor({ store, registry = new ProtocolRegistry(), countTokens, counterName = 'heuristic', backend = null, maxActiveChildren = 2, maxRunTokens = 200000, maxOutputTokens = 4096, closeTimeoutMs = 10000, qualityEvidence = [], minEvidenceSamples = MIN_EVIDENCE_SAMPLES, explicitEvidenceRefs = false, moneyPolicy = null, csvExecutor, csvDefaultEnabled = false, webCollaboration = false }) {
+  constructor({ store, registry = new ProtocolRegistry(), countTokens, counterName = 'heuristic', backend = null, maxActiveChildren = 2, maxRunTokens = 200000, maxOutputTokens = 4096, closeTimeoutMs = 10000, qualityEvidence = [], minEvidenceSamples = MIN_EVIDENCE_SAMPLES, explicitEvidenceRefs = false, groupSectionResults = false, allowPaidManagedChildren = false, moneyPolicy = null, csvExecutor, csvDefaultEnabled = false, webCollaboration = false }) {
     if (typeof explicitEvidenceRefs !== 'boolean') fail('INVALID_ARGUMENT','explicitEvidenceRefs must be boolean');
     this.explicitEvidenceRefs = explicitEvidenceRefs;
+    this.groupSectionResults = groupSectionResults === true;
+    this.allowPaidManagedChildren = allowPaidManagedChildren === true;
     this.store = store; this.registry = registry; this.countTokens = countTokens; this.counterName = counterName;
     this.backend = backend; this.maxActiveChildren = maxActiveChildren; this.maxRunTokens = maxRunTokens; this.maxOutputTokens = maxOutputTokens;
     this.csvExecutor = csvExecutor;
@@ -60,6 +74,7 @@ export class CollaborationManager {
     this.minEvidenceSamples = minEvidenceSamples;
     this.bindings = new Map(); this.handles = new Map(); this.pending = new Map(); this.finalEvents = new Map(); this.held = new Set(); this.reservations = new Map(); this.bridge = null; this.closing = false;
     this.toolPolicies = new Map();
+    this.coordinatorBoundaries = new Map();
     this.moneyHolds = new Set();
     this.nativeInputs = new NativeInputs(store);
     this.runLimits = new Map();
@@ -87,7 +102,8 @@ export class CollaborationManager {
         const estimate = request.estimate;
         if (Number.isSafeInteger(estimate) && estimate >= 0) {
           const known = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
-          this.reservations.set(request.callId, { runId:run.id, estimate, tokens:Math.max(0,estimate-known), recovered:true });
+          this.reservations.set(request.callId, { runId:run.id, estimate, tokens:Math.max(0,estimate-known), recovered:true,
+            tokenAdmission: request.tokenAdmission });
         } else this.held.add(run.id); // No bound for an unaccounted historical request: do not silently grant more work.
       }
       for (const item of store.getWorkItems(run.id)) if (ACTIVE.has(item.state)) {
@@ -144,6 +160,14 @@ export class CollaborationManager {
     this.bindings.set(sessionId, agent); this.hud.register(agent); return agent;
   }
   binding(sessionId) { return this.bindings.get(sessionId); }
+  /** Native ticket completion belongs to Superagent, independently of a live bridge connection. */
+  isNativeTicketRoot(sessionId) {
+    const binding = this.bindings.get(sessionId);
+    if (!binding || binding.parentId) return false;
+    const run = this.store.getRun(binding.runId);
+    return run?.source === 'superagent' && !isSharedCoordinatorRun(run);
+  }
+  compactGuidance(sessionId) { return this.isNativeTicketRoot(sessionId) ? NATIVE_WORKER_GUIDANCE : COMPACT_GUIDANCE; }
   isCsvWorkflowEnabled(runId) { return !!this.csvExecutor && this.csvPolicy.get(runId) === true; }
   setCsvWorkflowEnabled(sessionId, enabled) {
     const binding = this.binding(sessionId);
@@ -205,12 +229,33 @@ export class CollaborationManager {
       || new Set(allowedNames).size !== allowedNames.length) fail('INVALID_ARGUMENT', 'Expected a session ID and unique collaboration tool names');
     this.toolPolicies.set(sessionId, new Set(allowedNames));
   }
+  hasAssignedEvidence(sessionId) {
+    const binding = this.bindings.get(sessionId);
+    return Boolean(binding?.parentId && this.#item(binding.runId, binding.workItemId).evidenceScope === 'assigned');
+  }
+  #paidChildRoute() {
+    if (this.backend?.canStartFree?.() === true) return false;
+    if (!this.allowPaidManagedChildren) {
+      fail('FREE_CHILD_UNAVAILABLE', 'No free local model is configured. Use a supported local computation or execute the task in this worker.');
+    }
+    return true;
+  }
   isToolAvailable(sessionId, toolName) {
     const policy = this.toolPolicies.get(sessionId);
     if (policy && !policy.has(toolName)) return false;
     const binding = this.bindings.get(sessionId);
-    if (toolName === 'collab_delegate_task') return !!binding && !binding.parentId && !!this.nativeInputs.current(binding.runId);
+    if (toolName === 'collab_delegate_task') {
+      return !!binding && !binding.parentId && !!this.nativeInputs.current(binding.runId) &&
+        !!this.backend && (this.allowPaidManagedChildren || this.backend.canStartFree?.() === true);
+    }
+    if (toolName === 'collab_delegate_sections') {
+      return !!binding && !binding.parentId && !!this.nativeInputs.current(binding.runId)?.sections?.length;
+    }
+    if (toolName === 'collab_accept_sections') {
+      return this.groupSectionResults && !!binding && !binding.parentId && !!this.nativeInputs.current(binding.runId)?.sections?.length;
+    }
     const item = binding?.workItemId ? this.store.getWorkItems(binding.runId).find(work => work.id === binding.workItemId) : null;
+    if (item?.evidenceScope === 'assigned' && ['collab_consult_web', 'collab_csv_workflow'].includes(toolName)) return false;
     if (toolName === 'collab_consult_web') {
       return this.#canConsultWeb(binding, item) &&
         !this.store.eventsByKind(binding.runId, 'web_consultation_requested')
@@ -233,6 +278,7 @@ export class CollaborationManager {
     if (['collab_compute','collab_complete_computation'].includes(toolName)) return false;
     if (binding?.parentId) {
       if (this.finalEvents.has(sessionId) || (item && !this.isCurrentInput(item))) return false;
+      if (item?.evidenceScope === 'assigned') return ['collab_read_evidence', 'collab_history', 'collab_publish'].includes(toolName);
       return ['collab_read_evidence', 'collab_history', 'collab_publish', 'collab_send'].includes(toolName);
     }
     return true;
@@ -342,12 +388,15 @@ export class CollaborationManager {
   /** @param {string} sessionId @param {{stepId?: string, result: JsonValue, final?: boolean, parents?: string[], receiptId?: string}} options */
   publish(sessionId, { stepId, result, final = false, parents = [], receiptId }) {
     const binding = this.bindings.get(sessionId); if (!binding) fail('FORBIDDEN', 'No managed run');
+    if (final && this.isNativeTicketRoot(sessionId)) {
+      fail('NATIVE_REPORT_REQUIRED', 'Native Superagent ticket workers may publish evidence checkpoints with final=false only. Fix and rerun failed checks, then use orchestrator_report for formal delivery. This call did not archive or submit a result.');
+    }
     const item = this.#current(binding);
     const existingFinal = this.finalEvents.get(sessionId);
     if (final && existingFinal?.runId === binding.runId && existingFinal.attemptId === (binding.attemptId ?? 'root')) fail('ALREADY_SUBMITTED', 'Final result already submitted');
     const artifact = this.store.putArtifact(JSON.stringify(result), { mediaType: 'application/json' });
     let verification;
-    if (item?.computation) {
+    if (item?.computation || item?.sectionLookup) {
       try {
         const receipt = this.#validatedReceipt(binding, item, receiptId);
         const mismatches = resultMismatches(result, receipt.result);
@@ -374,18 +423,32 @@ export class CollaborationManager {
     return normalizeContract(planned.payload.computation);
   }
   #runComputation(item) {
+    if (item.sectionLookup) {
+      const contract = this.#boundSectionLookup(item);
+      return executeSectionLookup(contract, this.readArtifact(item.runId, contract.inputRef).data);
+    }
     const contract = this.#boundContract(item);
     const meta = this.store.getArtifact(contract.inputRef);
     if (meta.bytes > 2 * 1024 * 1024) fail('INPUT_TOO_LARGE', 'Computation input exceeds 2 MiB');
     const { data } = this.readArtifact(item.runId, contract.inputRef);
     return { ...executeComputation(contract, data), inputRef: contract.inputRef };
   }
+  #boundSectionLookup(item) {
+    const planned = this.store.eventsByKind(item.runId, 'work_planned')
+      .find(event => event.stepId === item.id && event.attemptId === item.attemptId);
+    const contract = planned?.payload.sectionLookup;
+    if (!contract || canonicalHash(contract) !== item.contractHash || canonicalHash(item.sectionLookup) !== item.contractHash ||
+        contract.title !== item.sectionDispatch?.title || item.inputRefs?.length !== 1 || item.inputRefs[0] !== contract.inputRef) {
+      fail('INVALID_CONTRACT', 'The section lookup no longer matches its bound source and immutable plan.');
+    }
+    return contract;
+  }
   /** @param {string} sessionId @param {Record<string, never>} [options] */
   compute(sessionId, options = {}) {
     if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).length) fail('INVALID_ARGUMENT', 'collab_compute accepts no plan overrides; the task contract is already bound');
     const binding = this.bindings.get(sessionId); if (!binding) fail('FORBIDDEN', 'No managed run');
     const item = this.#current(binding);
-    if (!item?.computation) fail('NO_COMPUTATION_CONTRACT', 'No computation contract was bound to this work item');
+    if (!item?.computation && !item?.sectionLookup) fail('NO_COMPUTATION_CONTRACT', 'No computation contract was bound to this work item');
     if (!ACTIVE.has(item.state)) fail('INVALID_STATE', 'Compute is only available during the current activation');
     if (this.finalEvents.has(sessionId)) fail('ALREADY_SUBMITTED', 'Final result already submitted');
     const computed = this.#runComputation(item);
@@ -433,22 +496,30 @@ export class CollaborationManager {
   /** Host-only review facts: verify persisted receipts again; never certify business-rule choice. */
   computationReview(runId, workItemId) {
     const item=this.#item(runId,workItemId);
-    if(!item.computation||item.state!=='succeeded'||!this.isCurrentInput(item))return null;
+    if((!item.computation&&!item.sectionLookup)||item.state!=='succeeded'||!this.isCurrentInput(item))return null;
     const verification=this.#validatedFinal(item),receipt=this.store.getEvent(verification.receiptId);
-    const input=this.nativeInputs.current(runId),table=input?.tables?.find(t=>t.artifactRef===item.computation.inputRef);
+    const input=this.nativeInputs.current(runId);
+    const contract=item.sectionLookup ? this.#boundSectionLookup(item) : this.#boundContract(item);
+    const table=item.sectionLookup ? item.sectionDispatch : input?.tables?.find(t=>t.artifactRef===contract.inputRef);
     const proof={receiptId:receipt.id,receiptRef:receipt.payload.artifactRef,verificationScope:VERIFICATION_SCOPE,
-      contract:this.#boundContract(item),result:receipt.payload.result,
+      contract,result:receipt.payload.result,...(item.sectionLookup?{modelCalls:0}:{}),
       ...(table?{source:{binding:'exact_slice_of_current_input',inputVersion:input.version,sourceId:table.sourceId,sourceHash:table.sourceHash,startByte:table.startByte,endByte:table.endByte}}:{})};
     return Buffer.byteLength(JSON.stringify(proof))<=4096?proof:{receiptId:proof.receiptId,receiptRef:proof.receiptRef,verificationScope:VERIFICATION_SCOPE,detail:'Read the immutable receipt for its rule and result; omitted here because it exceeds the compact review limit.'};
   }
   recordToolResult(sessionId, toolName, result, toolCallId, identity = null) {
     const binding = this.bindings.get(sessionId); if (!binding) return;
+    const version = identity?.scope?.runId === binding.runId && this.nativeInputs.current(binding.runId)?.version;
+    const reusable = eligibleObservation(toolName, result, toolCallId, identity, binding, version);
     const artifact = this.store.putArtifact(JSON.stringify(result), { mediaType: 'application/json' });
-    return this.store.appendEvent({ runId: binding.runId, stepId: binding.workItemId ?? `tool-${toolCallId}`, attemptId: binding.attemptId ?? 'root', kind: 'tool_observation', payload: { actorId: sessionId, toolName, toolCallId, artifactRef: artifact.id, provenance: 'host_tool_result', ...(identity ? { toolIdentity: identity } : {}) } });
+    return this.store.appendEvent({ runId: binding.runId, stepId: binding.workItemId ?? `tool-${toolCallId}`, attemptId: binding.attemptId ?? 'root', kind: 'tool_observation', payload: { actorId: sessionId, toolName, toolCallId, artifactRef: artifact.id, provenance: 'host_tool_result', ...(identity ? { toolIdentity: identity } : {}), ...(reusable ? { observedInputVersion: version } : {}) } });
   }
-  /** @param {string} runId @param {string} stepId @param {import('./types.js').StepQuery} [opts] */
-  inspect(runId, stepId, opts = {}) {
-    const view = this.store.inspectStep(runId, stepId, opts);
+  /** @param {string} runId @param {string} stepId @param {import('./types.js').StepQuery} [opts] @param {string} [sessionId] */
+  inspect(runId, stepId, opts = {}, sessionId) {
+    const binding = sessionId && this.bindings.get(sessionId);
+    const scoped = binding?.parentId && this.#item(binding.runId, binding.workItemId).evidenceScope === 'assigned';
+    if (scoped && binding.runId !== runId) fail('FORBIDDEN', 'History belongs to another run');
+    if (scoped) this.#current(binding);
+    const view = this.store.inspectStep(runId, stepId, scoped ? { ...opts, attemptId: binding.attemptId } : opts);
     if (view.event) {
       const payload = view.event.payload;
       view.chinese = renderChinese(payload.result ?? payload);
@@ -473,10 +544,16 @@ export class CollaborationManager {
     ref = this.nativeInputs.resolve(runId, ref);
     // Only host-owned envelope fields grant access. A model's result can mention any string;
     // mentioning another run's digest must not turn it into readable evidence.
-    let referenced = false;
     const binding = sessionId && this.bindings.get(sessionId);
-    for (const event of this.#events(runId)) {
+    const item = binding?.parentId && this.#item(binding.runId, binding.workItemId);
+    const scoped = item && item.evidenceScope === 'assigned';
+    if (scoped && binding.runId !== runId) fail('FORBIDDEN', 'Evidence belongs to another run');
+    if (scoped) this.#current(binding);
+    let referenced = !!(scoped && item.inputRefs.includes(ref));
+    for (const event of referenced ? [] : this.#events(runId)) {
       if (event.payload?.artifactRef !== ref && !event.inputRefs?.includes(ref)) continue;
+      if (scoped && !item.inputRefs.includes(ref) &&
+          (event.attemptId !== binding.attemptId || event.payload.actorId !== sessionId)) continue;
       if (event.kind === 'web_consultation_received' && binding?.parentId &&
           (event.payload.actorId !== sessionId || event.attemptId !== binding.attemptId)) continue;
       referenced = true;
@@ -497,22 +574,32 @@ export class CollaborationManager {
     return { eventId: event.id, projection, artifactRef: raw.id };
   }
   async send(sessionId, args) { return this.#send(sessionId, args); }
-  async #send(sessionId, { targetId, result, stepId, messageId = uid('msg'), taskType = 'generic' }, hostDelivery = false) {
+  /** @param {{inputVersion: string, parents: string[], projection?: object}} [batchReceipt] */
+  async #send(sessionId, { targetId, result, stepId, messageId = uid('msg'), taskType = 'generic' }, hostDelivery = false, batchReceipt) {
     const sender = this.bindings.get(sessionId); if (!sender) fail('FORBIDDEN', 'No managed run');
-    const recipient = this.authorize(targetId, sender.runId); const item = this.#current(sender); this.#current(recipient);
-    const projection = item?.computation && !hostDelivery ? { claim: result, provenance: 'agent_claim', verification: { status: 'unverified', scope: VERIFICATION_SCOPE } } : result;
+    const recipient = this.authorize(targetId, sender.runId);
+    const item = this.#current(sender), target = this.#current(recipient);
+    if (!hostDelivery && (item?.evidenceScope === 'assigned' || target?.evidenceScope === 'assigned')) {
+      fail('FORBIDDEN', 'Assigned-evidence children receive their assigned inputs and publish their result through the host');
+    }
+    const projection = batchReceipt?.projection ?? (item?.computation && !hostDelivery
+      ? { claim: result, provenance: 'agent_claim', verification: { status: 'unverified', scope: VERIFICATION_SCOPE } } : result);
     // Contract-bound results always use the exact-computation route, irrespective of a model's task label.
     const selected = this.select(projection, this.backend?.modelProfile?.(targetId) ?? 'unverified', item?.computation ? 'exact-computation' : taskType);
     const artifact = this.store.putArtifact(JSON.stringify(result), { mediaType: 'application/json' });
-    const committed = this.store.commitMessage({ event: { runId: sender.runId, stepId: stepId ?? uid('message'), attemptId: sender.attemptId ?? 'root', kind: 'agent_message', payload: { sender: sessionId, recipient: targetId, result, artifactRef: artifact.id, provenance: hostDelivery ? 'host_delivery' : 'agent_claim', selected: { packet: selected.packet, instructions: selected.instructions, metrics: selected.metrics } } },
-      message: { id: messageId, logicalMessageId: messageId, sender: sessionId, recipient: targetId, projection: { text: selected.modelInput ?? `${selected.instructions}\n${selected.text}`, packet: selected.packet }, deliveryRevision: 1 } });
+    const committed = this.store.commitMessage({ event: { runId: sender.runId, stepId: stepId ?? uid('message'), attemptId: sender.attemptId ?? 'root', kind: 'agent_message', payload: { sender: sessionId, recipient: targetId, result, artifactRef: artifact.id, provenance: hostDelivery ? 'host_delivery' : 'agent_claim', selected: { packet: selected.packet, instructions: selected.instructions, metrics: selected.metrics } }, ...(batchReceipt ? { parents: batchReceipt.parents } : {}) },
+      message: { id: messageId, logicalMessageId: messageId, sender: sessionId, recipient: targetId, projection: { text: selected.modelInput ?? `${selected.instructions}\n${selected.text}`, packet: selected.packet }, deliveryRevision: 1, ...(batchReceipt ? { sectionBatchInputVersion: batchReceipt.inputVersion } : {}) } });
     await this.deliver(committed.message);
     return { messageId, eventId: committed.event.id, status: this.store.getMessage(messageId).status, codec: selected.codec, metrics: selected.metrics };
   }
   async deliver(message) {
     if (this.closed) return { unknown:true, note:'Manager closed before delivery' };
     if (!this.backend) return { queued: true };
-    if (message.status === 'inbox_persisted' || message.status === 'included_in_request') return { duplicate: true };
+    if (['inbox_persisted', 'included_in_request', 'cancelled'].includes(message.status) || this.delivering.has(message.id)) return { duplicate: true };
+    if (message.sectionBatchInputVersion && this.nativeInputs.current(message.runId)?.version !== message.sectionBatchInputVersion) {
+      this.store.markDelivery(message.id, 'cancelled', { reason: 'input_changed' });
+      return { cancelled: true };
+    }
     const binding = this.authorize(message.recipient, message.runId); this.#current(binding);
     this.delivering.add(message.id);
     try {
@@ -536,9 +623,312 @@ export class CollaborationManager {
     return this.delegate(parent, { objective, dependsOn, retryOf, inputRefs: batch.sources.map(source => source.inputRef),
       csvWorkflow: batch }, options);
   }
+  workStatus(item) {
+    const report = {
+      workItemId: item.id, runId: item.runId, childId: item.childId,
+      attemptId: item.attemptId, state: item.state,
+    };
+    if (item.discarded) return { ...report, discarded: true, nextAction: 'This review was discarded and is not evidence.' };
+    if (item.state === 'submitted') {
+      const event = item.resultEventId && this.store.getEvent(item.resultEventId);
+      return { ...report, eventId: item.resultEventId,
+        ...(event?.payload?.artifactRef ? { evidenceRefs: [event.payload.artifactRef] } : {}),
+        nextAction: 'Use the delivered result or collab_history with eventId. Call collab_accept once with the correct acceptance decision.' };
+    }
+    if (item.state === 'succeeded') return { ...report, assessmentEventId: item.verificationEventId, nextAction: 'Reuse the already assessed result. Do not delegate the same work again.' };
+    if (RETRYABLE.has(item.state)) return { ...report, ...(item.resultEventId ? { eventId: item.resultEventId } : {}),
+      nextAction: 'Retry only with a changed approach and retryOf set to this workItemId.' };
+    return { ...report, nextAction: 'The host will deliver this result automatically. Do not poll or redelegate the same work.' };
+  }
+  acceptedWholeTaskResult(sessionId, workItemId) {
+    const binding = this.bindings.get(sessionId);
+    if (!binding || binding.parentId) fail('FORBIDDEN', 'Only the native worker can reference its accepted result');
+    const item = this.#item(binding.runId, workItemId);
+    if (item.parentId !== sessionId || !item.inputVersion || !this.isCurrentInput(item)
+      || !isWholeTask(item) || item.state !== 'succeeded') {
+      fail('RESULT_NOT_READY', 'Reference an accepted whole-task result for the current inputs');
+    }
+    const final = item.resultEventId && this.store.getEvent(item.resultEventId);
+    const assessment = item.verificationEventId && this.store.getEvent(item.verificationEventId);
+    if (final?.kind !== 'final_result' || final.runId !== item.runId || final.attemptId !== item.attemptId
+      || final.payload.actorId !== item.childId || assessment?.kind !== 'result_assessment'
+      || assessment.runId !== item.runId || assessment.stepId !== item.id || assessment.payload.actorId !== sessionId
+      || assessment.payload.accepted !== true || assessment.payload.resultEventId !== final.id) {
+      fail('RESULT_NOT_READY', 'The recorded final and assessment do not match this work item');
+    }
+    return final.payload.result;
+  }
   /** @param {{signal?: AbortSignal}} [options] */
-  async delegate(parent, { objective, wholeTask = false, role = 'researcher', dependsOn = [], acceptance = [], inputRefs = [], workItemId = undefined, retryOf, computation = undefined, completionMode = undefined, csvWorkflow, csvStepAllowed = false, taskType = undefined, maxOutputTokens = this.maxOutputTokens }, options = {}) {
+  async delegateSections(parent, { input, sections, objective, rules = [], retries = [], lookup = undefined }, options = {}) {
     const { signal } = options;
+    signal?.throwIfAborted();
+    if (this.closing) fail('CLOSING', 'Plugin is draining');
+    const binding = this.bindings.get(parent.id);
+    if (!binding || binding.parentId) fail('FORBIDDEN', 'Only the native task coordinator can delegate sections');
+    const current = this.nativeInputs.current(binding.runId);
+    if (!current || input !== current.handle) fail('STALE_INPUT', 'Use the complete input handle from the current section list');
+    if (!this.isToolAvailable(parent.id, 'collab_delegate_sections')) fail('FORBIDDEN', 'Section delegation is unavailable for this task');
+    if (lookup === undefined) {
+      this.#paidChildRoute();
+      if (!this.backend) fail('UNAVAILABLE', 'DSH backend is not connected');
+    }
+    const lookupRule = lookup === undefined ? null : normalizeSectionLookup(lookup);
+
+    const limits = SECTION_DELEGATION_LIMITS;
+    const validText = (value, limit) => typeof value === 'string' && value.length <= limit && Boolean(value.trim());
+    if (!validText(objective, limits.objective) || !Array.isArray(rules) || rules.length > limits.rules ||
+      !rules.every(rule => validText(rule, limits.rule))) {
+      fail('INVALID_ARGUMENT', `Use an objective of up to ${limits.objective} characters and at most ${limits.rules} rules of up to ${limits.rule} characters each`);
+    }
+    if (!Array.isArray(sections) || !sections.length || sections.length > limits.sections ||
+      !sections.every(section => validText(section, limits.selector))) {
+      fail('INVALID_ARGUMENT', 'Provide between one and twelve section handles or exact titles');
+    }
+    const indexed = current.sections.map((section, index) => ({ ...section, selector: `s${index + 1}` }));
+    const findSection = value => {
+      const selector = value.trim();
+      const handle = indexed.find(section => section.selector === selector);
+      const matches = handle ? [handle] : indexed.filter(section => section.title === selector);
+      if (matches.length !== 1) fail('INVALID_SECTION', 'Choose a unique current section handle or exact title');
+      return matches[0];
+    };
+    const selected = new Map(sections.map(value => {
+      const section = findSection(value);
+      return [section.selector, section];
+    }));
+    if (!Array.isArray(retries) || retries.length > selected.size) fail('INVALID_ARGUMENT', 'Choose at most one previous work item for each selected section');
+    const retryBySection = new Map();
+    const retryIds = new Set();
+    for (const retry of retries) {
+      if (!validText(retry?.section, limits.selector) || !validText(retry?.workItemId, 100)) fail('INVALID_ARGUMENT', 'Each retry requires a section and a previous work item ID');
+      const { selector } = findSection(retry.section);
+      if (!selected.has(selector) || retryBySection.has(selector) || retryIds.has(retry.workItemId)) fail('INVALID_ARGUMENT', 'Each retry must match a distinct selected section and previous work item');
+      const previous = this.#item(binding.runId, retry.workItemId);
+      if (previous.parentId !== parent.id || !previous.sectionDispatch) fail('FORBIDDEN', 'Retry only your own section work');
+      if (previous.inputVersion === current.version && previous.sectionDispatch.selector !== selector) fail('INVALID_SECTION', 'Retry the same section for an unchanged input');
+      retryBySection.set(selector, previous);
+      retryIds.add(previous.id);
+    }
+
+    const acceptance = rules.map(rule => rule.trim());
+    const assignments = [...selected.values()].map(({ selector, title, artifactRef, sourceId, startByte, endByte }) => {
+      const { data } = this.readArtifact(binding.runId, artifactRef);
+      const sectionLookup = lookupRule ? { inputRef: artifactRef, title, lookup: lookupRule } : null;
+      // Preflight all selected artifacts before committing any work items or calling a model.
+      if (sectionLookup) executeSectionLookup(sectionLookup, data);
+      const description = `Apply the shared objective to this assigned Markdown section only. Section title: ${JSON.stringify(title)}.\nShared objective: ${objective.trim()}`;
+      const previous = retryBySection.get(selector);
+      const reused = Boolean(previous && this.isCurrentInput(previous) && previous.objective === description &&
+        JSON.stringify(previous.acceptance) === JSON.stringify(acceptance) &&
+        canonicalHash(previous.sectionLookup ?? null) === canonicalHash(sectionLookup));
+      if (previous && !reused && !RETRYABLE.has(previous.state)) fail('INVALID_STATE', 'Only failed, rejected or interrupted section work can be retried');
+      return { selector, description, artifactRef, previous, reused, sectionLookup,
+        sectionDispatch: { selector, title, sourceId: sourceId ?? null, startByte, endByte } };
+    });
+
+    // Persist every validated assignment before any child can run or report a result.
+    const planned = await Promise.all(assignments.map(async ({ selector, description, artifactRef, previous, reused, sectionDispatch, sectionLookup }) => {
+      if (reused) return { selector, ...this.#reuseSection(parent, previous) };
+      const status = await this.delegate(parent, {
+        objective: description, acceptance, inputRefs: [artifactRef], evidenceScope: 'assigned', retryOf: previous?.id,
+      }, { signal, deferSchedule: true, sectionDispatch, sectionLookup });
+      return { selector, ...status };
+    }));
+    const members = planned.map(({ workItemId }) => this.#item(binding.runId, workItemId));
+    const grouped = this.groupSectionResults && members.length > 1
+      && !planned.some(status => 'reused' in status && status.reused)
+      && members.every(item => item.state === 'ready' && item.evidenceScope === 'assigned' && item.dependsOn.length === 0);
+    const batchId = grouped ? uid('sections') : null;
+    if (batchId) {
+      this.store.appendEvent({ id: batchId, runId: binding.runId, stepId: batchId, kind: 'section_batch_planned',
+        payload: { parentId: parent.id, inputVersion: current.version,
+          members: members.map(({ id, attemptId }) => ({ workItemId: id, attemptId })) } });
+    }
+    await this.schedule(binding.runId);
+    return {
+      ...(batchId ? { batchId, delivery: 'grouped', waiting: !this.held.has(binding.runId) } : {}),
+      workItems: planned.map(status => ({ section: status.selector, workItemId: status.workItemId,
+        state: this.#item(binding.runId, status.workItemId).state,
+        executionKind: this.#item(binding.runId, status.workItemId).executionKind,
+        ...(lookupRule ? { modelCalls: 0 } : {}),
+        ...('reused' in status && status.reused ? { reused: true } : {}) })),
+      nextAction: batchId
+        ? 'The host will deliver the section batch when ready. Assess each result with collab_accept_sections before reporting the combined result.'
+        : 'Wait for the automatically delivered results, then assess each by work item ID before reporting the combined result.',
+    };
+  }
+  #reuseSection(parent, item) {
+    if (item.state === 'ready' && !this.pending.has(item.childId)) {
+      // A persisted but never-started section may be recovered after a restart.
+      this.pending.set(item.childId, { item, parent });
+    }
+    return { ...this.workStatus(item), reused: true };
+  }
+  #sectionBatchFor(item) {
+    return this.store.eventsByKind(item.runId, 'section_batch_planned')
+      .find(event => event.payload.members.some(member => member.attemptId === item.attemptId));
+  }
+  #sectionBatchState(batch) {
+    const { runId, payload } = batch;
+    if (this.bindings.get(payload.parentId)?.runId !== runId ||
+        this.nativeInputs.current(runId)?.version !== payload.inputVersion) return;
+    const work = this.store.getWorkItems(runId);
+    const items = payload.members.map(member => work.find(item => item.attemptId === member.attemptId));
+    const submitted = items.filter(item => item?.state === 'submitted' && item.settlementEventId);
+    const pending = items.some(item => item && (ACTIVE.has(item.state) || item.state === 'ready' ||
+      (item.state === 'submitted' && !item.settlementEventId)));
+    const memberIds = new Set(payload.members.map(member => member.workItemId));
+    const attention = this.hud.load(runId).agents[payload.parentId]?.attention.length;
+    const individual = !this.groupSectionResults || this.held.has(runId) || attention ||
+      items.some(item => !item || RETRYABLE.has(item.state) || item.state === 'stopping' ||
+        (item.state === 'ready' && !this.pending.has(item.childId))) ||
+      work.some(item => item.dependsOn?.some(id => memberIds.has(id))) ||
+      this.store.eventsByKind(runId, 'section_batch_individual').some(event => event.stepId === batch.id);
+    return { submitted, pending, individual };
+  }
+  /** A successful grouped dispatch deliberately ends the worker turn until its reply enters a request. */
+  isAwaitingSectionBatch(sessionId, runId) {
+    const binding = this.bindings.get(sessionId);
+    if (!this.groupSectionResults || this.closing || !binding || binding.parentId || binding.runId !== runId) return false;
+    return this.store.eventsByKind(runId, 'section_batch_planned').some(batch => {
+      if (batch.payload.parentId !== sessionId) return false;
+      const state = this.#sectionBatchState(batch);
+      if (!state || state.individual) return false;
+      if (state.pending) return true;
+      if (!state.submitted.length) return false;
+      const reply = this.store.getMessage(`${batch.id}-results`);
+      return !reply || reply.status === 'queued' || reply.status === 'inbox_persisted';
+    });
+  }
+  #childResult(item, result) {
+    const event = this.store.getEvent(item.resultEventId);
+    return { workItemId: item.id, state: item.state, eventId: event.id, ...(this.explicitEvidenceRefs ? {
+      stepId: event.stepId, attemptId: event.attemptId, evidenceRefs: [event.payload.artifactRef],
+    } : {}), result, ...((item.computation || item.sectionLookup) ? { verification: event.payload.verification ??
+      { status: 'missing', scope: VERIFICATION_SCOPE } } : {}) };
+  }
+  async #notifyBatch(batch) {
+    const state = this.#sectionBatchState(batch);
+    if (!state || !this.backend?.getAgent?.(batch.payload.parentId)) return;
+    const { runId, payload } = batch;
+    const messageId = `${batch.id}-results`;
+    const committed = this.store.getMessage(messageId);
+    if (committed) {
+      await this.deliver(committed);
+      return;
+    }
+    if (state.individual) {
+      if (!this.store.eventsByKind(runId, 'section_batch_individual').some(event => event.stepId === batch.id)) {
+        this.store.appendEvent({ runId, stepId: batch.id, kind: 'section_batch_individual', parents: [batch.id],
+          payload: { parentId: payload.parentId } });
+      }
+      for (const item of state.submitted) {
+        if (!this.isCurrentInput(item)) return;
+        const messageId = `${item.attemptId}-section-result`;
+        const existing = this.store.getMessage(messageId);
+        if (existing) { await this.deliver(existing); continue; }
+        const final = this.store.getEvent(item.resultEventId);
+        await this.#send(item.childId, { targetId: item.parentId, stepId: `${item.id}:delivery`, messageId,
+          result: this.#childResult(item, final.payload.result) }, true,
+        { inputVersion: payload.inputVersion, parents: [final.id] });
+      }
+      return;
+    }
+    if (state.pending || !state.submitted.length) return;
+    const results = state.submitted.map(item => {
+      const final = this.store.getEvent(item.resultEventId);
+      const result = this.#childResult(item, final.payload.result);
+      if (Buffer.byteLength(JSON.stringify(result.result)) > 4096) {
+        result.result = { readThrough: 'collab_history', artifactRef: final.payload.artifactRef };
+      }
+      return { section: item.sectionDispatch.selector, ...result };
+    });
+    const report = { kind: 'section_batch_results', batchId: batch.id, results };
+    // The immutable delivery and its final events keep the complete proofs. Only
+    // the model-facing copy shares the verification scope across host lookups.
+    const projection = state.submitted.every(item => item.sectionLookup) && results.every(row => row.verification?.status === 'passed')
+      ? { ...report, verificationScope: VERIFICATION_SCOPE, results: results.map(({ verification, ...row }) =>
+        ({ ...row, verification: { status: verification.status, receiptId: verification.receiptId, verifiedFields: verification.verifiedFields } })) }
+      : undefined;
+    await this.#send(payload.parentId, { targetId: payload.parentId, stepId: batch.id, messageId, result: report }, true,
+    { inputVersion: payload.inputVersion, parents: [batch.id, ...results.map(result => result.eventId)], projection });
+  }
+  /** Resume durable group notifications and leave human follow-ups free to enter an active batch. */
+  async resumeSectionResults(sessionId) {
+    const binding = this.bindings.get(sessionId);
+    if (!binding || binding.parentId) return false;
+    const batches = this.store.eventsByKind(binding.runId, 'section_batch_planned')
+      .filter(event => event.payload.parentId === sessionId && this.#sectionBatchState(event));
+    for (const batch of batches) await this.#notifyBatch(batch);
+    return batches.some(batch => this.#sectionBatchState(batch)?.pending);
+  }
+  /** Review distinct current result events with the same gates as individual acceptance. */
+  acceptSections(parentId, { batchId, reviews }) {
+    const binding = this.bindings.get(parentId);
+    if (!binding || !this.isToolAvailable(parentId, 'collab_accept_sections')) fail('FORBIDDEN', 'Section review is unavailable for this parent');
+    const batch = this.store.getEvent(batchId);
+    if (!batch || batch.runId !== binding.runId || batch.kind !== 'section_batch_planned' || batch.payload.parentId !== parentId) {
+      fail('FORBIDDEN', 'Review only a section batch owned by this parent');
+    }
+    if (this.nativeInputs.current(binding.runId)?.version !== batch.payload.inputVersion) {
+      fail('STALE_INPUT', 'Use the results for the current task input');
+    }
+    if (!Array.isArray(reviews) || reviews.length < 1 || reviews.length > batch.payload.members.length) {
+      fail('INVALID_ARGUMENT', 'Review each selected work item at most once');
+    }
+    const shortReviews = reviews.some(review => review?.section !== undefined);
+    if (shortReviews) {
+      const message = this.store.getMessage(`${batch.id}-results`);
+      const notice = message && this.store.getEvent(message.eventId);
+      if (!notice || notice.runId !== binding.runId || notice.kind !== 'agent_message' || notice.stepId !== batch.id ||
+          notice.payload.provenance !== 'host_delivery' || notice.payload.recipient !== parentId ||
+          notice.payload.result?.batchId !== batch.id || !['inbox_persisted', 'included_in_request'].includes(message.status)) {
+        fail('STALE_RESULT', 'Section references require the delivered result from this batch');
+      }
+      // Resolve against exactly what the parent received, never the newest attempt for a section.
+      const delivered = new Map(notice.payload.result.results.map(row => [row.section, row]));
+      reviews = reviews.map(review => {
+        if (review.section === undefined) return review;
+        const row = delivered.get(review.section);
+        if (!row) fail('STALE_RESULT', 'Choose a section present in this batch result');
+        if ((review.workItemId !== undefined && review.workItemId !== row.workItemId) ||
+            (review.eventId !== undefined && review.eventId !== row.eventId)) {
+          fail('INVALID_ARGUMENT', 'Conflicting result references. Check the delivered batch and review its intended section.');
+        }
+        return { ...review, workItemId: row.workItemId, eventId: row.eventId };
+      });
+    }
+    if (new Set(reviews.map(review => review.workItemId)).size !== reviews.length) {
+      fail('INVALID_ARGUMENT', 'Review each selected work item at most once');
+    }
+    for (const review of reviews) {
+      const member = batch.payload.members.find(member => member.workItemId === review.workItemId);
+      const item = member && this.#item(binding.runId, member.workItemId);
+      if (!item || item.parentId !== parentId || item.attemptId !== member.attemptId ||
+          item.resultEventId !== review.eventId || !item.settlementEventId || !this.isCurrentInput(item)) {
+        fail('STALE_RESULT', 'Each assessment must bind an exact, current result event from this batch');
+      }
+      if (typeof review.accepted !== 'boolean' || typeof review.reason !== 'string' || !review.reason.trim() || review.reason.length > 400) {
+        fail('INVALID_ARGUMENT', 'Each assessment requires a decision and a reason up to 400 characters');
+      }
+      const state = review.accepted ? 'succeeded' : 'rejected';
+      if (item.state !== 'submitted' && (!item.verificationEventId || item.state !== state || item.discarded)) {
+        fail('INVALID_STATE', 'Each result must be submitted or already assessed with the same decision');
+      }
+    }
+    const assessments = reviews.map(({ workItemId, accepted, reason, section }) => {
+      const assessment = this.accept(parentId, { workItemId, accepted, reason }, { deferSchedule: true });
+      return section ? { section, state: assessment.state, ...(assessment.nextAction ? { nextAction: assessment.nextAction } : {}) }
+        : { workItemId, ...assessment };
+    });
+    this.schedule(binding.runId).catch(error => { this.lastError = error.message; });
+    return { assessments };
+  }
+  /** @param {{signal?: AbortSignal, deferSchedule?: boolean,
+   * sectionDispatch?: {selector:string,title:string,sourceId:string|null,startByte:number,endByte:number},
+   * sectionLookup?: {inputRef:string,title:string,lookup:ReturnType<typeof normalizeSectionLookup>}|null}} [options] */
+  async delegate(parent, { objective, wholeTask = false, role = 'researcher', dependsOn = [], acceptance = [], inputRefs = [], evidenceScope = undefined, workItemId = undefined, retryOf = undefined, computation = undefined, completionMode = undefined, csvWorkflow = undefined, csvStepAllowed = false, taskType = undefined, maxOutputTokens = this.maxOutputTokens }, options = {}) {
+    const { signal, deferSchedule, sectionDispatch, sectionLookup } = options;
     signal?.throwIfAborted();
     if (this.closing) fail('CLOSING', 'Plugin is draining');
     const b = this.bindings.get(parent.id) ?? this.bindRoot(parent.id);
@@ -549,19 +939,26 @@ export class CollaborationManager {
     if (wholeTask) {
       if (objective !== undefined) fail('INVALID_ARGUMENT', 'Choose wholeTask or a narrower objective, not both');
       if (!this.nativeInputs.current(b.runId)) fail('INVALID_ARGUMENT', 'wholeTask requires a current native task input snapshot');
-      objective = 'Execute or check the requested result using the bound complete input snapshot, including later corrections and constraints. You are the execution child: coordination, acknowledgements and acceptance belong to the parent; do not create agents. Preserve the exact requested output format. For a specified JSON object, publish that object itself as the final result, without wrappers, repeated field checklists or extra metadata. Record separately any intermediate checkpoint explicitly requested and evidence needed to support actual actions; do not invent test success. The parent independently verifies and accepts the result.';
+      objective = WHOLE_TASK_OBJECTIVE;
     }
     if (typeof objective !== 'string' || !objective.trim()) fail('INVALID_ARGUMENT', 'Objective required');
     const old = retryOf ? this.#item(b.runId, retryOf) : null;
+    const scope = evidenceScope ?? old?.evidenceScope ?? 'run';
+    if (!['run', 'assigned'].includes(scope)) fail('INVALID_ARGUMENT', 'Unknown evidence scope');
+    if (scope === 'assigned' && (wholeTask || !inputRefs.length)) {
+      fail('INVALID_ARGUMENT', 'Assigned evidence requires a focused objective and explicit inputRefs');
+    }
     const csv = csvWorkflow;
     if ((csv || csvStepAllowed) && !this.isCsvWorkflowEnabled(b.runId)) fail('CSV_WORKFLOW_DISABLED', 'Local CSV processing is off for this run.');
     if (csv && (!this.csvExecutor || computation || old?.computation)) fail('INVALID_CSV_WORKFLOW', 'CSV work requires a configured local executor and a single workflow.');
-    if (!csv && !this.backend) fail('UNAVAILABLE', 'DSH backend is not connected');
+    if (!csv && !sectionLookup && !this.backend) fail('UNAVAILABLE', 'DSH backend is not connected');
+    const executionKind = csv ? undefined : sectionLookup ? 'host-section-lookup'
+      : this.#paidChildRoute() ? 'paid-model' : 'free-local-model';
     taskType=taskType??old?.taskType??'generic';
     if(!TASK_TYPES.includes(taskType))fail('INVALID_ARGUMENT','Unknown encoding task type');
     const mode = completionMode ?? old?.completionMode ?? 'host';
     if (!['host', 'model-copy'].includes(mode)) fail('INVALID_ARGUMENT', 'completionMode must be host or model-copy');
-    if (old && !['failed', 'cancelled', 'unknown', 'rejected'].includes(old.state)) fail('INVALID_STATE', 'Only a failed/interrupted work item can be retried');
+    if (old && !RETRYABLE.has(old.state)) fail('INVALID_STATE', 'Only a failed, rejected or interrupted work item can be retried');
     const id = old?.id ?? workItemId ?? uid('work');
     if (!old && this.store.getWorkItems(b.runId).some(x => x.id === id)) fail('DUPLICATE_WORK', 'Work item already exists');
     for (const dep of dependsOn) {
@@ -571,11 +968,18 @@ export class CollaborationManager {
     }
     const nativeInput = this.nativeInputs.current(b.runId);
     inputRefs = [...new Set(inputRefs.map(ref => this.nativeInputs.resolve(b.runId, ref, { currentOnly: true })))];
-    if (nativeInput && !inputRefs.includes(nativeInput.artifactRef)) inputRefs.push(nativeInput.artifactRef);
+    if (scope === 'assigned' && nativeInput && inputRefs.includes(nativeInput.artifactRef)) {
+      fail('INVALID_ARGUMENT', 'Assigned evidence must use individual source artifacts, not the complete native input');
+    }
+    if (scope === 'run' && nativeInput && !inputRefs.includes(nativeInput.artifactRef)) inputRefs.push(nativeInput.artifactRef);
     for (const ref of inputRefs) this.readArtifact(b.runId, ref);
     const rawContract = computation ?? old?.computation;
     const contract = rawContract ? normalizeContract({ ...rawContract, inputRef: this.nativeInputs.resolve(b.runId, rawContract.inputRef, { currentOnly: true }) }) : null;
     if (contract && !inputRefs.includes(contract.inputRef)) fail('INVALID_CONTRACT', 'Computation inputRef must be an authorized task inputRef');
+    if (sectionLookup && (contract || csv || !sectionDispatch || scope !== 'assigned' ||
+        inputRefs.length !== 1 || inputRefs[0] !== sectionLookup.inputRef)) {
+      fail('INVALID_CONTRACT', 'Section lookup must be bound to its exact assigned source.');
+    }
     if (csvStepAllowed && (csv || contract || !inputRefs.some(ref => this.store.getArtifact(ref).mediaType.startsWith('text/csv')))) {
       fail('INVALID_CSV_WORKFLOW', 'A child CSV step requires an explicitly assigned CSV artifact.');
     }
@@ -586,8 +990,23 @@ export class CollaborationManager {
         fail('INVALID_CSV_WORKFLOW', 'CSV work requires authorized CSV artifacts and 1–8 steps.');
       }
     }
+    // Native retries are explicit; reissuing the same operation must not add another
+    // child to the assignment's required work. Distinct scopes and named work stay separate.
+    const delegationKey = nativeInput && !csv && !workItemId
+      ? canonicalHash({ wholeTask, role, objective: objective.trim(), dependsOn, acceptance, inputRefs, evidenceScope: scope,
+        taskType, computation: contract, completionMode: mode, csvStepAllowed, maxOutputTokens,
+        ...(sectionDispatch ? { sectionDispatch } : {}), ...(sectionLookup ? { sectionLookup } : {}) }) : null;
+    if (delegationKey && !old) {
+      const existing = this.store.getWorkItems(b.runId).find(item => item.parentId === parent.id &&
+        item.inputVersion === nativeInput.version && !item.staleInput &&
+        (item.delegationKey === delegationKey || (wholeTask && isWholeTask(item) && item.role === role)));
+      if (existing) {
+        return sectionDispatch ? this.#reuseSection(parent, existing) : { ...this.workStatus(existing), reused: true };
+      }
+    }
     const attemptId = uid('try'); const childId = csv ? null : uid('collab');
-    const item = { id, runId: b.runId, objective, role, dependsOn, acceptance, inputRefs, inputVersion: nativeInput?.version ?? null, taskType,attemptId, childId, parentId: parent.id, state: 'ready', maxOutputTokens, epoch: (old?.epoch ?? 0) + 1, ...(contract ? { computation: contract, contractHash: canonicalHash(contract), completionMode: mode } : {}), ...(csv ? { csvWorkflow: copy(csv) } : {}), ...(csvStepAllowed ? { csvStepAllowed: true } : {}) };
+    const item = { id, runId: b.runId, objective, role, dependsOn, acceptance, inputRefs, inputVersion: nativeInput?.version ?? null, taskType,attemptId, childId, parentId: parent.id, state: 'ready', maxOutputTokens, epoch: (old?.epoch ?? 0) + 1, ...(wholeTask ? { wholeTask: true } : {}), ...(scope === 'assigned' ? { evidenceScope: scope } : {}), ...(delegationKey ? { delegationKey } : {}), ...(contract ? { computation: contract, contractHash: canonicalHash(contract), completionMode: mode } : {}), ...(csv ? { csvWorkflow: copy(csv) } : {}), ...(csvStepAllowed ? { csvStepAllowed: true } : {}), ...(sectionDispatch ? { sectionDispatch } : {}),
+      ...(sectionLookup ? { sectionLookup, contractHash: canonicalHash(sectionLookup) } : {}), ...(executionKind ? { executionKind } : {}) };
     if (this.moneyBudget) Object.assign(item, { moneyContract: { policyId:this.moneyBudget.policy.id,
       currency:this.moneyBudget.policy.currency, maxBranchCost:this.moneyBudget.policy.maxBranchCost,
       scope:'work_item_including_retries', sharedPeriodAndRunLimits:true } });
@@ -597,12 +1016,13 @@ export class CollaborationManager {
       retryReason: old.staleInput ? 'input_changed' : old.state === 'unknown' ? 'recovery_unknown' :
         old.state === 'cancelled' ? 'cancelled' : old.state === 'rejected' ? 'acceptance_rejected' : 'execution_failed' } : {};
     this.store.appendEvent({ runId: b.runId, stepId: id, attemptId, kind: 'work_planned', payload: { ...item, ...retry } });
-    if (childId) this.#saveAgent({ id: childId, runId: b.runId, parentId: parent.id, role, hudLabel:hudLabel({assignmentTitle:objective,role}), state: 'planned', workItemId: id, attemptId, epoch: item.epoch, managed: true });
-    this.pending.set(childId ?? attemptId, { item, parent, signal: csv ? signal : undefined });
+    if (childId) this.#saveAgent({ id: childId, runId: b.runId, parentId: parent.id, role, hudLabel:hudLabel({assignmentTitle:sectionDispatch?.title ?? objective,role}), state: 'planned', workItemId: id, attemptId, epoch: item.epoch, managed: true });
+    this.pending.set(childId ?? attemptId, { item, parent, signal: (csv || sectionLookup) ? signal : undefined });
+    if (deferSchedule) return this.workStatus(item);
     await this.schedule(b.runId);
     const scheduled = this.#item(b.runId, id);
     const result = csv && scheduled.resultEventId ? this.store.getEvent(scheduled.resultEventId) : null;
-    return { workItemId: id, runId: b.runId, childId, attemptId, state: scheduled.state,
+    return { ...this.workStatus(scheduled),
       ...(result ? { eventId: result.id, result: result.payload.result ?? result.payload.error } : {}) };
   }
   async #executeCsv(item, signal) {
@@ -683,10 +1103,26 @@ export class CollaborationManager {
         await completion;
         continue;
       }
+      if (item.sectionLookup) {
+        this.pending.delete(pendingId);
+        this.store.saveWorkItem({ ...item, state: 'running' });
+        let result;
+        try {
+          request.signal?.throwIfAborted();
+          this.completeComputation(childId);
+          result = { stopReason: 'completed', output: [], modelCalls: 0 };
+        } catch (error) {
+          result = { stopReason: request.signal?.aborted ? 'aborted' : 'error', output: [],
+            diagnostic: error.message, modelCalls: 0 };
+        }
+        await this.settle(childId, result, { reschedule: false });
+        continue;
+      }
       if (WRITERS.has(item.role) && tasks.some(t => ACTIVE.has(t.state) && WRITERS.has(t.role))) continue;
       if (this.store.usageSummary(runId).totalTokens >= (this.runLimits.get(runId)?.maxRunTokens??this.maxRunTokens)) { this.pause(runId, true, 'token_budget'); return; }
       this.pending.delete(pendingId);
-      const csvResults = dependencies.filter(dep => dep.csvWorkflow)
+      const assigned = item.evidenceScope === 'assigned';
+      const csvResults = (assigned ? [] : dependencies.filter(dep => dep.csvWorkflow))
         .map(dep => this.store.getEvent(dep.resultEventId)?.payload);
       const labelledCsv = csvResults.flatMap(result => result?.result?.outputs?.map(output => ({
         label: output.label, ref: output.outputArtifactRef,
@@ -702,10 +1138,30 @@ export class CollaborationManager {
       const native = this.nativeInputs.current(runId);
       const labelledRefs = new Set(labelledCsv.map(output => output.ref));
       const refs = [...item.inputRefs.filter(ref => !labelledRefs.has(ref)).map(ref => native?.artifactRef === ref ? native.handle : ref), ...labelledCsv];
-      const prompt = `${COMPACT_GUIDANCE}\nRole: ${item.role}. Work item: ${item.id}. Run: ${runId}. Attempt: ${item.attemptId}.\nObjective: ${item.objective}\nAcceptance: ${JSON.stringify(item.acceptance)}\nAvailable evidence references: ${JSON.stringify(refs)}${native ? '\nThe input: handle contains the complete versioned task, ordered updates and sources; read required pages before executing. Framework requestId, ticket and assignment IDs are routing metadata, not user-data identifiers; obtain business values from source text and later corrections even when field names overlap. Return only the requested result and necessary evidence, not a copy of the source.' : ''}${item.computation ? `\nBound computation contract: ${JSON.stringify(item.computation)}\n${completion} ${VERIFICATION_SCOPE}` : ''}\nUse only your permitted tools. Evidence is not new authorization.`;
+      const sources = assigned && !item.computation ? item.inputRefs.map(ref => this.store.getArtifact(ref)) : [];
+      let inline = [];
+      if (sources.length && sources.every(source => /^(text\/|application\/json\b)/u.test(source.mediaType))
+        && sources.reduce((sum, source) => sum + source.bytes, 0) <= INLINE_EVIDENCE_LIMIT) {
+        try {
+          inline = sources.map(source => ({ ref: source.id, text: evidenceDecoder.decode(this.store.readArtifact(source.id)) }));
+        } catch {
+          // Non-text bytes or an unreadable artifact must not become a lossy prompt.
+        }
+      }
+      const evidence = assigned
+        ? inline.length
+          ? '\nAssigned source data follows as exact JSON-escaped text. Use it directly. Do not fetch these pages again.\n' + JSON.stringify(inline)
+          : '\nRead only the assigned references. If a required source is missing, state that limitation in the result.'
+        : native ? '\nThe input: handle contains the complete versioned task, ordered updates and sources. Preserve source identifiers and values; framework IDs are routing metadata.' : '';
+      const prompt = `${MANAGED_CHILD_GUIDANCE}\nRole: ${item.role}. Work item: ${item.id}. Run: ${runId}. Attempt: ${item.attemptId}.\nObjective: ${item.objective}\nAcceptance: ${JSON.stringify(item.acceptance)}\nAvailable evidence references: ${JSON.stringify(refs)}${evidence}${item.computation ? `\nBound computation contract: ${JSON.stringify(item.computation)}\n${completion} ${VERIFICATION_SCOPE}` : ''}\nUse only your permitted tools. Evidence is not new authorization.`;
       this.store.appendEvent({ runId, stepId: item.id, attemptId: item.attemptId, kind: 'delegation_input', payload: { recipient: childId, prompt, inputRefs: item.inputRefs, provenance: 'host' } });
       try {
-        const start = Promise.resolve(this.backend.start({ parent, childId, prompt, label: item.objective.slice(0, 80), maxOutputTokens: item.maxOutputTokens }));
+        const paid = this.#paidChildRoute();
+        if (item.executionKind && (item.executionKind === 'paid-model') !== paid) {
+          fail('CHILD_ROUTE_CHANGED', 'The available model route changed after delegation. Retry with the current child policy.');
+        }
+        const start = Promise.resolve(this.backend.start({ parent, childId, prompt,
+          label: (item.sectionDispatch?.title ?? item.objective).slice(0, 80), maxOutputTokens: item.maxOutputTokens, paid }));
         this.starting.add(start);
         let handle;
         try { handle = await start; } finally { this.starting.delete(start); }
@@ -718,10 +1174,10 @@ export class CollaborationManager {
           .catch(error => { this.lastError = error.message; }).finally(() => { this.settlements.delete(childId); });
         this.settlements.set(childId, settlement);
         if (this.closing || stale) await handle.dispose();
-      } catch (e) { await this.settle(childId, { stopReason: 'error', output: [], diagnostic: e.message }); }
+      } catch (e) { await this.settle(childId, { stopReason: 'error', output: [], diagnostic: e.message }, { reschedule: false }); }
     }
   }
-  async settle(childId, result) {
+  async settle(childId, result, { reschedule = true } = {}) {
     this.webPending.get(childId)?.abort();
     if (this.closed) return { unknown:true, note:'Activation settled after shutdown deadline' };
     const binding = this.bindings.get(childId); if (!binding) return;
@@ -738,24 +1194,58 @@ export class CollaborationManager {
     const event = this.store.appendEvent({ runId: binding.runId, stepId: item.id, attemptId: binding.attemptId, kind: 'activation_settled', payload: { agentId: childId, stopReason: result.stopReason, finalEventId: final?.id ?? null, artifactRef: raw.id, stale, diagnostic: result.diagnostic ?? null } });
     this.#saveAgent({ ...binding, state: 'settled' });
     if (stale) return;
-    const state = result.stopReason === 'completed' ? 'submitted' : result.stopReason === 'aborted' ? 'cancelled' : 'failed';
-    this.store.saveWorkItem({ ...item, state, resultEventId: final?.id ?? event.id, settlementEventId: event.id });
-    const publicResult = final?.payload.result ?? { execution_status: result.stopReason, outcome: 'inconclusive', summary: item.computation ? 'No host-validated final result was submitted.' : output.filter(x => x.type === 'text').map(x => x.text).join('\n').slice(0, 1200), raw_ref: raw.id, note: 'No structured final result; full output archived.' };
+    const batch = item.sectionDispatch && this.#sectionBatchFor(item);
+    const missingFinal = result.stopReason === 'completed' && (isWholeTask(item) || batch || item.sectionLookup) && !final;
+    const state = result.stopReason === 'completed' && !missingFinal ? 'submitted' : result.stopReason === 'aborted' ? 'cancelled' : 'failed';
+    const settled = this.store.saveWorkItem({ ...item, state, resultEventId: final?.id ?? event.id, settlementEventId: event.id });
+    const publicResult = final?.payload.result ?? { execution_status: missingFinal ? 'missing_final_result' : result.stopReason, outcome: 'inconclusive', summary: item.computation ? 'No host-validated final result was submitted.' : output.filter(x => x.type === 'text').map(x => x.text).join('\n').slice(0, 1200), raw_ref: raw.id, note: 'No structured final result; full output archived.' };
     if (this.backend?.getAgent?.(binding.parentId)) {
-      try { await this.#send(childId, { targetId: binding.parentId, stepId: `${item.id}:delivery`, taskType:item.taskType??'generic',result: { workItemId: item.id, state, eventId: final?.id ?? event.id, ...(this.explicitEvidenceRefs ? {stepId:(final??event).stepId,attemptId:(final??event).attemptId,evidenceRefs:[final?.payload.artifactRef ?? raw.id]} : {}), result: publicResult, ...(item.computation ? { verification: final?.payload.verification ?? { status: 'missing', scope: VERIFICATION_SCOPE } } : {}) } }, true); }
+      try {
+        if (!batch || state !== 'submitted') await this.#send(childId, {
+          targetId: binding.parentId, stepId: `${item.id}:delivery`, taskType: item.taskType ?? 'generic',
+          result: this.#childResult(settled, publicResult),
+        }, true);
+        if (batch) await this.#notifyBatch(batch);
+      }
       catch (e) { this.lastError = e.message; }
     }
-    await this.schedule(binding.runId);
+    if (reschedule) await this.schedule(binding.runId);
   }
-  accept(parentId, { workItemId, accepted, reason, evidenceRefs = [] }) {
+  accept(parentId, { workItemId, accepted, reason, evidenceRefs = [], discard = false }, { deferSchedule = false } = {}) {
     const b = this.bindings.get(parentId); if (!b) fail('FORBIDDEN', 'No managed run');
     const item = this.#item(b.runId, workItemId);
     if (!this.isCurrentInput(item)) fail('STALE_INPUT', `Cannot accept a result from an earlier task input version. Call collab_delegate with retryOf=${JSON.stringify(item.id)}, an objective and acceptance criteria for the current inputs; then assess that new attempt.`);
-    if (item.parentId !== parentId || item.state !== 'submitted') fail('INVALID_STATE', 'Only the owning coordinator can assess a submitted result');
+    if (item.parentId !== parentId) fail('FORBIDDEN', 'Only the Agent that delegated this work can assess it');
     if (typeof accepted !== 'boolean') fail('INVALID_ARGUMENT', 'accepted must be a boolean');
-    for (const ref of evidenceRefs) this.readArtifact(b.runId, ref);
+    if (typeof discard !== 'boolean') fail('INVALID_ARGUMENT', 'discard must be a boolean');
     if (typeof reason !== 'string' || !reason.trim()) fail('INVALID_ARGUMENT', 'Recorded acceptance reason required');
-    const verification = accepted && item.computation ? this.#validatedFinal(item) : null;
+    if (discard && accepted) fail('INVALID_ARGUMENT', 'Discarding a result requires accepted=false');
+    const sameDecision = item.state === 'succeeded' ? accepted : item.state === 'rejected' && !accepted;
+    if (item.verificationEventId && sameDecision && Boolean(item.discarded) === discard) {
+      return { eventId: item.verificationEventId, state: item.state, ...(discard ? { discarded: true } : {}) };
+    }
+    for (const ref of evidenceRefs) this.readArtifact(b.runId, ref);
+    if (discard) {
+      const peers = this.store.getWorkItems(b.runId).filter(other => other.inputVersion === item.inputVersion);
+      const hasAcceptedTask = peers.some(other => other.parentId === parentId && isWholeTask(other) && other.state === 'succeeded');
+      const hasDependants = peers.some(other => other.dependsOn?.includes(item.id));
+      if (!item.inputVersion || !hasAcceptedTask || hasDependants || isWholeTask(item) || item.role !== 'reviewer'
+        || item.computation || item.csvWorkflow || (item.state !== 'submitted' && !RETRYABLE.has(item.state))) {
+        fail('CANNOT_DISCARD_WORK', 'Discard is for an unused, finished supplemental review with no dependants after the whole-task result was accepted');
+      }
+      const parents = item.resultEventId ? [item.resultEventId] : [];
+      const event = this.#event(b, workItemId, 'result_assessment', {
+        accepted: false, reason, evidenceRefs, resultEventId: item.resultEventId ?? null,
+        previousState: item.state, disposition: 'discarded', provenance: 'coordinator_assessment',
+      }, parents);
+      this.store.saveWorkItem({ ...item, state: 'rejected', discarded: true, verificationEventId: event.id });
+      return { eventId: event.id, state: 'rejected', discarded: true,
+        nextAction: 'Do not use this review as evidence. If all remaining required work is accepted, report your checked final result.' };
+    }
+    if (item.state !== 'submitted') {
+      fail('INVALID_STATE', 'Work item ' + item.id + ' is ' + item.state + '. ' + this.workStatus(item).nextAction);
+    }
+    const verification = accepted && (item.computation || item.sectionLookup) ? this.#validatedFinal(item) : null;
     if (accepted && item.csvWorkflow) {
       const final = this.store.getEvent(item.resultEventId);
       const receipt = final?.parents?.length === 1 ? this.store.getEvent(final.parents[0]) : null;
@@ -776,8 +1266,13 @@ export class CollaborationManager {
     }
     const event = this.#event(b, workItemId, 'result_assessment', { accepted, reason, evidenceRefs, resultEventId: item.resultEventId, provenance: 'coordinator_assessment', ...(verification ? { verification } : {}) }, [item.resultEventId]);
     this.store.saveWorkItem({ ...item, state: accepted ? 'succeeded' : 'rejected', verificationEventId: event.id });
-    this.schedule(b.runId).catch(e => { this.lastError = e.message; });
-    return { eventId: event.id, state: accepted ? 'succeeded' : 'rejected' };
+    if (!deferSchedule) this.schedule(b.runId).catch(e => { this.lastError = e.message; });
+    const ready = accepted && item.inputVersion && this.store.getWorkItems(b.runId)
+      .every(work => work.discarded || (work.inputVersion === item.inputVersion && work.state === 'succeeded'));
+    const reusable = ready && isWholeTask(item) && this.bridge?.compatibility().capabilities?.acceptedTaskResult;
+    return { eventId: event.id, state: accepted ? 'succeeded' : 'rejected',
+      ...(reusable ? { workItemId, nextAction: 'For an unchanged local JSON answer, call orchestrator_report with state=ready and work_item_id. Supply summary instead if you revised the result.' }
+        : ready ? { nextAction: 'If the final answer satisfies the user request, send it to the coordinator with orchestrator_report state=ready now.' } : {}) };
   }
   /** @param {string} runId @param {boolean} paused @param {string} [reason] */
   pause(runId, paused, reason = 'operator') {
@@ -816,10 +1311,21 @@ export class CollaborationManager {
   }
   canUseTool(sessionId, toolName) {
     const b = this.bindings.get(sessionId); if (!b) return;
-    if (b.parentId) { try { this.#current(b); } catch (error) { return error.message; } }
+    if (b.parentId) {
+      try {
+        if (this.#current(b).evidenceScope === 'assigned' && !toolName.startsWith('collab_')) {
+          return 'Use the assigned evidence and collaboration tools for this branch.';
+        }
+      } catch (error) { return error.message; }
+    }
     if (toolName.startsWith('collab_') && !this.isToolAvailable(sessionId,toolName)) return 'This tool is not available for the current task phase and host policy.';
     const final = this.finalEvents.get(sessionId);
-    if (final?.runId === b.runId && final.attemptId === (b.attemptId ?? 'root') && !toolName.startsWith('collab_')) return 'Final result already submitted; finish the turn.';
+    const nativeReport = !b.parentId && toolName === 'orchestrator_report' && this.store.getRun(b.runId)?.source === 'superagent';
+    // Old versions permitted native-worker archival finals. Keep that history,
+    // but never interpret it as Superagent completion or a lock on repair/check tools.
+    if (!nativeReport && !this.isNativeTicketRoot(sessionId) && final?.runId === b.runId && final.attemptId === (b.attemptId ?? 'root') && !toolName.startsWith('collab_')) {
+      return 'Final result already submitted; finish the turn.';
+    }
     if (['subagent', 'send_message'].includes(toolName)) return 'Use collab_delegate/collab_send so results are recorded and compacted.';
     const writes = /^(bash|pwsh|write|edit|apply_patch|str_replace|shell|exec)/.test(toolName);
     if (!writes) return;
@@ -827,22 +1333,65 @@ export class CollaborationManager {
     const writer = this.store.getWorkItems(b.runId).find(t => ACTIVE.has(t.state) && WRITERS.has(t.role));
     if (writer && writer.childId !== sessionId) return 'A managed writer owns this workspace; wait for it to settle.';
   }
-  /** @param {string} sessionId @param {string} callId @param {number} estimate @param {object} [priceContext] */
-  reserveCall(sessionId, callId, estimate, priceContext = {}) {
+  observeCoordinatorTurn(sessionId, event) {
+    if (!['turn/start','turn/end','step/start','step/end'].includes(event.type) || !Number.isSafeInteger(event.data?.turn) || event.data.turn < 0 ||
+        !Number.isSafeInteger(event.seq) || event.seq < 0) return;
+    const b = this.binding(sessionId);
+    if (!b || b.parentId || b.runId !== `super-master-${sessionId}` || this.bridge?.snapshot().masterSessionId !== sessionId) return;
+    const run = this.store.getRun(b.runId);
+    if (!isSharedCoordinatorRun(run) || run.rootSessionId !== sessionId) return;
+    const previous = this.coordinatorBoundaries.get(sessionId);
+    if (previous && event.seq <= previous.seq) return;
+    const turn = event.data.turn;
+    if (event.type === 'turn/start') {
+      this.store.recordCoordinatorTurn(b.runId, turn, event.seq);
+      this.coordinatorBoundaries.set(sessionId, { seq:event.seq, lastTurn:turn, openTurnStartSeq:event.seq, lastStepBoundary:null });
+    } else if (event.type === 'turn/end' || !previous || previous.lastTurn !== turn || previous.openTurnStartSeq == null) {
+      this.coordinatorBoundaries.set(sessionId, { seq:event.seq, lastTurn:turn, openTurnStartSeq:null, lastStepBoundary:null });
+    } else {
+      this.coordinatorBoundaries.set(sessionId, { ...previous, seq:event.seq,
+        ...(event.type === 'step/start' ? { lastStepStartSeq:event.seq } : {}),
+        lastStepBoundary:{kind:event.type === 'step/start' ? 'start' : 'end',seq:event.seq} });
+    }
+  }
+  /** @param {string} sessionId @param {string} callId @param {number} estimate
+   * @param {import('./types.js').TokenAdmission} [tokenAdmission]
+   * @param {{provider?:string,model?:string,estimatedInputTokens?:number,maxOutputTokens?:number}} [priceContext] */
+  reserveCall(sessionId, callId, estimate, priceContext = {}, tokenAdmission = { scope: 'run' }) {
     const b = this.bindings.get(sessionId); if (!b) return null;
     if (this.moneyHolds.has(b.runId)) fail('RUN_PAUSED', 'Money budget paused requests; an operator must review and resume before another model request.');
     if (!Number.isSafeInteger(estimate) || estimate < 0) fail('INVALID_ARGUMENT', 'Token reservation must be a nonnegative safe integer');
     if (typeof callId !== 'string' || !callId) fail('INVALID_ARGUMENT', 'callId required');
+    const anchor = tokenAdmission.scope === 'coordinator_turn' && !b.parentId && b.runId === `super-master-${sessionId}` &&
+      this.store.coordinatorTurnStart(b.runId, tokenAdmission.turn, tokenAdmission.startSeq);
+    const sameTurn = previous => anchor && previous?.scope === 'coordinator_turn' &&
+      previous.turn === anchor.payload.turn && previous.startSeq === anchor.payload.startSeq;
     const old = this.reservations.get(callId);
-    if (old) { if (old.runId !== b.runId || (old.estimate??old.tokens) !== estimate) fail('RESERVATION_CONFLICT', 'callId already reserved with different data'); return b; }
-    const usage = this.store.usageSummary(b.runId);
-    const pending = [...this.reservations.values()].filter(x => x.runId === b.runId).reduce((n,x) => n+x.tokens,0);
-    if (usage.totalTokens + pending + estimate > (this.runLimits.get(b.runId)?.maxRunTokens??this.maxRunTokens)) { this.pause(b.runId,true,'token_budget'); fail('TOKEN_BUDGET', 'Run token admission budget exceeded'); }
-    if (this.moneyBudget) {
-      try { this.moneyBudget.reserve({ ...priceContext, runId:b.runId, branchId:b.workItemId ?? 'root', callId }); }
+    if (old) {
+      if (old.runId !== b.runId || (old.estimate ?? old.tokens) !== estimate ||
+          (anchor ? !sameTurn(old.tokenAdmission) : old.tokenAdmission?.scope === 'coordinator_turn')) {
+        fail('RESERVATION_CONFLICT', 'callId already reserved with different data');
+      }
+      return b;
+    }
+    const known = anchor ? this.store.tokensAfterTurnStart(b.runId, anchor) : this.store.usageSummary(b.runId).totalTokens;
+    const pending = [...this.reservations.values()].filter(x => x.runId === b.runId &&
+      (!anchor || x.tokenAdmission?.scope !== 'coordinator_turn' || sameTurn(x.tokenAdmission))).reduce((n,x) => n+x.tokens,0);
+    if (known + pending + estimate > (this.runLimits.get(b.runId)?.maxRunTokens??this.maxRunTokens)) {
+      if (anchor) fail('TOKEN_BUDGET', 'Coordinator turn token admission budget exceeded');
+      this.pause(b.runId,true,'token_budget'); fail('TOKEN_BUDGET', 'Run token admission budget exceeded');
+    }
+    const internallyFree = b.parentId && typeof priceContext.provider === 'string' && typeof priceContext.model === 'string' &&
+      this.backend?.isFreeRoute?.(priceContext.provider, priceContext.model) === true;
+    if (this.moneyBudget && !internallyFree) {
+      try {
+        this.moneyBudget.reserve({ runId: b.runId, branchId: b.workItemId ?? 'root', callId,
+          provider: priceContext.provider ?? '', model: priceContext.model ?? '',
+          estimatedInputTokens: priceContext.estimatedInputTokens ?? NaN, maxOutputTokens: priceContext.maxOutputTokens ?? NaN });
+      }
       catch (error) { this.pause(b.runId,true,error.code ?? 'money_budget'); throw error; }
     }
-    this.reservations.set(callId,{runId:b.runId,estimate,tokens:estimate}); return b;
+    this.reservations.set(callId,{runId:b.runId,estimate,tokens:estimate,tokenAdmission:anchor ? tokenAdmission : {scope:'run'}}); return b;
   }
   /** @param {string} callId */
   releaseCall(callId) {
@@ -851,6 +1400,18 @@ export class CollaborationManager {
     if (usage?.inputTokens != null && usage?.outputTokens != null) { this.reservations.delete(callId); return; }
     const known = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
     this.reservations.set(callId, { ...reservation, tokens:Math.max(0,(reservation.estimate??reservation.tokens)-known) });
+  }
+  /** Synchronous setup failed before the provider stream opened. The confirmed debit is zero. */
+  cancelBeforeDispatch(callId, attribution) {
+    const reservation = this.reservations.get(callId);
+    if (!reservation) return;
+    try {
+      this.store.recordUsage({ ...attribution, runId: reservation.runId, callId, usageStatus:'not_dispatched',
+        measurement:'host_not_dispatched', inputTokens:0, outputTokens:0, cachedInputTokens:0,
+        uncachedInputTokens:0, cacheWriteTokens:0 });
+    } finally {
+      this.reservations.delete(callId);
+    }
   }
   protocols() { return this.registry.exportVersions(); }
   attachBridge(bridge) { this.bridge = bridge; }

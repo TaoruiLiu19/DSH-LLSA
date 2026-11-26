@@ -28,11 +28,14 @@ import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
 import { executorLoad, ticketDetail, ticketList } from './views/tickets.ts'
 import { LOCAL_PANEL } from './local-panel.ts'
-import { LocalTaskConflict, LocalTaskWebUnavailable } from './local-tasks.ts'
+import { LocalTaskConflict, LocalTaskWebUnavailable, MAX_LOCAL_TASK_BODY_BYTES } from './local-tasks.ts'
+import { LocalArtifactDownload, LocalArtifactDownloadError } from './local-artifact-download.ts'
 
 export interface HttpHost {
   submitLocal?(input: unknown): { triggerId: string; reused: boolean }
+  appendLocal?(ticketId: string, input: unknown): { triggerId: string; reused: boolean }
   localTasks?(): unknown
+  downloadLocalArtifact?(ticketId: string, path: string, allowDraft: boolean, sha256?: string): LocalArtifactDownload
   readonly store: Store
   /** Feishu message links resolved since startup, used by search to match AppLink URLs. */
   readonly sourceLinks: Pick<TextCache, 'entries'>
@@ -72,11 +75,20 @@ async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<un
     if (size > maxBytes) throw new RouteError(413, `Request exceeds ${maxBytes} bytes`)
     chunks.push(bytes)
   }
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown }
+  try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))) as unknown }
   catch { throw new RouteError(400, 'The request body is not JSON') }
 }
 function json(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(JSON.stringify(value))
+}
+function attachment(res: ServerResponse, result: LocalArtifactDownload): void {
+  const name = result.path.split('/').at(-1)!
+  const fallback = name.replace(/[^A-Za-z0-9_. -]/gu, '_')
+  res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': result.content.length,
+    'content-disposition': `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+    'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "sandbox; default-src 'none'",
+    'x-llsa-artifact-status': result.disposition })
+  res.end(result.content)
 }
 export function sameOrigin(req: Pick<IncomingMessage, 'headers'>, port: number): boolean {
   const host = req.headers.host
@@ -90,7 +102,7 @@ function failure(error: unknown): [number, Record<string, unknown>] {
     return [400, { error: `Invalid settings: ${issues.map(issue => issue.path).join(', ')}`, issues }]
   }
   if (error instanceof SetupError) return [400, { error: error.message, setup: error.problem }]
-  if (error instanceof RouteError) return [error.status, { error: error.message }]
+  if (error instanceof RouteError || error instanceof LocalArtifactDownloadError) return [error.status, { error: error.message }]
   if (error instanceof UserError) return [error.missing ? 404 : 400, { error: error.message, code: error.code, values: error.values }]
   if (error instanceof SettingsConflict || error instanceof PromptConflict || error instanceof LocalTaskConflict || error instanceof LocalTaskWebUnavailable) {
     return [409, { error: error.message }]
@@ -155,14 +167,28 @@ const PromptsQuery = z.object({ revision: count.optional(), offset: count.defaul
 const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-9-]*$/)])
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() }).strict()
+const ArtifactDownloadQuery = z.object({ path: z.string().min(1).max(180), draft: z.literal('1').optional(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/u).optional() }).strict()
 
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
   const ticket = (id: string) => { if (!store.tickets.get(id)) throw new RouteError(404, 'Ticket not found'); return id }
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
   return {
-    'POST local/tasks': async ({ body }) => { if (!runtime.machine.localOnly || !runtime.submitLocal) throw new RouteError(404, 'Local tasks unavailable'); return runtime.submitLocal(await body()) },
+    'POST local/tasks': async ({ body }) => {
+      if (!runtime.machine.localOnly || !runtime.submitLocal) throw new RouteError(404, 'Local tasks unavailable')
+      return runtime.submitLocal(await body(MAX_LOCAL_TASK_BODY_BYTES))
+    },
+    'POST local/tasks/:id/followups': async ({ params, body }) => {
+      if (!runtime.machine.localOnly || !runtime.appendLocal) throw new RouteError(404, 'Local tasks unavailable')
+      return runtime.appendLocal(ticket(params.id), await body())
+    },
     'GET local/tasks': () => { if (!runtime.machine.localOnly || !runtime.localTasks) throw new RouteError(404, 'Local tasks unavailable'); return runtime.localTasks() },
+    'GET local/tasks/:id/artifacts': ({ params, query }) => {
+      if (!runtime.machine.localOnly || !runtime.downloadLocalArtifact) throw new RouteError(404, 'Local tasks unavailable')
+      const { path, draft, sha256 } = ArtifactDownloadQuery.parse(query)
+      return runtime.downloadLocalArtifact(params.id, path, draft === '1', sha256)
+    },
     'GET state': () => stateView(runtime),
     'GET overview': () => overview(views(runtime), runtime.health, policyVersion(store.settings()),
       executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem),
@@ -200,7 +226,13 @@ function routes(runtime: HttpHost): Routes {
       return ticketList(views(runtime), state, offset, limit)
     },
     'GET tickets/:id': ({ params }) => ticketPage(runtime, params.id),
-    'POST tickets/:id/retry': ({ params }) => { const id = ticket(params.id); runtime.engine.retryTicket(id); return { retried: true } },
+    'POST tickets/:id/retry': ({ params, query }) => {
+      const id = ticket(params.id)
+      if (query.assignmentId !== undefined && store.tickets.get(id)?.assignments.at(-1)?.id !== query.assignmentId)
+        throw new LocalTaskConflict('The assignment changed. Refresh the ticket before retrying.')
+      runtime.engine.retryTicket(id)
+      return { retried: true }
+    },
     'POST tickets/:id/stop': ({ params }) => { const id = ticket(params.id); runtime.engine.stopTicket(id); return { stopped: true } },
     'POST executor/pause': async ({ body }) => runtime.settings.pause(z.object({ paused: z.boolean() }).strict().parse(await body()).paused, 'panel'),
     'PUT settings/:block': async ({ params, body }) => {
@@ -260,7 +292,9 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
         const route = match(table, req.method ?? 'GET', url.pathname.slice('/orchestrator/api/'.length).split('/'))
         if (!route) throw new RouteError(404, 'Unknown operation')
         const query = Object.fromEntries(url.searchParams)
-        json(res, 200, await route.run({ params: route.params as never, query, body: maxBytes => readBody(req, maxBytes) }))
+        const result = await route.run({ params: route.params as never, query, body: maxBytes => readBody(req, maxBytes) })
+        if (result instanceof LocalArtifactDownload) attachment(res, result)
+        else json(res, 200, result)
       } catch (error) { json(res, ...failure(error)) }
     } })]
   return () => { for (const dispose of disposers) dispose() }

@@ -79,7 +79,7 @@ function fixture(t, wrapExecutor = execute => execute) {
     python,
     scratchDir: join(stateDir, 'engine'),
   });
-  const manager = new CollaborationManager({ store, backend, csvExecutor: wrapExecutor(executor) });
+  const manager = new CollaborationManager({ store, backend, allowPaidManagedChildren: true, csvExecutor: wrapExecutor(executor) });
   manager.bindRoot(root.id, { runId, ticketId: 'batch-ticket', assignmentId: 'batch-assignment' });
   t.after(async () => {
     await manager.close();

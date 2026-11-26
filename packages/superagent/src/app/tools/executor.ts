@@ -6,10 +6,11 @@ import { claimPull, readPull } from '../../sources/github-pull.ts'
 import type { SourceContext } from '../../sources/host.ts'
 import { readResource, type ResourceHost } from '../resources.ts'
 import type { Store } from '../store.ts'
-import { reportRelay, threadFollowedNotice } from '../notices.ts'
+import { applyWorkerReport, threadFollowedNotice } from '../notices.ts'
 import type { Sessions } from '../sessions.ts'
 import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
 import type { CollabBridge } from '../collab-bridge.ts'
+import { localArtifactTools } from './artifacts.ts'
 
 export interface ExecutorToolsHost {
   readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext'>
@@ -18,13 +19,15 @@ export interface ExecutorToolsHost {
   readonly resources: ResourceHost
   /** GitHub Source context whose pull-request rules govern claiming a reported PR. */
   readonly github: SourceContext
-  readonly collabBridge?: Pick<CollabBridge, 'recordReport' | 'beforeReport'>
+  readonly collabBridge?: Pick<CollabBridge, 'recordReport' | 'beforeReport' | 'acceptedTaskResult' |
+    'localArtifactWorkspace' | 'localArtifactEvidence' | 'submitLocalArtifact' | 'pendingLocalReview'>
   sendReplies(): Promise<void>
 }
 
 export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
   const ticketId = ticket.id
   return [
+    ...localArtifactTools(host.collabBridge, ticketId),
     readTool('Read one page of a resource of this ticket that the resource parameter lists. Follow next_offset, and next_resource where a page names one.',
       true, (resource, offset, limit, signal) => readResource(host.resources, resource, offset, limit, ticketId, signal)),
     tool({
@@ -75,29 +78,41 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     }),
     tool({
       name: 'orchestrator_report',
-      description: 'Report progress, ready, blocked, failed or dropped, as the work and handoff sections say.',
+      description: 'Report progress, ready, blocked, failed or dropped. For a local ready JSON answer, pass work_item_id alone if the accepted whole-task result is already the complete correct answer. Otherwise provide summary.',
       schema: z.object({
         state: z.enum(['progress', 'ready', 'blocked', 'failed', 'dropped']),
-        summary: z.string().min(1),
+        summary: z.string().min(1).optional(),
+        work_item_id: z.string().trim().min(1).max(200).optional()
+          .describe('For ready only: the accepted whole-task work item containing the complete JSON answer. Omit summary.'),
         human_action: z.string().trim().min(1).max(1000).nullish().describe('One concrete question for a person, also with state=progress; omit to keep the pending one, null to clear it.'),
         question_for_trigger_id: z.string().optional().describe('With human_action: the human message that raised the question, which is asked where that person wrote.'),
         pr_number: z.number().int().positive().nullish().describe(`The ticket's PR: its source PR, or one by ${host.github.deployment.github.login} from a branch named after this ticket (DSH_SUPERAGENT_NAME).`),
         reply_to_trigger_id: z.string().optional().describe('The explicit human question this report answers; never for ordinary progress.'),
-      }).strict(),
+      }).strict().refine(args => args.work_item_id === undefined ? args.summary !== undefined
+        : args.state === 'ready' && args.summary === undefined && args.human_action === undefined && args.pr_number === undefined
+          && args.question_for_trigger_id === undefined && args.reply_to_trigger_id === undefined, {
+        message: 'Provide summary, or report ready with work_item_id alone',
+      }),
       execute: async (args, signal) => {
         const current = host.store.tickets.get(ticketId)
         if (!current || !liveTicket(current)) throw new Error('Ticket ended (PR was closed or work finished); do not resume it')
-        host.collabBridge?.beforeReport(current, args)
+        const summary = args.work_item_id === undefined
+          ? args.summary
+          : host.collabBridge?.acceptedTaskResult(current, args.work_item_id)
+        if (!summary) throw new Error('A complete summary is required when the report cannot reuse an accepted child result')
         const pull = args.pr_number != null ? await readPull(host.github, args.pr_number, signal) : undefined
         // Claim the PR, record the report, and queue the relay atomically so a rejected PR claim or invalid report leaves no partial state, and a recorded report always reaches the main Session.
         return host.store.atomic(() => {
+          const latest = host.store.tickets.get(ticketId)
+          if (!latest || latest.assignments.at(-1)?.id !== current.assignments.at(-1)?.id || !liveTicket(latest))
+            throw new Error('Ticket or assignment changed while preparing the report')
+          host.collabBridge?.beforeReport(latest, args)
           const refused = pull && claimPull(host.github, ticketId, pull)
           if (refused) throw new Error(refused)
-          const report = { state: args.state, summary: args.summary, ...(args.human_action !== undefined ? { question: args.human_action } : {}),
+          const report = { state: args.state, summary, ...(args.human_action !== undefined ? { question: args.human_action } : {}),
             ...(args.question_for_trigger_id ? { askedBy: args.question_for_trigger_id } : {}),
             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}) }
-          const updated = host.engine.report(ticketId, report)
-          const relay = reportRelay(updated, report)
+          const { ticket: updated, relay } = applyWorkerReport(host.engine, ticketId, report)
           if (host.collabBridge) host.collabBridge.recordReport(updated, report, relay)
           else if (relay) host.sessions.relay(relay.id, relay.text)
           const notification = relay ? 'orchestrator' : 'internal_only'

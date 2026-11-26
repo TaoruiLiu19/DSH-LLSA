@@ -1,5 +1,6 @@
 /** Shared tool primitives and schemas for the main and executor Sessions. */
 import { z } from 'zod'
+import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { IM_WORDS, wordCount } from '../../infra/text.ts'
 import { resourceGrammar } from '../resources.ts'
 
@@ -7,7 +8,7 @@ export interface Tool<S extends z.ZodType = z.ZodType> {
   name: string
   description: string
   schema: S
-  execute: (args: z.infer<S>, signal: AbortSignal) => Promise<unknown>
+  execute: (args: z.infer<S>, signal: AbortSignal, localExecution?: ToolRunContext) => Promise<unknown>
 }
 export type RegisterTool = <S extends z.ZodType>(name: string, description: string, schema: S, execute: Tool<S>['execute']) => void
 export const tool = <S extends z.ZodType>(definition: Tool<S>): Tool => definition as unknown as Tool

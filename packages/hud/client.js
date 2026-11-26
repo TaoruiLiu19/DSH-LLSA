@@ -117,10 +117,17 @@ const ALIASES = Object.freeze({
   write: 'write',
 });
 const csvAliases = Object.freeze({ ...ALIASES, collab_csv_workflow: 'collab_csv_workflow' });
+const webAliases = Object.freeze({ ...csvAliases, collab_consult_web: 'collab_consult_web' });
+const sectionAliases = Object.freeze({ ...webAliases, collab_delegate_sections: 'collab_delegate_sections' });
+const sectionReviewAliases = Object.freeze({ ...sectionAliases, collab_accept_sections: 'collab_accept' });
 const aliasTables = new Map([
   [ALIAS_VERSION, ALIASES],
   [2, csvAliases],
-  [3, Object.freeze({ ...csvAliases, collab_consult_web: 'collab_consult_web' })],
+  [3, webAliases],
+  [4, sectionAliases],
+  [5, sectionReviewAliases],
+  [6, Object.freeze({ ...sectionReviewAliases, artifact_check: 'artifact_check', artifact_list: 'glob',
+    artifact_read: 'read', artifact_write: 'write' })],
 ]);
 
 function supportsAliasVersion(version) {
@@ -148,7 +155,7 @@ const ALIAS_GROUPS = Object.freeze({
     'session_event_search', 'session_event_trace', 'cordis_inspect_list',
     'cordis_inspect_query',
   ],
-  doc: ['read', 'read_image', 'write', 'edit', 'apply_patch', 'str_replace_editor', 'present', 'collab_csv_workflow'],
+  doc: ['read', 'read_image', 'write', 'edit', 'apply_patch', 'str_replace_editor', 'present', 'collab_csv_workflow', 'artifact_check'],
   web: ['web_fetch', 'web_search', 'collab_consult_web'],
   shell: [
     'bash', 'pwsh', 'ralph', 'working_directory', 'load_workspace_dependencies',
@@ -162,7 +169,7 @@ const ALIAS_GROUPS = Object.freeze({
 const AGENT_ALIASES = Object.freeze([
   'subagent', 'workflow', 'list_agents', 'interrupt_agent', 'send_message', 'list_subagent_models',
   'collab_accept', 'collab_complete_computation', 'collab_compute', 'collab_delegate',
-  'collab_delegate_task', 'collab_history', 'collab_project_log', 'collab_publish',
+  'collab_delegate_sections', 'collab_delegate_task', 'collab_history', 'collab_project_log', 'collab_publish',
   'collab_read_evidence', 'collab_send', 'collab_status',
   'orchestrator_ack', 'orchestrator_collab_finish', 'orchestrator_collab_review',
   'orchestrator_eval', 'orchestrator_eval_decide', 'orchestrator_eval_read',
@@ -367,6 +374,7 @@ const VERBS = Object.freeze({
  * (编写中) while the document seat still writes files (整理中).
  */
 const MATERIAL_VERBS = Object.freeze({
+  doc: Object.freeze({ execute: { zh: '校验中', en: 'Checking' } }),
   code: Object.freeze({
     write: { zh: '编写中', en: 'Writing' },
     read: { zh: '阅读中', en: 'Reading' },
@@ -379,10 +387,10 @@ const OTHER_VERB = Object.freeze({ zh: '处理中', en: 'Working' });
 const VERB_GROUPS = Object.freeze({
   read: ['read', 'read_image', 'session_event_read', 'get_goal', 'collab_read_evidence', 'orchestrator_read', 'schedule_view'],
   write: ['write', 'edit', 'apply_patch', 'str_replace_editor', 'present', 'todo_write', 'create_goal', 'update_goal', 'schedule_create', 'schedule_edit', 'send_message', 'collab_send', 'collab_publish', 'collab_csv_workflow', 'orchestrator_reply'],
-  execute: ['bash', 'pwsh', 'ralph', 'run_code', 'working_directory', 'load_workspace_dependencies', 'terminal_open', 'terminal_read', 'terminal_send', 'terminal_close', 'terminal_list', 'terminal_signal', 'job_list', 'job_output', 'job_kill', 'skill'],
+  execute: ['bash', 'pwsh', 'ralph', 'run_code', 'working_directory', 'load_workspace_dependencies', 'terminal_open', 'terminal_read', 'terminal_send', 'terminal_close', 'terminal_list', 'terminal_signal', 'job_list', 'job_output', 'job_kill', 'skill', 'artifact_check'],
   scan: ['glob', 'grep', 'session_search', 'session_trace', 'session_event_search', 'session_event_trace', 'cordis_inspect_list', 'cordis_inspect_query'],
   fetch: ['web_fetch', 'web_search', 'collab_consult_web'],
-  handoff: ['ask_user_question', 'subagent', 'workflow', 'list_agents', 'interrupt_agent'],
+  handoff: ['ask_user_question', 'subagent', 'workflow', 'list_agents', 'interrupt_agent', 'collab_delegate_sections'],
 });
 
 const VERB_BY_ALIAS = (() => {

@@ -14,6 +14,25 @@ export interface EventQuery { asOfSeq?: number; afterSeq?: number; limit?: numbe
 export interface StepQuery { attemptId?: string; asOfSeq?: number; eventId?: string }
 export interface ArtifactRange { start?: number; end?: number }
 
+/** Host-visible request settings, not a verified provider limit or billing cap. */
+export interface RequestLimitObservation {
+  requestedMaxOutputTokens: number | null;
+  observedStatus: 'explicit' | 'not_set' | 'invalid';
+  observationBoundary: 'llm_stream_options';
+  reservationMaxOutputTokens: number;
+  reservationSource: 'request_option' | 'configured_estimate';
+  providerEffectiveLimit: 'unknown';
+}
+
+export type TokenAdmission = { scope: 'run' } | { scope: 'coordinator_turn'; turn: number; startSeq: number };
+export interface CallAccountingContext {
+  accountingScope: 'shared_coordinator' | 'ticket_execution' | 'standalone';
+  ticketId: string | null;
+  assignmentId: string | null;
+  attributionBasis: 'host_run_binding';
+  requestLimits: RequestLimitObservation;
+}
+
 export interface RunInput {
   id?: string;
   runId?: string;
@@ -40,6 +59,8 @@ export interface EventInput {
 
 /** Minimal adapter contract; the backend owns lifecycle and real DSH handles. */
 export interface Backend {
+  canStartFree?(): boolean;
+  isFreeRoute?(provider: string, model: string): boolean;
   modelProfile?(sessionId: string): string;
   getAgent?(sessionId: string): unknown;
   start(options: {
@@ -48,6 +69,7 @@ export interface Backend {
     prompt: string;
     label: string;
     maxOutputTokens: number;
+    paid?: boolean;
   }): Promise<AgentHandle> | AgentHandle;
   deliver(message: {
     recipientId: string; senderId: string; runId: string; messageId: string; text: string;

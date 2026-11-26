@@ -65,6 +65,9 @@ export class CollaborationStore {
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), run_seq INTEGER NOT NULL, step_id TEXT NOT NULL, attempt_id TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(run_id,run_seq));
       CREATE INDEX IF NOT EXISTS event_step ON events(run_id,step_id,run_seq);
+      CREATE INDEX IF NOT EXISTS event_tool_observation ON events(run_id,run_seq)
+        WHERE json_extract(data,'$.kind')='tool_observation';
+      CREATE TABLE IF NOT EXISTS tool_observation_refs(ref TEXT NOT NULL, event_id TEXT NOT NULL REFERENCES events(id), PRIMARY KEY(ref,event_id));
       CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'events are immutable'); END;
       CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'events are immutable'); END;
       CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, sha256 TEXT UNIQUE NOT NULL, bytes INTEGER NOT NULL, media_type TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -277,6 +280,31 @@ export class CollaborationStore {
     this.db.prepare('INSERT INTO requests(id,run_id,data) VALUES (?,?,?)').run(id,input.runId,json(data)); return data;
   }
   listRequests(runId) { this.#run(runId); return this.db.prepare('SELECT data FROM requests WHERE run_id=? ORDER BY rowid').all(runId).map(parse); }
+  coordinatorTurnStart(runId, turn, startSeq) {
+    const event = this.getEvent(`admission:${runId}:${startSeq}`);
+    return event?.runId === runId && event.kind === 'coordinator_turn_started' && event.payload.turn === turn ? event : undefined;
+  }
+  recordCoordinatorTurn(runId, turn, startSeq) {
+    integer(turn, 'turn'); integer(startSeq, 'startSeq');
+    return this.#tx(() => {
+      const prior = this.coordinatorTurnStart(runId, turn, startSeq);
+      if (prior) return prior;
+      const usageThrough = Number(this.db.prepare('SELECT IFNULL(MAX(rowid),0) AS n FROM usage_calls').get().n);
+      return this.#append({ id: `admission:${runId}:${startSeq}`, runId, kind: 'coordinator_turn_started',
+        stepId: 'token-admission', payload: { turn, startSeq, usageThrough } });
+    });
+  }
+  tokensAfterTurnStart(runId, anchor) {
+    // Use the immutable receipt position rather than wall-clock time. Count even unscoped calls
+    // that started after this turn opened. A late settlement updates its original receipt in place.
+    const row = this.db.prepare(`SELECT IFNULL(SUM(IFNULL(json_extract(data,'$.inputTokens'),0) +
+      IFNULL(json_extract(data,'$.outputTokens'),0)),0) AS n FROM usage_calls WHERE run_id=? AND
+      ((json_extract(data,'$.tokenAdmission.scope')='coordinator_turn' AND
+        json_extract(data,'$.tokenAdmission.startSeq')=? AND json_extract(data,'$.tokenAdmission.turn')=?)
+       OR (IFNULL(json_extract(data,'$.tokenAdmission.scope'),'run')!='coordinator_turn' AND rowid>?))`)
+      .get(runId, anchor.payload.startSeq, anchor.payload.turn, anchor.payload.usageThrough);
+    return Number(row.n);
+  }
   recordUsage(input) {
     this.#run(required(input.runId, 'runId')); const id = required(input.callId ?? input.id, 'callId');
     const counts = ['inputTokens','outputTokens','cachedInputTokens','cacheWriteTokens','uncachedInputTokens'];
@@ -287,7 +315,7 @@ export class CollaborationStore {
     if (input.cost !== undefined && input.cost !== null && (typeof input.cost !== 'number' || !Number.isFinite(input.cost) || input.cost < 0)) fail('INVALID_USAGE','Cost must be nonnegative');
     data.cost = input.cost ?? null; data.currency = input.currency ?? old?.currency ?? 'unspecified';
     if (old) {
-      for (const key of ['runId','provider','account','model','agentId','attemptId','workItemId','parentAgentId','role','purpose',...counts,'cost','providerRequestId']) {
+      for (const key of ['runId','provider','account','model','agentId','attemptId','workItemId','parentAgentId','role','purpose','tokenAdmission',...counts,'cost','providerRequestId']) {
         if (old[key] != null && data[key] != null && !equal(old[key],data[key])) fail('USAGE_CONFLICT', `Recorded usage differs: ${key}`);
         if (data[key] == null && old[key] != null) data[key] = old[key];
       }

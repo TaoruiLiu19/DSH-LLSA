@@ -38,7 +38,10 @@ export const RESOURCES: readonly { name: string; holds: string; executor?: true 
   { name: 'ticket/<id>/inputs', holds: 'its inputs, newest first', executor: true },
   { name: 'ticket/<id>/result', holds: 'its latest report', executor: true },
   { name: 'ticket/<id>/report/<id>', holds: 'the report of one of its assignments', executor: true },
+  { name: 'ticket/<id>/issued', holds: 'local results actually sent, oldest first, with read paths', executor: true },
+  { name: 'ticket/<id>/issued/<id>', holds: 'the exact text of a sent local result', executor: true },
   { name: 'ticket/<id>/collab-report/<id>', holds: 'the complete immutable report content and identity, without duplicated transport copies', executor: true },
+  { name: 'ticket/<id>/artifact/<report-id>/<path>', holds: 'one declared file during its current local review' },
   { name: 'ticket/<id>/collab-audit/<id>', holds: 'the full archived report event including original and delivered transport text', executor: true },
   { name: 'ticket/<id>/transcript', holds: 'its Executor Session\'s messages, newest first', executor: true },
   { name: 'ticket/<id>/message/<n>', holds: 'one message of that transcript', executor: true },
@@ -72,6 +75,7 @@ export interface ResourceHost {
   /** Whether a Session may read `revision` (the revision it currently runs under or any revision it ran under previously). */
   mayRead(sessionId: string, revision: number): boolean
   feishuPageSize(): number
+  readySubmissionHint?(ticketId: string): string | undefined
   sourceLink(trigger: Trigger, signal?: AbortSignal): Promise<{ source_url?: string; source_url_read?: string }>
 }
 export interface MainResourceHost extends ResourceHost {
@@ -254,6 +258,12 @@ const ROUTES: readonly Route[] = [
   ['ticket/', async read => {
     const { host, resource, rest, ticketId, signal } = read
     const [id, section, part, ...more] = rest.split('/')
+    if (id && section === 'artifact' && part && more.length) {
+      main(read)
+      const bridge = host.context.get('orchestratorCollabBridge')
+      if (!bridge) throw new Error('Local artifact review unavailable')
+      return bridge.readLocalReviewArtifact(id, part, more.join('/'), read.offset, read.limit ?? 4000)
+    }
     if (!id || more.length) throw new Error('Unknown context resource')
     if (ticketId && ticketId !== id) throw new Error('Ticket does not belong to this worker')
     const ticket = host.store.tickets.get(id)
@@ -284,7 +294,7 @@ const ROUTES: readonly Route[] = [
       const input = ticket.inputs.find(item => key(item.id) === part || item.id === part)
       const trigger = input?.kind === 'trigger' ? host.store.triggers.get(input.triggerId) : undefined
       const card = trigger && input?.kind === 'trigger' ? triggerMessage(trigger, await host.sourceLink(trigger, signal), input.note) : undefined
-      const message = input && inputMessage(input, card)
+      const message = input && inputMessage(input, card, host.readySubmissionHint?.(id))
       if (message === undefined) throw new Error('Unknown ticket input')
       body = message
     } else if (section === 'message' && part && /^\d+$/.test(part)) {
@@ -292,6 +302,13 @@ const ROUTES: readonly Route[] = [
       const entry = event && transcriptEntry(event)
       if (!entry) throw new Error('Unknown transcript entry')
       body = JSON.stringify(entry)
+    } else if (section === 'issued') {
+      const bridge = host.context.get('orchestratorCollabBridge');
+      if (!bridge) throw new Error('Local result history unavailable')
+      if (part === undefined) return bridge.issuedLocalResults(id, read.offset, Math.min(read.limit ?? 10, 20))
+      const issued = bridge.issuedLocalResult(id, part)
+      if (issued === undefined) throw new Error('Unknown issued result for this ticket')
+      body = issued
     } else if ((section === 'collab-report' || section === 'collab-audit') && part) {
       const report = host.context.get('orchestratorCollabBridge')?.readReport(part)
       if (!report || report.ticketId !== id) throw new Error('Unknown immutable collaboration report')

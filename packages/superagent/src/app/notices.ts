@@ -1,11 +1,12 @@
 /** Formats background notices and steering relays delivered to the main Session via the effect queue. */
 import { randomUUID } from 'node:crypto'
-import { followupOwners, key, liveTicket, type DomainEvent, type Ticket, type WorkerReport } from '../core/index.ts'
+import { followupOwners, key, liveTicket, type DomainEvent, type EngineForExecutor, type Ticket, type WorkerReport } from '../core/index.ts'
 import { triggerMessage } from '../executor/dsh.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import { repliedTo } from './links.ts'
 import type { Store } from './store.ts'
 import { ticketCard } from './cards.ts'
+import { localAppendTarget } from './local-tasks.ts'
 
 /**
  * A background notice tuple for the main Session: `[name, value, summary]`, where `name` is the coalescing key in
@@ -86,7 +87,10 @@ const FOLLOWUP_NOTE = 'Its ticket\'s worker has it and decides; act only if the 
 export function followupNotice(store: Store, sources: SourceRegistry, triggerId: string): Relay | undefined {
   const trigger = store.triggers.get(triggerId)
   const disposition = store.triggers.disposition(triggerId)
-  if (!trigger || !followupOwners(trigger, store).length) return undefined
+  if (!trigger || !disposition) return undefined
+  const owners = followupOwners(trigger, store)
+  if (!owners.length) return undefined
+  if (owners.length === 1 && disposition.fanout.length === 1 && localAppendTarget(trigger) === owners[0]) return undefined
   const tickets = disposition!.fanout.flatMap(id => {
     const ticket = store.tickets.get(id)
     const context = disposition!.context?.includes(id) ? { context: true } : {}
@@ -126,4 +130,10 @@ export function reportRelay(ticket: Ticket, report: Pick<WorkerReport, 'state' |
   }
   if (report.state === 'progress' && !report.answers) return undefined
   return resultRelay(ticket, report.state, report.summary, report.answers)
+}
+
+/** Persist a worker report through the ordinary engine and derive its native relay. */
+export function applyWorkerReport(engine: Pick<EngineForExecutor, 'report'>, ticketId: string, report: WorkerReport) {
+  const ticket = engine.report(ticketId, report)
+  return { ticket, relay: reportRelay(ticket, report) }
 }

@@ -17,6 +17,7 @@ import {
   SEAT_ORDER,
   STATE_COLORS,
   aliasTable,
+  aliasVersionForTool,
   colorOf,
   intentOfAlias,
   isAgentAlias,
@@ -38,11 +39,11 @@ test('the shipped alias table is the contract’s', { skip: contractSkip }, () =
   assert.deepEqual(aliasTable(), contract, 'src/materials.js must mirror contracts/tool-aliases-v1.json');
   const generated = JSON.parse(readFileSync(new URL('../data/tool-aliases-v1.json', import.meta.url), 'utf8'));
   assert.deepEqual(generated, contract, 'data/tool-aliases-v1.json is the published copy');
-  for (const version of [2, 3]) assert.deepEqual(aliasTable(version), contractJson(`tool-aliases-v${version}.json`));
+  for (const version of [2, 3, 4, 5, 6]) assert.deepEqual(aliasTable(version), contractJson(`tool-aliases-v${version}.json`));
 });
 
 test('every published alias has exactly one destination', () => {
-  const aliasNames = new Set(Object.values(aliasTable(3).aliases));
+  const aliasNames = new Set(Object.values(aliasTable(6).aliases));
   for (const alias of aliasNames) {
     assert.ok(Object.hasOwn(MATERIAL_BY_ALIAS, alias), `alias ${alias} is unmapped`);
   }
@@ -176,6 +177,36 @@ test('alias version 3 classifies the consultation tool as web activity', () => {
     tool, alias: tool, material: 'web', known: true, aliasOk: true,
   });
   assert.deepEqual(materialForTool('collab_csv_workflow', { aliasVersion: 3 }), materialForTool('collab_csv_workflow', { aliasVersion: 2 }));
+});
+
+test('alias version 4 recognizes batch section dispatch as orchestration', () => {
+  const tool = 'collab_delegate_sections';
+  assert.equal(materialForTool(tool, { aliasVersion: 3 }).known, false);
+  assert.equal(materialForTool(tool, { aliasVersion: 4 }).alias, tool);
+  assert.equal(intentOfAlias(tool), 'handoff');
+  assert.deepEqual(materialForTool('read', { aliasVersion: 4 }), materialForTool('read'));
+});
+
+test('alias version 5 uses the existing acceptance presentation for a section batch', () => {
+  const tool = 'collab_accept_sections';
+  assert.equal(materialForTool(tool, { aliasVersion: 4 }).known, false);
+  assert.deepEqual(materialForTool(tool, { aliasVersion: 5 }), {
+    ...materialForTool('collab_accept'), tool,
+  });
+});
+
+test('alias version 6 classifies the four scoped file tools without changing older tables', () => {
+  for (const [tool, alias, material] of [
+    ['artifact_list', 'glob', 'search'], ['artifact_read', 'read', 'doc'], ['artifact_write', 'write', 'doc'],
+    ['artifact_check', 'artifact_check', 'doc'],
+  ]) {
+    assert.equal(materialForTool(tool, { aliasVersion: 5 }).known, false);
+    assert.equal(aliasVersionForTool(tool), 6);
+    assert.deepEqual(materialForTool(tool, { aliasVersion: 6 }), { tool, alias, material, known: true, aliasOk: true });
+  }
+  assert.equal(verbFor('doc', 'artifact_check', 'zh'), '校验中');
+  assert.deepEqual(materialForTool('collab_accept_sections', { aliasVersion: 6 }),
+    materialForTool('collab_accept_sections', { aliasVersion: 5 }));
 });
 
 test('verbs are material x intent, always present', () => {

@@ -14,12 +14,19 @@ import type { Settings } from '../settings.ts'
 import type { Store } from '../store.ts'
 import type { CollabBridge } from '../collab-bridge.ts'
 import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
+import { concludeSoleRejectedReview, soleRelayForTool } from './review-handoff.ts'
+import { messageId } from '../delivery.ts'
+import { artifactRecovery } from '../artifact-recovery.ts'
+import { localArtifactContract } from '../local-tasks.ts'
+
+const ReviewReasonSchema = z.string().trim().min(1).max(4000).describe(
+  'Accept briefly. When rejecting, identify the specific mismatch with an evidence path or short exact citation. Omit fields that already passed.')
 
 const RoutingNoteSchema = z.string().trim()
   .refine(text => wordCount(text) <= NOTE_WORDS, `Routing note must not exceed ${NOTE_WORDS} words (Chinese uses word segmentation). Shorten it; do not split it across deliveries.`)
   .describe(`Optional routing background or explicit human constraint, at most ${NOTE_WORDS} words. Never add implementation instructions or replace the original source.`)
 export interface MainToolsHost {
-  readonly collabBridge?: Pick<CollabBridge, 'reviewReport' | 'assertReviewed' | 'validateReply' | 'reportTicket'>
+  readonly collabBridge?: Pick<CollabBridge, 'reviewReport' | 'readReport' | 'assertReviewed' | 'validateReply' | 'reportTicket' | 'readyLocalReply' | 'localReplyFormat' | 'queueResult' | 'sendWorkspaceRepair'>
   readonly context: Context
   readonly engine: Pick<EngineForMainSession, 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'> & EngineForPeople
   readonly store: Pick<Store, 'tickets' | 'triggers' | 'threads' | 'atomic' | 'replyStatus' | 'settings'>
@@ -124,12 +131,12 @@ function route(host: MainToolsHost, item: RouteItem, decided: ReadonlyMap<string
  * `orchestrator_route`: routing decisions for several triggers in one call, in order. Each runs as its own Engine command; one
  * that is refused, or fails, is answered so, and the others still run.
  */
-function routeTool(host: MainToolsHost): Tool {
+function routeTool(host: MainToolsHost, agent: Agent): Tool {
   return tool({
     name: 'orchestrator_route',
     description: 'Route candidates, one item each by the card\'s trigger_id, in one call: accept an explicit request as a new ticket, attach a trigger to an existing ticket, stop a ticket on a person\'s stop message, or ignore a candidate that needs no ticket or stop, as dispatch says. Items run in order and each is answered on its own; a refused item leaves the others. An inferred candidate may be ignored here; accepting one goes through orchestrator_eval_decide.',
     schema: z.object({ decisions: z.array(RouteItemSchema).min(1).max(20) }).strict(),
-    execute: async ({ decisions }) => {
+    execute: async ({ decisions }, _signal, localExecution) => {
       const decided = new Map<string, string>()
       const results = decisions.map(item => {
         const head = { trigger_id: item.trigger_id, kind: item.kind }
@@ -149,42 +156,93 @@ function routeTool(host: MainToolsHost): Tool {
         }
       })
       host.requestPass()
+      const first = results[0]
+      if (localExecution && results.length === 1 && first && !('refused' in first) && first.decision === 'accept' && first.ticket) {
+        const relay = soleRelayForTool(agent, localExecution, 'orchestrator_route')
+        const block = relay?.content.length === 1 ? relay.content[0] : undefined
+        if (block?.type === 'text') {
+          let card: { kind?: string; strength?: string; trigger_id?: string } | undefined
+          try { card = JSON.parse(block.text) ?? undefined } catch { /* Only a native candidate permits the shortcut. */ }
+          if (card?.kind === 'candidate' && card.strength === 'explicit' && card.trigger_id === first.trigger_id) localExecution.concludeTurn()
+        }
+      }
       return { results }
     },
   })
 }
+async function finishReviewedReport(host: MainToolsHost, args: { report_id: string; accepted: boolean; reason: string; text?: string | undefined; use_report?: true | undefined }) {
+  const bridge = host.collabBridge
+  if (!bridge) throw new Error('Collaboration bridge unavailable')
+  const ticketId = bridge.reportTicket(args.report_id)
+  const text = args.accepted ? args.text ?? (args.use_report ? bridge.readyLocalReply(args.report_id, true) : undefined) : undefined
+  if (args.accepted && !text) throw new Error('Supply final reply text, or set use_report:true for a complete local ready report eligible for verbatim delivery')
+  if (text) bridge.validateReply(ticketId, text)
+  const result = host.quietly(() => host.store.atomic(() => {
+    const review = bridge.reviewReport(args.report_id, args.accepted, args.reason)
+    if (!args.accepted || !text) return { review }
+    bridge.assertReviewed(review.ticketId)
+    const reply = bridge.queueResult(review.ticketId, () => host.engine.reply({ purpose: 'result', ticketId: review.ticketId, text }).id)
+    return { review, replyId: reply.id, ...(reply.reused ? { reused: true } : {}) }
+  }))
+  if (!('status' in result.review)) host.requestPass()
+  if (!('replyId' in result)) return result
+  if (host.store.replyStatus(result.replyId) !== 'sent') await host.sendReplies()
+  return { ...result, status: host.store.replyStatus(result.replyId) }
+}
+
 /** Builds the main Session's tools; `agent` scopes prompt preview resources to that Session. */
 export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
   const resources: MainResourceHost = { ...host.resources, sessions: host.sessions, settings: host.settings }
   return [
-    tool({ name: 'orchestrator_collab_finish', description: 'Assess the complete delivered immutable report against the task and submit your final reply in one transaction. No duplicate report read is needed when all required facts are already delivered. Read evidence when missing or conflicting. Rejection sends correction feedback only. After success finish briefly.',
-      schema: z.object({report_id:z.string(),accepted:z.boolean(),reason:z.string().trim().min(1).max(4000),text:z.string().trim().min(1).max(20000).optional()}).strict(),
-      execute: async args => {
-        if(!host.collabBridge) throw new Error('Collaboration bridge unavailable')
-        if(args.accepted&&!args.text) throw new Error('Accepted review requires final reply text')
-        if(!args.accepted&&args.text) throw new Error('Rejected review cannot send a success reply')
-        if(args.accepted)host.collabBridge.validateReply(host.collabBridge.reportTicket(args.report_id),args.text!);
-        const result=host.quietly(()=>host.store.atomic(()=>{
-          const review=host.collabBridge!.reviewReport(args.report_id,args.accepted,args.reason)
-          if(!args.accepted)return {review}
-          host.collabBridge!.assertReviewed(review.ticketId)
-          const reply=host.engine.reply({purpose:'result',ticketId:review.ticketId,text:args.text!})
-          return {review,replyId:reply.id}
-        }))
-        host.requestPass();await host.sendReplies()
-        return {...result,...result.replyId?{status:host.store.replyStatus(result.replyId)}:{}}
+    tool({ name: 'orchestrator_collab_finish', description: 'Review a ready report against the task. Acceptance requires an explicit delivery choice. Set use_report:true to send the unchanged local report or supply the complete corrected text. Reject with an actionable reason. If unchanged_result, verify disputed facts before continuing.',
+      schema: z.object({
+        report_id: z.string(), accepted: z.boolean(), reason: ReviewReasonSchema,
+        text: z.string().trim().min(1).max(20000).optional(), use_report: z.literal(true).optional(),
+      }).strict().refine(args => !args.use_report || (args.accepted && args.text === undefined),
+        'use_report requires acceptance and cannot be combined with replacement text'),
+      execute: async (args, _signal, localExecution) => {
+        const result = await finishReviewedReport(host, args)
+        const review = result.review
+        if (localExecution && !review.accepted && review.reportId === args.report_id && !('status' in review)
+          && host.collabBridge?.localReplyFormat(review.ticketId)) {
+          const relay = host.collabBridge.readReport(review.reportId)?.deliveredRelay
+          if (relay) concludeSoleRejectedReview(agent, localExecution, relay.id)
+        }
+        return result
       } }),
-    tool({ name: 'orchestrator_collab_review', description: 'Review a worker ready report against the original task using the complete delivered immutable report. Read additional evidence only when needed. Record acceptance and a reason before a result reply. Acceptance completes ready work under the existing ticket completion rules; required human PR approval is preserved.',
-      schema: z.object({ report_id: z.string(), accepted: z.boolean(), reason: z.string().trim().min(1).max(4000) }).strict(),
-      execute: async args => { if (!host.collabBridge) throw new Error('Collaboration bridge unavailable'); const result = host.collabBridge.reviewReport(args.report_id, args.accepted, args.reason); host.requestPass(); return result } }),
+    tool({ name: 'orchestrator_collab_review', description: 'Assess a ready report. For accepted local JSON set use_report:true to deliver the unchanged report. For local text or edits, use orchestrator_collab_finish. For external tickets, record your review before replying.',
+      schema: z.object({ report_id: z.string(), accepted: z.boolean(), reason: ReviewReasonSchema, use_report: z.literal(true).optional() })
+        .strict().refine(args => !args.use_report || args.accepted, 'use_report requires acceptance'),
+      execute: async args => {
+        const bridge = host.collabBridge
+        if (!bridge) throw new Error('Collaboration bridge unavailable')
+        if (args.accepted) {
+          const format = bridge.localReplyFormat(bridge.reportTicket(args.report_id))
+          if (format === 'json') {
+            const delivery = await finishReviewedReport(host, args)
+            return { ...delivery.review, ...delivery }
+          }
+          if (format === 'text') throw new Error('Use orchestrator_collab_finish with use_report:true or the final reply text for this local task')
+          if (args.use_report) throw new Error('use_report requires a local result')
+        }
+        const review = bridge.reviewReport(args.report_id, args.accepted, args.reason)
+        if (!('status' in review)) host.requestPass()
+        return review
+      } }),
     readTool('Read one page of a resource the resource parameter lists, such as the ticket list or a ticket. Follow next_offset, and next_resource where a page names one.',
       false, (resource, offset, limit, signal) => readResource(resources, resource, offset, limit, undefined, signal)),
-    routeTool(host),
+    routeTool(host, agent),
     tool({
       name: 'orchestrator_ticket_retry',
       description: 'Start a new assignment on an explicit human request to retry a ticket whose worker reported failed or blocked, or whose input was not delivered; the stalled one ends.',
       schema: z.object({ ticket_id: z.string() }).strict(),
-      execute: async args => routed(host, { reason: 'Started a new assignment', ticketId: host.engine.retryTicket(args.ticket_id).id }),
+      execute: async args => {
+        const ticket = host.store.tickets.get(args.ticket_id)
+        if (ticket && localArtifactContract(host.store.triggers.get(ticket.origin.triggerId)) &&
+          artifactRecovery(ticket)?.kind === 'token_budget')
+          throw new Error('The owner must resume this file task from the local tasks panel to start a new budgeted assignment.')
+        return routed(host, { reason: 'Started a new assignment', ticketId: host.engine.retryTicket(args.ticket_id).id })
+      },
     }),
     tool({
       name: 'orchestrator_ticket_request_status',
@@ -197,12 +255,21 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
     }),
     tool({
       name: 'orchestrator_ticket_note',
-      description: 'Tell a ticket\'s worker a fact from other work, such as what another ticket found; it grants no authority.',
+      description: 'Tell a ticket\'s worker a fact from other work. For workspace_check_failed, pass its verification_id and one targeted repair. This grants no new authority.',
       schema: z.object({
         ticket_id: z.string(),
         text: z.string().trim().min(1).refine(text => wordCount(text) <= IM_WORDS, `At most ${IM_WORDS} words`),
+        verification_id: z.string().regex(/^wc-[a-f0-9-]{36}$/u).optional(),
       }).strict(),
-      execute: async args => {
+      execute: async (args, _signal, execution) => {
+        if (args.verification_id) {
+          if (!host.collabBridge) throw new Error('Collaboration bridge unavailable')
+          const result = host.collabBridge.sendWorkspaceRepair(args.ticket_id, args.verification_id, args.text)
+          host.requestPass()
+          if (execution && soleRelayForTool(agent, execution, 'orchestrator_ticket_note')?.id === messageId(key(result.verificationId)))
+            execution.concludeTurn()
+          return result
+        }
         host.engine.note(args.ticket_id, args.text)
         return routed(host, { reason: 'Noted for the worker', ticketId: args.ticket_id })
       },
@@ -255,8 +322,17 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       execute: async args => {
         if (args.purpose === 'result' && args.ticket_id) host.collabBridge?.assertReviewed(args.ticket_id)
         if (args.purpose === 'result' && args.ticket_id) host.collabBridge?.validateReply(args.ticket_id,args.text)
-        const reply = host.engine.reply({ purpose: args.purpose, text: args.text, ...(args.trigger_id ? { triggerId: args.trigger_id } : {}),
+        if (args.purpose === 'result' && !args.ticket_id && args.trigger_id && host.store.triggers.get(args.trigger_id)?.source === 'local') {
+          throw new Error('Use ticket_id for a local result reply')
+        }
+        const enqueue = () => host.engine.reply({ purpose: args.purpose, text: args.text, ...(args.trigger_id ? { triggerId: args.trigger_id } : {}),
           ...(args.ticket_id ? { ticketId: args.ticket_id } : {}), ...(args.human_action ? { question: args.human_action } : {}) })
+        if (args.purpose === 'result' && args.ticket_id && host.collabBridge?.localReplyFormat(args.ticket_id)) {
+          const reply = host.collabBridge.queueResult(args.ticket_id, () => enqueue().id)
+          if (host.store.replyStatus(reply.id) !== 'sent') await host.sendReplies()
+          return { status: host.store.replyStatus(reply.id), replyId: reply.id, ...(reply.reused ? { reused: true } : {}) }
+        }
+        const reply = enqueue()
         await host.sendReplies()
         return { status: host.store.replyStatus(reply.id) ?? reply.status }
       },

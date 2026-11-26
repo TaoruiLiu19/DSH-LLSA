@@ -1,7 +1,7 @@
 /** Lifecycle, prompt/tool/skill decoration, message delivery, and budget retry tracking for orchestrator and worker DSH sessions. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { MessageId } from '@deepseek-ai/dsh-llm'
+import type { MessageId, UserMessage } from '@deepseek-ai/dsh-llm'
 import { scopeParentOf } from '@deepseek-ai/dsh-scope'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { dirname } from 'node:path'
@@ -25,6 +25,7 @@ import type { RegisterTool, Tool } from './tools/tool.ts'
 export interface SessionsHost {
   readonly localOnly?: boolean
   beforeRequest?(sessionId: string): void
+  sentOriginalAcknowledgement?(ticketId: string, assignmentId: string): string | undefined
   /** DSH Cordis context: sessions, agents, persistence, and their events. */
   readonly context: Context
   readonly store: Pick<Store, 'tickets' | 'settings' | 'get' | 'set' | 'keys'>
@@ -66,6 +67,27 @@ const WORK_TOOLS = ['read', 'write', 'edit', 'read_image', 'glob', 'grep', 'bash
 /** What the main Session is told when it would wait: what it waits for comes to it, and a waiting step holds back the next. */
 const NO_WAIT = 'Reports, follow_up notices, new candidates and a background job\'s end with its output arrive by themselves as messages; '
   + 'end the turn instead of waiting for them.'
+// Keep the same schema prefix across routine routing and review for provider cache reuse.
+const routineCoordinatorTools = new Set(['orchestrator_route', 'orchestrator_collab_finish', 'orchestrator_read'])
+
+/** Only a sole native relay can narrow the local coordinator's tool inventory. */
+export function localCoordinatorPhase(messages: readonly UserMessage[]): 'route' | 'review' | undefined {
+  const relevant = messages.filter(message => {
+    const source: { kind: string; form?: string } = message.source
+    return source.kind !== 'runtime-context' || source.form !== 'snapshot'
+  })
+  if (relevant.length !== 1) return
+  const message = relevant[0]!
+  if (message.source.kind !== 'dsh-superagent' || message.source.form !== 'relay' ||
+      message.content.length !== 1 || message.content[0]?.type !== 'text') return
+  try {
+    const payload = JSON.parse(message.content[0].text)
+    if (payload?.kind === 'candidate' && payload.strength === 'explicit' && typeof payload.trigger_id === 'string' &&
+        !payload.batch?.length && !payload.handed_back?.length && !payload.referenced_tickets?.length &&
+        !payload.related_tickets?.length && !payload.delivered_to?.length) return 'route'
+    if (payload?.state === 'ready' && typeof payload.report_id === 'string' && !payload.question && !payload.answers) return 'review'
+  } catch { /* Use the regular tools for unknown relays. */ }
+}
 /** What a main Session under `standard` is told when its command would wait the shell's default. */
 const DEFAULT_WAIT = 'This shell waits up to 60 seconds by default: pass timeoutMs of at most 30000, or run_in_background, '
   + 'as a waiting step holds back new candidates.'
@@ -98,6 +120,7 @@ export class Sessions {
   /** Decorated agents mapped to their registered disposers and skill scope until the agent is disposed or `Sessions.dispose()` runs. */
   private readonly bindings = new Map<Agent, SessionBinding>()
   private readonly retryHealth = new RetryHealth()
+  private readonly coordinatorClaims = new WeakMap<Agent, { turn: number; messages: UserMessage[] }>()
   private readonly ctx: Context
   /** Registers ordered `relay` and `notice` effect handlers that deliver to the main Session. */
   constructor(private readonly host: SessionsHost) {
@@ -109,6 +132,18 @@ export class Sessions {
   }
   /** Subscribes to host agent and session events so newly created sessions are decorated and model-budget retries are reflected in health. Call once at startup. */
   install(): void {
+    if (this.host.localOnly) {
+      this.ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
+        if (agent.id !== this.host.masterId) return
+        const prior = this.coordinatorClaims.get(agent)
+        if (prior?.turn === turn) prior.messages.push(message)
+        else this.coordinatorClaims.set(agent, { turn, messages: [message] })
+      })
+      this.ctx.on('agent/pre-step', async ({ agent }, next) => {
+        try { return await next() }
+        finally { this.coordinatorClaims.delete(agent) }
+      })
+    }
     const ctx = this.ctx
     ctx.on('agent/request', async ({ agent }, next) => { this.host.beforeRequest?.(agent.id); return next() })
     ctx.on('agent/disposed', ({ agent }) => {
@@ -140,6 +175,8 @@ export class Sessions {
   }
   /** Resolves or creates session `id` in workspace `cwd`, initializes its role model, decorates it with prompts/skills/tools, sets `danger-full-access` permissions, and renames it to `title`. */
   async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
+    // Bind the current input before Harness constructs the worker's first tool inventory.
+    if (role === 'worker') this.host.beforeRequest?.(id)
     const ctx = this.ctx
     let result = await ctx.sessionController.resolveAgent(id as SessionId)
     if ('error' in result && result.error.code === 'session/not-found') {
@@ -206,6 +243,17 @@ export class Sessions {
   mayRead(sessionId: string, revision: number): boolean {
     return revision === this.promptVersion(sessionId).revision || (this.host.store.get(KV.sessions.prompts(sessionId)) ?? []).includes(revision)
   }
+  private localToolAvailable(agent: Agent, name: string): boolean {
+    const events = agent.session.snapshotEvents()
+    const start = events.findLastIndex(event => event.type === 'turn/start')
+    const turn = events[start]
+    if (turn?.type !== 'turn/start' || events.slice(start + 1).some(event => event.type === 'turn/end')) return true
+    const messages = events.slice(start + 1).flatMap(event => event.type === 'user/message' ? [event.data] : [])
+    const claimed = this.coordinatorClaims.get(agent)
+    if (claimed?.turn === turn.data.turn) messages.push(...claimed.messages)
+    const phase = localCoordinatorPhase(messages)
+    return !phase || routineCoordinatorTools.has(name)
+  }
   /** Returns a tool registrar for `agent` that renders tool output as JSON text and attaches `output.image` as an image when present. */
   private registerTool(agent: Agent, binding: SessionBinding): RegisterTool {
     return (name, description, schema, execute) => {
@@ -216,13 +264,14 @@ export class Sessions {
           return image ? [text, { type: 'image' as const, attachment: image }] : [text]
         } },
         execute: async (args, execution) => {
-          const parsed=schema.parse(args),result=await execute(parsed,execution.signal)
+          const parsed=schema.parse(args),result=await execute(parsed,execution.signal,this.host.localOnly ? execution : undefined)
           const control=parsed as {accepted?:boolean;state?:string}
           const complete=name==='orchestrator_collab_finish' && control.accepted===true && result && typeof result==='object' && 'status' in result && result.status==='sent'
           const ready=name==='orchestrator_report' && control.state==='ready'
           if(this.host.localOnly && (complete||ready)) (execution as unknown as {concludeTurn?:()=>void}).concludeTurn?.()
           return result
-        } }))
+        } }, this.host.localOnly && agent.id === this.host.masterId
+          ? { when: () => this.localToolAvailable(agent, name) } : undefined))
     }
   }
   /** Returns `sessionId`'s active model-budget retry state (`{ model_retry }`) for status listings, or `{}` when not waiting on one. */
@@ -255,9 +304,12 @@ export class Sessions {
     binding.disposers.push(agent.ctx.systemPrompt.section({ name: 'dsh-superagent-policy', order: 9999, interpolate: false, text: context => {
       const version = this.promptFor(agent, context.signal !== undefined)
       const current = ticket && host.store.tickets.get(ticket.id)
+      const assignment = current?.assignments.at(-1)
+      const acknowledged = current && assignment && host.sentOriginalAcknowledgement?.(current.id, assignment.id)
       const composed = (host.localOnly ? localPrompt(master, version.config) : undefined) ?? host.prompts.compose(version.config, master ? 'orchestrator' : 'worker', current ? host.environment(current) : undefined)
-      const local = host.localOnly ? '\nLocal content mode: work only on supplied content and saved collaboration evidence. No external repository, GitHub, Feishu, shell or filesystem work is available. Deliver acknowledgements and final replies through the local source; these stay on this machine. For ready reports, compare the complete delivered report with the original task. Prefer orchestrator_collab_finish to record your assessment and final reply together. Do not reread the same report or transport audit when its full content is already delivered. Read additional evidence if facts are missing or conflicting, or the user requests an audit. Never treat a child acceptance state as independent proof of factual correctness. Workers using collab_delegate must accept their child results before reporting ready.' : ''
-      return `[dsh-superagent prompt revision ${version.revision}]\n${composed}\n${current ? mandateInstructions(current.mandate) : ''}${local}`
+      const local = host.localOnly ? '\nLocal content mode: use supplied content, saved collaboration evidence and only explicitly authorized workspace tools. No unrestricted filesystem, shell, external repository, GitHub or Feishu access is available. Deliver acknowledgements and final replies through the local source; these stay on this machine. For ready reports, compare the complete delivered report with the original task. Prefer orchestrator_collab_finish to record your assessment and final reply together. Do not reread the same report or transport audit when its full content is already delivered. Read additional evidence if facts are missing or conflicting, or the user requests an audit. Never treat a child acceptance state as independent proof of factual correctness. Workers using collab_delegate must accept their child results before reporting ready.' : ''
+      const ack = acknowledged ? `\nThe host has already delivered and recorded the acknowledgement for trigger ${acknowledged}. Continue the work without acknowledging that trigger again. Acknowledge other inputs as needed.` : ''
+      return `[dsh-superagent prompt revision ${version.revision}]\n${composed}\n${current ? mandateInstructions(current.mandate) : ''}${local}${ack}`
     }, ...(master ? { complete: true } : {}) }))
     // A recreated skill scope (e.g. after the skills service restarts) starts empty, so reset `binding.skills` before rebinding.
     const skillScope = agent.ctx.inject(['skills'], scope => {

@@ -47,6 +47,16 @@ If you already run Harness Web, download `dsh-llsa-harness-bundle-0.4.2.tgz` fro
 
 If port 3095 is busy, use `npm start -- 3096` and open the new authentication link. The launcher is designed for loopback access. Report failures with your OS, Node/npm versions, and redacted error output.
 
+### Deliver workspace files
+
+1. Select **File delivery** on the local task page. Describe the target and how it should be checked. Enter workspace-relative paths such as `index.html, styles.css` for new files.
+2. Add existing UTF-8 files. They default to read-only source material. Mark a file as editable to ask for changes to it. You can give each file a relative path such as `docs/notes.md`. Each submission accepts up to 12 uploads, at most 180 KiB each and 512 KiB in total.
+3. Use the task card to check progress, download files, or add requirements. Reviewed results are marked **Delivered**. Files saved before review are available as **Draft** downloads. Follow-ups keep the same workspace and file scope.
+
+If the worker reaches the token budget, the task card gives the reason and keeps the saved files. **Continue from saved files** starts a new model assignment in the same workspace using the configured model allowance. The coordinator still reviews the result. A draft download retrieves saved work without starting a model.
+
+The host rechecks file sizes and SHA-256 hashes at acceptance. Functional quality depends on the evidence required by the task. Authenticated API clients can use `artifactFiles` for outputs, `artifactInputs` for read-only paths, and `workspaceFiles: [{path, text}]` for their initial content. Each path list accepts up to 12 entries. File tasks use a text reply.
+
 ## Try a task
 
 In the task page, submit this prompt with the final JSON option selected:
@@ -118,7 +128,7 @@ LeanLink keeps structured exchanges compact and stores original evidence by refe
 
 The optional `@dsh-llsa/hud` is a read-only overlay for Harness sessions. It shows agent activity, tools, and requests for your attention. Install it separately through the Harness plugin manager. The HUD has its own package and release cycle on npm. The repository currently contains HUD source `0.4.5`, including support for the CSV tool's alias table. [HUD installation guide](https://github.com/TaoruiLiu19/DSH-LLSA/tree/main/packages/hud#readme) · [HUD on npm](https://www.npmjs.com/package/@dsh-llsa/hud)
 
-HUD snapshots keep schema version 1 and select the alias table for the tools they show. Ordinary tool activity uses `aliasVersion: 1`, CSV activity uses version 2, and activity involving `collab_consult_web` uses version 3. Native tool IDs stay the same. [Alias table v1](contracts/tool-aliases-v1.json) · [v2](contracts/tool-aliases-v2.json) · [v3](contracts/tool-aliases-v3.json)
+HUD snapshots keep schema version 1 and select the alias table for the tools they show. Ordinary tool activity uses `aliasVersion: 1`, CSV activity uses version 2, web consultation uses version 3, batch section delegation uses version 4, batch section review uses version 5, and workspace file tools use version 6. Native tool IDs stay the same. [Alias table v1](contracts/tool-aliases-v1.json) · [v2](contracts/tool-aliases-v2.json) · [v3](contracts/tool-aliases-v3.json) · [v4](contracts/tool-aliases-v4.json) · [v5](contracts/tool-aliases-v5.json) · [v6](contracts/tool-aliases-v6.json)
 
 Use `/collab` for model usage. It separates provider-reported usage, estimates, and missing data. The cost controls in the collaboration graph are for comparing scenarios. Real savings depend on the task, model, cached input, output length, and retries.
 

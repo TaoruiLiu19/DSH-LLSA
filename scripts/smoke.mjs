@@ -1,4 +1,4 @@
-/** Start an isolated, keyless Harness and verify plugin registration without submitting a task. */
+/** Start an isolated Harness to check registration and optionally exercise local file delivery. */
 import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
 import { randomUUID } from 'node:crypto';
@@ -10,10 +10,11 @@ import { resolve, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PANEL_HTML, PANEL_SCRIPT } from '../packages/dsh-collab/src/text-assets.js';
+import { openDeliveryFixture, smokeDelivery } from './smoke-delivery.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
-export async function smoke(cwd = root, entry = 'dist/start.js', { csvWorkspace, webCollab = false } = {}) {
+export async function smoke(cwd = root, entry = 'dist/start.js', { csvWorkspace, webCollab = false, delivery = false } = {}) {
   const state = await mkdtemp(join(tmpdir(), 'dsh-llsa-smoke-'));
   const reservation = createServer();
   await new Promise((accept, reject) => {
@@ -29,8 +30,15 @@ export async function smoke(cwd = root, entry = 'dist/start.js', { csvWorkspace,
   }
   env.DSH_HOME = join(state, 'harness');
   env.DSH_LLSA_STATE = join(state, 'plugin');
+  env.DSH_TELEMETRY_DISABLED = '1';
   if (csvWorkspace) env.DSH_LLSA_CSV_WORKSPACE = resolve(cwd, csvWorkspace);
   if (webCollab) env.DSH_LLSA_WEB_COLLAB = '1';
+  const fixture = delivery ? await openDeliveryFixture() : undefined;
+  if (fixture) {
+    env.DEEPSEEK_BASE_URL = fixture.baseURL;
+    env.DEEPSEEK_API_KEY = fixture.key;
+    env.NO_PROXY = '127.0.0.1,localhost';
+  }
   const child = spawn(process.execPath, [resolve(cwd, entry), String(port)], {
     cwd, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     detached: process.platform !== 'win32',
@@ -131,13 +139,14 @@ export async function smoke(cwd = root, entry = 'dist/start.js', { csvWorkspace,
         'The optional Web Collab API is registered on a default launch');
       await status.body?.cancel();
     }
-    console.log('PASS: isolated Harness, both panels, collaboration bridge and native state; no model task submitted');
+    console.log('PASS: isolated Harness, both panels, collaboration bridge and native state');
     if (csvWorkspace) console.log('PASS: local CSV policy toggles on and off over the running web API');
     console.log(`PASS: Web Collab ${webCollab ? 'loads its shipped panel and starts without an advisor' : 'is disabled by default'}`);
+    if (fixture) await smokeDelivery(origin, headers, state, fixture);
   } catch (error) {
     // Keep ephemeral auth URLs out of CI output even when boot fails.
     const safe = output.replace(/([?&]token=)[^\s&]+/g, '$1[REDACTED]');
-    console.error(safe.slice(-7000));
+    console.error((fixture ? safe.replaceAll(fixture.key, '[REDACTED]') : safe).slice(-7000));
     throw error;
   } finally {
     if (child.pid && child.exitCode === null) {
@@ -147,9 +156,10 @@ export async function smoke(cwd = root, entry = 'dist/start.js', { csvWorkspace,
         try { process.kill(-child.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
       }
     }
+    await fixture?.close();
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  await smoke(root, 'dist/start.js', { webCollab: process.argv.includes('--web-collab') });
+  await smoke(root, 'dist/start.js', { webCollab: process.argv.includes('--web-collab'), delivery: process.argv.includes('--delivery') });
 }

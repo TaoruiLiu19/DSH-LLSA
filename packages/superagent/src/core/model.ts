@@ -214,6 +214,8 @@ export type AssignmentState = 'pending' | 'running' | 'ended'
  * ready (`ready`), a person must act to unblock or recover it (`blocked` or `failed`), or nothing is left to do (`dropped`).
  */
 export type ReportState = 'progress' | 'waiting' | 'ready' | 'blocked' | 'failed' | 'dropped'
+/** A failure classified by the host rather than supplied by the worker. */
+export type AssignmentFailure = 'token_budget'
 /** Binding between a ticket and one executor instance. */
 export interface Assignment {
   id: string
@@ -222,7 +224,7 @@ export interface Assignment {
   startedAt?: string
   endedAt?: string
   endedReason?: string
-  report?: { state: ReportState; summary: string; at: string }
+  report?: { state: ReportState; summary: string; at: string; failureCode?: AssignmentFailure }
   /** When Inputs last reached the worker; one at or after `report.at` means the worker has been busy with Inputs since that report. */
   deliveredAt?: string
   /**
@@ -232,6 +234,7 @@ export interface Assignment {
   idleAt?: string
 }
 
+export interface SubmissionReminder { assignmentId: string; inputVersion: string; verifiedWork?: true; startupWork?: true }
 export type TicketInput =
   /** A Trigger on one of its Threads, or attached to it; `human` when a person wrote it. */
   | { id: string; kind: 'trigger'; triggerId: string; at: string; note?: string; human?: true
@@ -254,7 +257,7 @@ export type TicketInput =
   | { id: string; kind: 'resumed'; triggerId: string; at: string }
   | { id: string; kind: 'text'; text: string; at: string }
   /** A fact the main Session gave the ticket from other work: context, which asks for nothing and grants nothing. */
-  | { id: string; kind: 'note'; text: string; at: string }
+  | { id: string; kind: 'note'; text: string; at: string; reviewOf?: string; submissionFor?: SubmissionReminder }
 
 /**
  * How a Policy change bears on a ticket: the rules it was accepted under that changed, with their instruction now, or no

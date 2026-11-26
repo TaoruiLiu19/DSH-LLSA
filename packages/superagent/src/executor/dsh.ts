@@ -2,10 +2,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { artifactQuietDraft, draftSubmission, type DraftSubmission } from './draft-submission.ts'
+import { unfinishedEditDraft } from './edit-progress.ts'
 import { mkdir, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
-import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
+import type { AssessmentOutcome, Assignment, AssignmentFailure, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
 import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
@@ -16,7 +18,8 @@ import { executionRoot, type Variable } from '../app/execution-environment.ts'
 import type { Sessions } from '../app/sessions.ts'
 import { WorktreeNameSchema } from '../app/assessment.ts'
 import { resultRelay } from '../app/notices.ts'
-import { browserAdviceReference } from '../app/local-tasks.ts'
+import { browserAdviceReference, localAppendTarget, localArtifactContract } from '../app/local-tasks.ts'
+import { isArtifactTokenBudgetError } from '../app/artifact-recovery.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { cancelled, collectJob, killJobs, runningJobs, stopBackground, stopSubagents, until, untilQuiet } from './background.ts'
 
@@ -25,6 +28,7 @@ const now = (): string => new Date().toISOString()
 export const workerSessionId = (ticketId: string): string => `worker-${ticketId}`
 /** Returns the ticket ID for a worker session ID (`worker-<ticketId>`), or undefined for non-worker sessions. */
 export const ticketOfSession = (sessionId: string): string | undefined => sessionId.startsWith('worker-') ? sessionId.slice('worker-'.length) : undefined
+class SupersededReviewReminder extends Error {}
 /** Maximum runtime for a workspace prepare command. */
 const PREPARE_TIMEOUT_MS = 10 * 60_000
 /** Maximum transient retry attempts for a launch or worker turn, and the initial backoff before resuming a turn. */
@@ -49,9 +53,16 @@ const PASSING = new RegExp(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAI
  * connection that was refused, reset, timed out, or could not resolve its host.
  */
 export function transient(error: unknown): boolean {
-  const status = (error as { status?: unknown } | undefined)?.status
-  if (typeof status === 'number') return status === 408 || status === 429 || status >= 500
-  const text = error instanceof Error ? `${error.name} ${error.message} ${String((error as { code?: unknown }).code ?? '')}` : String(error)
+  if (isArtifactTokenBudgetError(error)) return false
+  // The live Harness LlmError keeps HTTP facts in failure; turn/end serializes that object directly.
+  const detail = error as { failure?: { status?: number; code?: string; message?: string }; status?: number; code?: string; message?: string } | null
+  const facts = detail?.failure ?? detail
+  if (['ABORTED', 'AUTH', 'QUOTA', 'ACCOUNT_QUOTA', 'MODEL_CALL_LIMIT', 'CONTEXT_WINDOW_EXCEEDED'].includes(facts?.code ?? '')
+    || /\bMODEL_CALL_LIMIT\b/.test(facts?.message ?? '')) return false
+  const status = facts?.status
+  if (typeof status === 'number') return status === 408 || status === 429 || (status >= 500 && status <= 599)
+  if (['TIMEOUT', 'TRANSPORT', 'SERVER', 'RATE_LIMIT'].includes(facts?.code ?? '')) return true
+  const text = [facts?.code, facts?.message ?? String(error)].join(' ')
   return PASSING.test(text)
 }
 /** Appends a stable 12-character ticket ID suffix to a validated English worktree name. */
@@ -68,13 +79,22 @@ export interface ExecutorHost {
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
   /** The `worker` health entry, which reports whether background worker event handling failed. */
   readonly health: HealthEntry
-  readonly machine: Pick<Machine, 'stateDir' | 'localOnly'>
+  readonly machine: Pick<Machine, 'stateDir' | 'localOnly' | 'inlineLocalWorkerNotices'>
   readonly lifetime: AbortSignal
   /** Session manager for worker sessions and for relaying worker reports to the main Session. */
   readonly sessions: Pick<Sessions, 'ensure' | 'prompt' | 'promptedId' | 'relay' | 'holds'>
   closing(): boolean
   /** Whether processing is paused, which holds launches and input deliveries. */
   paused(): boolean
+  /** Whether an independent collaboration batch will resume this worker with its own results. */
+  awaitingSectionBatch?(ticket: Ticket, sessionId: string): boolean
+  stageWorkspace?(trigger: Trigger, ticketId: string, directory: string): void
+  readySubmissionHint?(ticketId: string): string | undefined
+  recordIdleStatus?(ticket: Ticket, assignmentId: string, endSeq: number): void
+  recoverReviewFeedback?(ticketId: string, assignmentId: string, consumedInputId: string): 'queued' | 'blocked' | undefined
+  discardSupersededReminder?(ticketId: string, assignmentId: string, inputId: string, reportId: string): boolean
+  recoverDraftSubmission?(ticketId: string, assignmentId: string, draft: DraftSubmission): 'queued' | 'blocked' | undefined
+  discardSupersededSubmission?(ticketId: string, assignmentId: string, inputId: string): boolean
   /** Execution environment variables for `ticket`, passed to its workspace prepare command. */
   environment(ticket: Ticket): Variable[]
   sourceLink(trigger: Trigger, signal?: AbortSignal): Promise<{ source_url?: string; source_url_read?: string }>
@@ -112,6 +132,7 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
 }
 /** Character limits for inline assignment and trigger text in worker messages; longer text is read via its resource. */
 const ASSIGNMENT_CHARS = 1500, TRIGGER_CHARS = 600
+const COMPLETE_LOCAL_NOTICE_BYTES = 4096
 /** Returns `text` up to `limit` characters, or a truncated preview with total character count and the resource path to read the full text. */
 const capped = (text: string, limit: number, read: string) =>
   text.length <= limit ? { text } : { text: `${text.slice(0, limit)}…`, chars: text.length, read }
@@ -126,6 +147,9 @@ export function triggerMessage(trigger: Trigger, link: { source_url?: string; so
     ...(browserAdvice ? { browser_advice: browserAdvice } : {}),
     ...(repliesTo ? { replies_to: { trigger_id: repliesTo.id, preview: repliesTo.text.replace(/\s+/g, ' ').slice(0, 160) } } : {}) }
 }
+type WorkerTriggerCard = Omit<ReturnType<typeof triggerMessage>, 'chars'> & {
+  chars?: number | undefined; input_action?: 'owner_appended_to_this_ticket'; text_complete?: true
+}
 /** Formats a peer trigger from the ticket's acceptance batch with author, timestamp, 160-character preview, and read resource path. */
 export const batchLine = (trigger: Trigger) => ({ trigger_id: trigger.id, from: trigger.actor.id, at: trigger.at,
   preview: trigger.text.replace(/\s+/g, ' ').slice(0, 160), read: `trigger/${trigger.id}` })
@@ -135,8 +159,9 @@ export const batchOf = (host: { store: Pick<Store, 'triggers'> }, ticket: Ticket
 const RESUMED = 'This ticket ended earlier and the message that follows, on its thread, resumed it under the same mandate. If it asks for '
   + 'more within the original scope, inspect the worktree, git history and PR state and continue; if it asks for work beyond that scope or '
   + 'for another ticket, hand it back with orchestrator_trigger_handback and report dropped; if it needs nothing, such as thanks, '
-  + 'report dropped without a message. Report ready when the follow-up is done. Do not repeat completed work.'
+  + 'report dropped without a message.'
 const RETRIED = 'A person retried this ticket. Continue the assignment from the current worktree, git history and PR state.'
+const RETRIED_FILES = 'The owner resumed this file task. Continue in the same workspace. Apply the latest owner input and any still-relevant review feedback. Reuse the saved files, read only what the remaining work needs, and submit the final revision with artifact_check and submit_for_review=true.'
 /** Formats a policy-change input for the worker; inputs recorded before `effect` existed fall back to a general notice. */
 function policyMessage(effect?: PolicyEffect): string {
   if (!effect) return 'Policy change: the access or admission rules changed. Check that the remaining work stays within the assignment.'
@@ -156,12 +181,18 @@ export const inputResource = (ticketId: string, inputId: string): string => `tic
  * a `policy-changed` notice, a `resumed` notice, an orchestrator `note`, or a `text` input as written.
  * Returns `undefined` for legacy `reopen` inputs, which are historical only because the schema 11 migration converted pending reopen inputs into text inputs.
  */
-export function inputMessage(input: TicketInput, trigger?: object): string | undefined {
+export function inputMessage(input: TicketInput, trigger?: object, submissionHint?: string): string | undefined {
   // Mark triggers arriving on context-only subscriptions so the worker knows they are not addressed to the ticket.
   if (input.kind === 'trigger') return JSON.stringify({ ...trigger ?? { trigger_id: input.triggerId, read: `trigger/${input.triggerId}` },
     ...input.context ? { context: true, browser_advice: undefined } : {} })
   if (input.kind === 'policy-changed') return policyMessage(input.effect)
-  if (input.kind === 'resumed') return RESUMED
+  if (input.kind === 'resumed') return `${RESUMED} ${submissionHint ?? 'Report ready when the follow-up is done.'} Do not repeat completed work.`
+  if (input.kind === 'note' && input.submissionFor) return input.text
+  if (input.kind === 'note' && input.reviewOf) {
+    const next = submissionHint ? `Apply the correction. ${submissionHint}`
+      : 'Apply the correction, then call orchestrator_report with state="ready" and the complete corrected answer in summary.'
+    return `Review feedback for ${input.reviewOf}. ${next} A chat reply does not submit it. If you cannot complete it, report the specific blocker.\n${input.text}`
+  }
   if (input.kind === 'note') return `Note from the orchestrator, for context only: ${input.text}`
   return input.kind === 'text' ? input.text : undefined
 }
@@ -213,7 +244,8 @@ export class DshExecutor implements Executor {
   /** Transient failure counts tried so far: keyed by `assignment.id` for worker turns and `launch:<assignment.id>` for launches. */
   private readonly transient = new Map<string, number>()
   /** Assignment IDs currently waiting on a transient-failure backoff timer before resuming their worker turn. */
-  private readonly resuming = new Set<string>()
+  private readonly resuming = new Map<string, number>()
+  private readonly lastFailedTurn = new Map<string, number>()
   /**
    * The looks at background work of workers that went idle, by ticket, which hold their slots; a look ends when its worker
    * runs again or its Assignment ends.
@@ -324,6 +356,7 @@ export class DshExecutor implements Executor {
           }
           if (input) await this.deliverInput(ticket, assignment, input)
         } catch (error) {
+          if (error instanceof SupersededReviewReminder) continue
           if (this.host.closing() || error instanceof Later) throw error
           const current = this.host.store.tickets.get(ticketId)
           if (!current || !liveTicket(current) || runningAssignment(current)?.id !== assignment.id) return
@@ -339,23 +372,78 @@ export class DshExecutor implements Executor {
     const live = () => {
       const current = this.host.store.tickets.get(ticket.id)
       if (!current || !liveTicket(current) || runningAssignment(current)?.id !== assignment.id) throw new Error('The ticket ended or another Assignment took it over')
+      if (input.kind === 'note' && input.reviewOf && this.host.discardSupersededReminder?.(ticket.id, assignment.id, input.id, input.reviewOf))
+        throw new SupersededReviewReminder()
+      if (input.kind === 'note' && input.submissionFor && this.host.discardSupersededSubmission?.(ticket.id, assignment.id, input.id))
+        throw new SupersededReviewReminder()
       // A stop of the worker's background work that started meanwhile ends with a cancel, which would drop the Input.
       if (this.stopping.has(ticket.id)) throw new Later('The worker\'s background work is stopping')
     }
     live()
-    const trigger = input.kind === 'trigger' ? await this.triggerCard(ticket, input.triggerId, input.note) : undefined
-    const message = inputMessage(input, trigger)
-    if (message === undefined) return
-    const text = message.length > ASSIGNMENT_CHARS ? JSON.stringify(capped(message, ASSIGNMENT_CHARS, inputResource(ticket.id, input.id))) : message
-    await this.host.sessions.prompt(workerSessionId(ticket.id), input.id, text, 'steer', live)
+    const card = input.kind === 'trigger' ? await this.triggerCard(ticket, input.triggerId, input) : undefined
+    const submissionHint = input.kind === 'resumed' || (input.kind === 'note' && input.reviewOf)
+      ? this.host.readySubmissionHint?.(ticket.id) : undefined
+    let text = card?.complete && inputMessage(input, card.complete)
+    if (text === undefined || Buffer.byteLength(text) > COMPLETE_LOCAL_NOTICE_BYTES) {
+      const message = inputMessage(input, card?.preview, submissionHint)
+      if (message === undefined) return
+      text = message.length > ASSIGNMENT_CHARS ? JSON.stringify(capped(message, ASSIGNMENT_CHARS, inputResource(ticket.id, input.id))) : message
+    }
+    const sessionId = workerSessionId(ticket.id)
+    const resumeNotice = input.kind === 'resumed' && input.id === this.serialOwnerResume(ticket, assignment.id) &&
+      await this.host.sessions.holds(sessionId, `assignment:${ticket.id}`)
+    await this.host.sessions.prompt(sessionId, input.id, text, resumeNotice ? { inject: 'Ticket resumed' } : 'steer', () => {
+      live()
+      if (resumeNotice) this.assertSerialOwnerResume(ticket.id, assignment.id, input.id)
+    })
+  }
+  private localOwnerTrigger(ticket: Ticket, trigger: Trigger, input?: Extract<TicketInput, { kind: 'trigger' }>): boolean {
+    if (!this.host.machine.localOnly || input?.context ||
+        ticket.mandate.strength !== 'explicit' || ticket.mandate.actor?.source !== 'local' || ticket.mandate.actor.id !== 'owner' ||
+        ticket.origin.triggerIds.length !== 1 || ticket.origin.triggerIds[0] !== ticket.origin.triggerId) return false
+    const origin = sourceTrigger(this.host, ticket)
+    const requestId = origin?.meta.requestId
+    if (!origin || typeof requestId !== 'string' || origin.id !== `local-${key(requestId)}` ||
+        !origin.human || origin.addressed !== 'direct' || origin.source !== 'local' ||
+        origin.actor.source !== 'local' || origin.actor.id !== 'owner' || origin.threads.length !== 1 ||
+        origin.threads[0]?.source !== 'local' || origin.threads[0].id !== requestId ||
+        origin.channel?.source !== 'local' || origin.channel.thread !== requestId || origin.channel.address.requestId !== requestId) return false
+    if (!input) return trigger.id === origin.id
+    return localAppendTarget(trigger) === ticket.id && trigger.threads.length === 1 &&
+      trigger.threads[0]?.source === 'local' && trigger.threads[0].id === requestId &&
+      trigger.channel?.source === 'local' && trigger.channel.thread === requestId && trigger.channel.address.requestId === requestId
+  }
+  /** Only an authenticated serial continuation of a completed result can defer wake until the owner input. */
+  private serialOwnerResume(ticket: Ticket, assignmentId: string): string | undefined {
+    const prior = ticket.assignments.at(-2)
+    if (!liveTicket(ticket) || latestAssignment(ticket)?.id !== assignmentId || prior?.state !== 'ended' ||
+        prior.report?.state !== 'ready' || prior.endedReason !== undefined) return
+    const [resumeId, ownerId] = ticket.undelivered
+    const resumed = ticket.inputs.find(input => input.id === resumeId)
+    const owner = ticket.inputs.find(input => input.id === ownerId)
+    if (resumed?.kind !== 'resumed' || owner?.kind !== 'trigger' || !owner.human ||
+        resumed.triggerId !== owner.triggerId) return
+    const trigger = this.host.store.triggers.get(owner.triggerId)
+    if (trigger && typeof trigger.meta.localAppendAfterReplyId === 'string' && trigger.meta.localAppendAfterReplyId &&
+        this.localOwnerTrigger(ticket, trigger, owner)) return resumed.id
+  }
+  private assertSerialOwnerResume(ticketId: string, assignmentId: string, resumedId: string): void {
+    const current = this.host.store.tickets.get(ticketId)
+    if (!current || this.serialOwnerResume(current, assignmentId) !== resumedId)
+      throw new Later('Serial owner continuation changed before worker delivery')
   }
   /** Formats a trigger on `ticket` for the worker, including a preview of the replied-to message when the worker has not yet seen it. */
-  private async triggerCard(ticket: Ticket, triggerId: string, note?: string): Promise<object | undefined> {
+  private async triggerCard(ticket: Ticket, triggerId: string, input?: Extract<TicketInput, { kind: 'trigger' }>):
+    Promise<{ preview: WorkerTriggerCard; complete?: WorkerTriggerCard } | undefined> {
     const trigger = this.host.store.triggers.get(triggerId)
     if (!trigger) return undefined
     const parent = this.host.repliedTo(trigger)
     const seen = parent && (parent.id === ticket.origin.triggerId || ticket.inputs.some(item => item.kind === 'trigger' && item.triggerId === parent.id))
-    return triggerMessage(trigger, await this.host.sourceLink(trigger), note, seen ? undefined : parent)
+    const preview: WorkerTriggerCard = { ...triggerMessage(trigger, await this.host.sourceLink(trigger), input?.note, seen ? undefined : parent),
+      ...(localAppendTarget(trigger) === ticket.id ? { input_action: 'owner_appended_to_this_ticket' } : {}) }
+    if (!this.host.machine.inlineLocalWorkerNotices || !this.localOwnerTrigger(ticket, trigger, input)) return { preview }
+    const { chars: _chars, ...uncapped } = preview
+    return { preview, complete: { ...uncapped, text: trigger.text, read: `trigger/${trigger.id}`, text_complete: true } }
   }
   /**
    * After the ending transaction commits (so a rollback leaves the worker working, and a launch the same transaction queued
@@ -369,6 +457,8 @@ export class DshExecutor implements Executor {
     const ownTurn = (report?.state === 'ready' || report?.state === 'dropped') && !busy
     const sessionId = workerSessionId(ticket.id)
     this.host.store.afterCommit(() => {
+      this.resuming.delete(assignment.id)
+      this.lastFailedTurn.delete(assignment.id)
       this.settling.get(ticket.id)?.abort()
       if (!ownTurn) this.host.context.agents.get(sessionId as SessionId)?.cancel({ kind: 'user' }, { keepInbox: false })
       // Its shell jobs and subagents stop with it, also those of a worker that ends its own turn.
@@ -419,14 +509,21 @@ export class DshExecutor implements Executor {
   private launchFailed(ticketId: string, assignmentId: string, error: unknown): void {
     const ticket = this.host.store.tickets.get(ticketId)
     if (!ticket || !liveTicket(ticket) || latestAssignment(ticket)?.id !== assignmentId) return
-    this.failed(ticketId, String(error))
+    this.reportWorkerError(ticket, error)
   }
   /** Records a `failed` report on the ticket and relays the failure to the main Session in one transaction. */
-  private failed(ticketId: string, summary: string): void {
+  private failed(ticketId: string, summary: string, failureCode?: AssignmentFailure): void {
     this.host.store.atomic(() => {
-      const updated = this.host.engine.report(ticketId, { state: 'failed', summary })
-      this.relay(resultRelay(updated, 'failed', summary))
+      const updated = this.host.engine.report(ticketId, { state: 'failed', summary, ...(failureCode ? { failureCode } : {}) })
+      if (failureCode !== 'token_budget') this.relay(resultRelay(updated, 'failed', summary))
     })
+  }
+  private reportWorkerError(ticket: Ticket, error: unknown): void {
+    if (isArtifactTokenBudgetError(error) && this.host.machine?.localOnly && localArtifactContract(sourceTrigger(this.host, ticket))) {
+      this.failed(ticket.id, 'The assignment reached its token budget. Any saved files remain in the ticket workspace and require a fresh review.', 'token_budget')
+      return
+    }
+    this.failed(ticket.id, String(error))
   }
   private relay({ id, text }: { id: string; text: string }): void { this.host.sessions.relay(id, text) }
   private async launch(ticket: Ticket, assignment: Assignment): Promise<void> {
@@ -445,6 +542,7 @@ export class DshExecutor implements Executor {
       if (!current()) return
     }
     if (!current()) return
+    if (source && this.host.stageWorkspace) this.host.stageWorkspace(source, ticket.id, workspace)
     const sessionId = workerSessionId(ticket.id)
     const agent = await this.host.sessions.ensure(sessionId, workspace, ticket.title, 'worker')
     if (!current()) return
@@ -460,21 +558,38 @@ export class DshExecutor implements Executor {
     const later = ticket.assignments.length > 1
     const told = later && await this.host.sessions.holds(sessionId, first)
     if (!current()) return
-    const retried = ticket.assignments.at(-2)?.endedReason === 'retried' ? { note: RETRIED } : {}
+    const retried = ticket.assignments.at(-2)?.endedReason === 'retried'
+      ? { note: this.host.machine.localOnly && localArtifactContract(source) ? RETRIED_FILES : RETRIED } : {}
     const assignmentText = ticket.execution?.assignment ?? ''
     const { text: brief, chars, read } = capped(assignmentText, ASSIGNMENT_CHARS, `ticket/${ticket.id}/assignment`)
     const card = told || !source ? undefined : await this.triggerCard(ticket, source.id)
     if (!current()) return
     const batch = told ? [] : batchOf(this.host, ticket).map(batchLine)
+    const files = this.host.machine.localOnly && localArtifactContract(source)
+    const notice = (card?: WorkerTriggerCard) => JSON.stringify({ ticket_id: ticket.id, title: ticket.title, ...(brief ? { assignment: brief } : {}),
+      ...(read ? { assignment_chars: chars, assignment_read: read } : {}), ...(card ? { trigger: card } : {}),
+      ...(batch.length ? { batch } : {}), ...(files ? { workspace_files: { editable: files.files, read_only: files.inputs ?? [] } } : {}),
+      ...retried })
+    const complete = card?.complete && notice(card.complete)
     const text = told ? JSON.stringify({ ticket_id: ticket.id, assignment: ticket.assignments.length, ...retried })
-      : JSON.stringify({ ticket_id: ticket.id, title: ticket.title, ...(brief ? { assignment: brief } : {}),
-        ...(read ? { assignment_chars: chars, assignment_read: read } : {}), ...(card ? { trigger: card } : {}),
-        ...(batch.length ? { batch } : {}), ...retried })
+      : complete && Buffer.byteLength(complete) <= COMPLETE_LOCAL_NOTICE_BYTES ? complete : notice(card?.preview)
     const requestId = later ? `assignment:${ticket.id}:${assignment.id}` : first
-    await this.host.sessions.prompt(sessionId, requestId, text, 'queue',
-      () => { if (!current()) throw new Error('Launch authorization changed before worker delivery') },
-      () => { this.host.engine.assignmentStarted(ticket.id, assignment.id) })
-    this.host.engine.assignmentStarted(ticket.id, assignment.id)
+    const recent = this.host.store.tickets.get(ticket.id)
+    const serialResume = told && recent && this.serialOwnerResume(recent, assignment.id)
+    const startAssignment = () => { this.host.engine.assignmentStarted(ticket.id, assignment.id) }
+    // The real owner input will wake the worker. Keep its two routing notices in history without starting an empty turn.
+    await this.host.sessions.prompt(sessionId, requestId, text, serialResume ? { inject: 'Assignment resumed' } : 'queue',
+      () => {
+        if (!current()) throw new Error('Launch authorization changed before worker delivery')
+        if (serialResume) this.assertSerialOwnerResume(ticket.id, assignment.id, serialResume)
+      },
+      serialResume ? undefined : startAssignment)
+    // For a non-waking delivery the owner input may be scheduled only after the assignment notice is durable.
+    if (serialResume) {
+      if (!current()) return
+      this.assertSerialOwnerResume(ticket.id, assignment.id, serialResume)
+    }
+    startAssignment()
   }
   /** Returns the stored ticket for `agent` when it is a worker session, or undefined otherwise. */
   private ticketOf(agent: Agent): Ticket | undefined {
@@ -510,12 +625,20 @@ export class DshExecutor implements Executor {
         if (read.length) this.host.engine.inputsRead(ticketId, read)
       }))
     }))
-    this.disposers.push(ctx.on('agent/error', ({ agent, error }) => {
+    this.disposers.push(ctx.on('agent/error', ({ agent, error, turn }) => {
       const ticket = this.ticketOf(agent)
       const assignment = ticket && runningAssignment(ticket)
       if (!ticket || !assignment || !liveTicket(ticket) || this.host.closing()) return
-      if (this.retries(assignment.id, error)) { this.resumeAfter(ticket.id, assignment.id, error); return }
-      void this.background(Promise.resolve().then(() => { this.failed(ticket.id, String(error)) }))
+      if ((this.lastFailedTurn.get(assignment.id) ?? -1) >= turn || this.handedOffAfterError(ticket, assignment)) return
+      this.lastFailedTurn.set(assignment.id, turn)
+      if (this.retries(assignment.id, error)) { this.resumeAfter(ticket.id, assignment.id, turn); return }
+      this.resuming.delete(assignment.id)
+      void this.background(Promise.resolve().then(() => {
+        const current = this.host.store.tickets.get(ticket.id)
+        const running = current && runningAssignment(current)
+        if (!current || !liveTicket(current) || running?.id !== assignment.id || this.handedOffAfterError(current, running)) return
+        this.reportWorkerError(current, error)
+      }))
     }))
   }
   /** Unsubscribes from host agent events and clears any pending transient-retry timers. */
@@ -559,15 +682,30 @@ export class DshExecutor implements Executor {
     this.transient.set(key, tries + 1)
     return true
   }
+  private handedOffAfterError(ticket: Ticket, assignment: Assignment): boolean {
+    const report = assignment.report
+    if (report && ((assignment.deliveredAt && assignment.deliveredAt >= report.at) || (this.personal.get(ticket.id) ?? '') > report.at)) return false
+    return !!ticket.attention || ['ready', 'blocked', 'failed'].includes(report?.state ?? '')
+  }
   /** Schedules a worker turn retry with exponential backoff after a transient provider or network error. */
-  private resumeAfter(ticketId: string, assignmentId: string, error: unknown): void {
+  private resumeAfter(ticketId: string, assignmentId: string, turn: number): void {
     const tries = this.transient.get(assignmentId)!
-    const text = `Your last turn failed for a passing reason (${String(error).slice(0, 200)}). Continue the assignment where it stopped.`
-    this.resuming.add(assignmentId)
-    const go = () => {
-      if (this.host.closing()) return
+    const text = 'The model request was interrupted. Continue from the last delivered result and tool receipt in this session. Reuse completed work.'
+    this.resuming.set(assignmentId, turn)
+    const clear = () => { if (this.resuming.get(assignmentId) === turn) this.resuming.delete(assignmentId) }
+    const current = () => {
       const ticket = this.host.store.tickets.get(ticketId)
-      if (!ticket || !liveTicket(ticket) || runningAssignment(ticket)?.id !== assignmentId) { this.resuming.delete(assignmentId); return }
+      const assignment = ticket && runningAssignment(ticket)
+      if (this.host.closing() || this.resuming.get(assignmentId) !== turn || !ticket || !liveTicket(ticket)
+        || assignment?.id !== assignmentId || this.handedOffAfterError(ticket, assignment)) return
+      const loaded = this.host.context.agents.get(workerSessionId(ticketId) as SessionId)
+      const latest = loaded?.session.snapshotEvents().findLast(event => event.type === 'turn/start')
+      if (latest && latest.data.turn > turn) return
+      return ticket
+    }
+    const go = () => {
+      const ticket = current()
+      if (!ticket) { clear(); return }
       // Wait while processing is paused or no wake slot is free.
       if (this.host.paused()) { this.after(SLOT_WAIT_MS, go); return }
       const sessionId = workerSessionId(ticketId)
@@ -576,9 +714,10 @@ export class DshExecutor implements Executor {
         if (!(failure instanceof Later)) throw failure
         this.after(SLOT_WAIT_MS, go); return
       }
-      const sent = this.host.sessions.prompt(sessionId, `retry:${assignmentId}:${tries}`, text, 'queue')
-      void this.background(sent.finally(() => { if (waking) this.slots.free(ticketId); this.resuming.delete(assignmentId) })
-        .catch(failure => { this.failed(ticketId, String(failure)) }))
+      const sent = this.host.sessions.prompt(sessionId, `retry:${assignmentId}:turn:${turn}`, text, 'queue',
+        () => { if (!current()) throw new Error('Worker recovery superseded') })
+      void this.background(sent.catch(failure => { if (current()) this.failed(ticketId, String(failure)) })
+        .finally(() => { if (waking) this.slots.free(ticketId); clear() }))
     }
     this.after(TRANSIENT_BACKOFF_MS * 2 ** (tries - 1), go)
   }
@@ -664,13 +803,66 @@ export class DshExecutor implements Executor {
     }
     // The worker may have reported while its turn ended; a blocked or failed report a person's message has lifted is stale.
     if (handedOff(current)) return
-    const last = agent.session.snapshotEvents().filter(event => event.type === 'assistant/message').at(-1)
+    // A managed batch ends the turn to prevent polling. Keep the normal idle timestamp and worker slots,
+    // and let the bridge wake the worker once the batch results are deliverable.
+    if (quiet && this.host.awaitingSectionBatch?.(current, agent.id)) return
+    const history = agent.session.snapshotEvents()
+    const latestInput = current.inputs.at(-1)
+    if (quiet && latestInput?.kind === 'note' && latestInput.reviewOf && this.host.recoverReviewFeedback) {
+      const start = history.findLastIndex(event => event.type === 'turn/start')
+      const turn = history.slice(start + 1)
+      const ended = turn.findLast(event => event.type === 'turn/end')
+      const consumed = (id: string) => turn.some(event => event.type === 'user/message' && event.data.source.kind === 'dsh-superagent'
+        && event.data.id === this.host.sessions.promptedId(id))
+      if (start >= 0 && ended?.data.reason.kind === 'completed') {
+        const input = current.inputs.findLast(item => item.kind === 'note' && item.reviewOf === latestInput.reviewOf && consumed(item.id))
+        if (input) {
+          const next = this.host.recoverReviewFeedback(current.id, idle.id, input.id)
+          if (next === 'queued') return
+          if (next === 'blocked') {
+            const summary = 'The worker did not submit a corrected report after one reminder. The rejected result remains unaccepted.'
+            this.host.store.atomic(() => {
+              const updated = this.host.engine.report(current.id, { state: 'blocked', summary })
+              this.relay(resultRelay(updated, 'blocked', summary))
+            })
+            return
+          }
+        }
+      }
+    }
+    if (quiet && !idle.report && !current.attention && this.host.recoverDraftSubmission) {
+      const receipt = (id: string) => this.host.sessions.promptedId(id)
+      const draft = (this.host.readySubmissionHint?.(current.id) ? artifactQuietDraft(history, current, idle.id, receipt) : undefined)
+        ?? draftSubmission(history, current, idle.id, receipt) ?? unfinishedEditDraft(history, current, idle.id, receipt)
+      if (draft) {
+        const next = this.host.recoverDraftSubmission(current.id, idle.id, draft)
+        if (next === 'queued') return
+        if (next === 'blocked') {
+          const summary = draft.startupWork
+            ? 'The worker stopped without a formal status after one workspace startup reminder. No result was submitted for review.'
+            : 'No formal worker report was submitted after one reminder. No report ID exists to review. The draft has not been delivered.'
+          this.host.store.atomic(() => {
+            const updated = this.host.engine.report(current.id, { state: 'blocked', summary })
+            this.relay(resultRelay(updated, 'blocked', summary))
+          })
+          return
+        }
+      }
+    }
+    const end = history.findLast(event => event.type === 'turn/end' || event.type === 'turn/start')
+    const passive = quiet && !current.attention && !current.undelivered.length
+      && end?.type === 'turn/end' && end.data.reason.kind === 'completed' ? this.host.recordIdleStatus : undefined
+    const last = history.findLast(event => event.type === 'assistant/message')
     const text = last?.type === 'assistant/message'
       ? last.data.message.content.filter(block => block.type === 'text').map(block => block.text).join('\n').trim() : ''
     const said = [text, stopped].filter(Boolean).join('\n\n')
     this.host.store.atomic(() => {
       const before = latestReport(current)?.summary ?? ''
       const updated = this.host.engine.report(ticket.id, { state: 'waiting', summary: said || before })
+      if (passive && end) {
+        passive(updated, idle.id, end.seq)
+        return
+      }
       // A quiet final after orchestrator_report is not a new status or an empty handoff.
       if (said) this.relay(resultRelay(updated, 'waiting', said))
       else if (!before.trim()) {

@@ -2,7 +2,7 @@
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, latestReport, liveTicket, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, ChannelRef, Evaluation, Follow, Mandate, PolicyEffect, ThreadRef, Ticket, TicketEndBy, TicketInput, TicketOutcome,
+import type { Assignment, ChannelRef, Evaluation, Follow, Mandate, PolicyEffect, SubmissionReminder, ThreadRef, Ticket, TicketEndBy, TicketInput, TicketOutcome,
   Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
@@ -392,11 +392,16 @@ export class Tickets extends EnginePart {
    * Give an open ticket's Executor a fact as a note Input, such as what another ticket found; it grants nothing (see `TicketInput`).
    * @throws UserError when the ticket is unknown or has ended.
    */
-  note(ticketId: string, text: string): Ticket {
+  note(ticketId: string, text: string, feedback?: string | SubmissionReminder): Ticket {
     const ticket = this.require(ticketId)
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     const at = this.now()
-    this.addInput(ticket, { id: key('input', ticketId, 'note', at, text), kind: 'note', text, at })
+    const reminder = typeof feedback === 'object' ? feedback : undefined
+    const id = reminder ? key('report-reminder', ticketId, reminder.assignmentId, reminder.inputVersion)
+      : typeof feedback === 'string' && feedback.startsWith('wc-') ? key('workspace-repair', ticketId, feedback)
+      : key('input', ticketId, 'note', at, text)
+    this.addInput(ticket, { id, kind: 'note', text, at,
+      ...(typeof feedback === 'string' ? { reviewOf: feedback } : {}), ...(reminder ? { submissionFor: reminder } : {}) })
     return this.require(ticketId)
   }
   /**
