@@ -132,6 +132,20 @@ HUD snapshots keep schema version 1 and select the alias table for the tools the
 
 Use `/collab` for model usage. It separates provider-reported usage, estimates, and missing data. The cost controls in the collaboration graph are for comparing scenarios. Real savings depend on the task, model, cached input, output length, and retries.
 
+### Short- and long-task benchmark
+
+On 2026-11-26, we ran two public DROP questions and two multi-round tasks with changing source material across nine configurations. The 36 runs covered a single agent, upstream SuperAgent, current DSH-LLSA, and LangGraph, AutoGen, and CrewAI with and without LeanLink. The single agent and coordinators used Sol high. Workers used Luna xhigh. Strict scoring checked both answers and evidence references. Items without a formal delivery received zero credit. [Tested revision](https://github.com/TaoruiLiu19/DSH-LLSA/commit/a93207acc3d1a5202d9f3afe15407fc821f32436)
+
+| Local configuration | Short-task strict score | Short-task estimated cost | Long-task delivery | Long-task strict score |
+| --- | ---: | ---: | ---: | ---: |
+| Single agent | 6/6 | $0.03715 | 9/9 rounds | 65/72 |
+| Upstream SuperAgent | 6/6 | ≥ $0.36238 | 1/9 rounds | 8/72 |
+| Current DSH-LLSA (file workflow) | 6/6 | $0.13067 | 4/9 rounds | 32/72 |
+
+With the same short-task score, DSH-LLSA cost about 64% less than upstream SuperAgent's metered lower bound and 3.52× as much as the single agent. The file workflow added calls for reading, writing, and review. One LLSA long-task run hit a benchmark relay error. Its independent rerun reached the ticket token budget in a later round, and the other long task reached that budget in its final round.
+
+All 12 external framework pairs delivered. On long tasks, LeanLink reduced handoff bytes by **98.63%**, strict score went from **212/216** to **213/216**, and total model tokens rose **0.07%**. Estimated cost fell **21.63%** at observed cache rates and **2.04%** when repricing the same usage as entirely uncached. Estimates use model usage receipts, with one short-task upstream receipt missing. Handoffs shrank consistently in this sample. Cost varied with caching and the task.
+
 ### Codex split-view HUD
 
 Install the separate **LeanLink for Codex** plugin from the repository source to archive subagent results and evidence references. Start the local HUD. In Codex desktop on Windows, press `Ctrl+T`, paste the address printed in the terminal, and use `Ctrl+Shift+B` to cycle to split view. The same address opens in a regular browser on your machine. Once you review and trust the plugin's hooks, the HUD shows agent relationships, work states, and requests for attention reported by Codex. [Codex installation and permissions](https://github.com/TaoruiLiu19/DSH-LLSA/blob/main/packages/codex/README.en.md)
